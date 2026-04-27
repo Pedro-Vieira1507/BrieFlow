@@ -3,6 +3,7 @@ import os
 import io
 import logging
 from googleapiclient.http import MediaIoBaseDownload
+from googleapiclient.errors import HttpError
 
 logger = logging.getLogger(__name__)
 
@@ -34,9 +35,14 @@ MEDIA_MIME_TYPES = {
 SCOPES = ["https://www.googleapis.com/auth/drive"]
 
 
-# ─────────────────────────────────────────────
+# ───────────────────────────────────────────────
+class DownloadError(Exception):
+    """Erro específico de download do Drive."""
+
+
+# ───────────────────────────────────────────────
 # FUNÇÕES UTILITÁRIAS (usadas pela classe e externamente)
-# ─────────────────────────────────────────────
+# ───────────────────────────────────────────────
 
 def get_drive_files(service, folder_id: str) -> list[dict]:
     """Lista todos os arquivos suportados dentro da pasta do Google Drive."""
@@ -45,7 +51,7 @@ def get_drive_files(service, folder_id: str) -> list[dict]:
             service.files()
             .list(
                 q=f"'{folder_id}' in parents and trashed=false",
-                fields="files(id, name, mimeType, modifiedTime)",
+                fields="files(id, name, mimeType, modifiedTime, capabilities)",
                 pageSize=50,
             )
             .execute()
@@ -64,6 +70,11 @@ def download_file(service, file: dict, dest_folder: str) -> str | None:
     """
     Baixa um arquivo do Google Drive para dest_folder.
     Suporta textos, documentos, vídeos e áudios.
+
+    Para vídeos com erro 403 'cannotDownloadFile', tenta duas estratégias:
+      1. get_media padrão
+      2. get_media com acknowledgeAbuse=True
+
     Retorna o caminho local do arquivo baixado, ou None em caso de erro.
     """
     file_id = file["id"]
@@ -88,10 +99,12 @@ def download_file(service, file: dict, dest_folder: str) -> str | None:
 
     try:
         if mime_type == "application/vnd.google-apps.document":
+            # Google Docs: exporta como DOCX
             request = service.files().export_media(
                 fileId=file_id, mimeType=GOOGLE_DOCS_EXPORT_MIME
             )
         else:
+            # Tentativa 1: download binário padrão
             request = service.files().get_media(fileId=file_id)
 
         buffer = io.BytesIO()
@@ -110,6 +123,56 @@ def download_file(service, file: dict, dest_folder: str) -> str | None:
 
         logger.info(f"[Drive] ✅ Arquivo salvo: {dest_path}")
         return dest_path
+
+    except HttpError as e:
+        # ----------------------------------------------------------------
+        # Tratamento especial para 403 cannotDownloadFile
+        # Esse erro ocorre em vídeos grandes / arquivos não-proprietários.
+        # Tentativa 2: repete o request com acknowledgeAbuse=True
+        # ----------------------------------------------------------------
+        reason = ""
+        try:
+            import json
+            details = json.loads(e.content.decode())
+            errors = details.get("error", {}).get("errors", [])
+            reason = errors[0].get("reason", "") if errors else ""
+        except Exception:
+            pass
+
+        if e.resp.status == 403 and reason in ("cannotDownloadFile", "forbidden"):
+            logger.warning(
+                f"[Drive] 403 cannotDownloadFile para '{file_name}'. "
+                "Tentando com acknowledgeAbuse=True..."
+            )
+            try:
+                request2 = service.files().get_media(
+                    fileId=file_id,
+                    acknowledgeAbuse=True,
+                )
+                buffer2 = io.BytesIO()
+                downloader2 = MediaIoBaseDownload(buffer2, request2)
+                done2 = False
+                while not done2:
+                    status2, done2 = downloader2.next_chunk()
+                    if status2:
+                        logger.info(
+                            f"[Drive] Download (retry) {file_name}: "
+                            f"{int(status2.progress() * 100)}%"
+                        )
+                with open(dest_path, "wb") as f:
+                    f.write(buffer2.getvalue())
+                logger.info(f"[Drive] ✅ Arquivo salvo (retry): {dest_path}")
+                return dest_path
+            except Exception as e2:
+                logger.error(
+                    f"[Drive] Erro no retry de download '{file_name}': {e2}\n"
+                    f"⚠️  Se o arquivo pertence a outra conta, o proprietário precisa "
+                    f"conceder permissão de download."
+                )
+                return None
+        else:
+            logger.error(f"[Drive] Erro ao baixar {file_name}: {e}")
+            return None
 
     except Exception as e:
         logger.error(f"[Drive] Erro ao baixar {file_name}: {e}")
@@ -149,26 +212,12 @@ def upload_file(service, local_path: str, folder_id: str) -> str | None:
 def build_drive_service(credentials_path: str = None, token_path: str = None):
     """
     Autentica no Google Drive usando OAuth 2.0 (fluxo de usuário).
-
-    - Na primeira execução: abre o browser para o usuário autorizar o acesso.
-      Um arquivo token.json é salvo para reutilização nas próximas execuções.
-    - Nas execuções seguintes: reusa o token.json (ou renova automaticamente).
-
-    Args:
-        credentials_path: Caminho para o credentials.json (OAuth2 Client ID).
-                          Padrão: variável GOOGLE_CREDENTIALS_PATH ou 'credentials.json'.
-        token_path: Caminho para salvar/ler o token autorizado.
-                    Padrão: variável GOOGLE_TOKEN_PATH ou 'credentials/token.json'.
-
-    Returns:
-        Objeto service autenticado do Google Drive v3.
     """
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
     from google_auth_oauthlib.flow import InstalledAppFlow
     from googleapiclient.discovery import build
 
-    # Resolve os caminhos via parâmetros ou variáveis de ambiente
     creds_path = (
         credentials_path
         or os.getenv("GOOGLE_CREDENTIALS_PATH")
@@ -191,13 +240,11 @@ def build_drive_service(credentials_path: str = None, token_path: str = None):
 
     creds = None
 
-    # Tenta reutilizar token existente
     os.makedirs(os.path.dirname(tok_path) or ".", exist_ok=True)
     if os.path.exists(tok_path):
         creds = Credentials.from_authorized_user_file(tok_path, SCOPES)
         logger.info(f"[Drive] Token carregado de: {tok_path}")
 
-    # Renova ou inicia novo fluxo de autorização
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             logger.info("[Drive] Token expirado — renovando automaticamente...")
@@ -210,7 +257,6 @@ def build_drive_service(credentials_path: str = None, token_path: str = None):
             flow = InstalledAppFlow.from_client_secrets_file(creds_path, SCOPES)
             creds = flow.run_local_server(port=0)
 
-        # Salva o token para próximas execuções
         with open(tok_path, "w") as token_file:
             token_file.write(creds.to_json())
         logger.info(f"[Drive] ✅ Token salvo em: {tok_path}")
@@ -220,26 +266,25 @@ def build_drive_service(credentials_path: str = None, token_path: str = None):
     return service
 
 
-# ─────────────────────────────────────────────
+# ───────────────────────────────────────────────
 # CLASSE ORQUESTRADORA
-# ─────────────────────────────────────────────
+# ───────────────────────────────────────────────
 
 class DriveMonitor:
     """
     Orquestra o ciclo completo:
-      1. Autentica no Google Drive via OAuth2 (abre browser na 1ª vez)
-      2. Lista arquivos novos na pasta de entrada (GOOGLE_DRIVE_INPUT_FOLDER_ID)
+      1. Autentica no Google Drive via OAuth2
+      2. Lista arquivos novos na pasta de entrada
       3. Baixa cada arquivo para data/downloads/
       4. Se for vídeo/áudio → transcreve com Whisper
       5. Envia o texto para o pipeline de geração de assets
-      6. Faz upload dos entregáveis para a pasta de saída (GOOGLE_DRIVE_OUTPUT_FOLDER_ID)
+      6. Faz upload dos entregáveis para a pasta de saída
     """
 
     def __init__(self):
         from dotenv import load_dotenv
         load_dotenv()
 
-        # Suporta tanto o nome antigo quanto o novo da variável de entrada
         self.input_folder_id = (
             os.getenv("GOOGLE_DRIVE_INPUT_FOLDER_ID")
             or os.getenv("DRIVE_INPUT_FOLDER_ID")
@@ -250,7 +295,11 @@ class DriveMonitor:
             or os.getenv("DRIVE_OUTPUT_FOLDER_ID")
             or ""
         )
-        self.download_dir = os.getenv("VIDEO_DOWNLOAD_DIR") or os.getenv("DOWNLOAD_DIR") or "data/downloads"
+        self.download_dir = (
+            os.getenv("VIDEO_DOWNLOAD_DIR")
+            or os.getenv("DOWNLOAD_DIR")
+            or "data/downloads"
+        )
         self.output_dir = os.getenv("OUTPUT_DIR", "data/output")
 
         if not self.input_folder_id:
@@ -266,10 +315,6 @@ class DriveMonitor:
     # ------------------------------------------------------------------
 
     def process_new_files(self) -> None:
-        """
-        Ponto de entrada principal. Lista, baixa, transcreve (se necessário)
-        e aciona o pipeline de geração de assets para cada arquivo.
-        """
         logger.info(
             f"[DriveMonitor] Verificando pasta de entrada: {self.input_folder_id}"
         )
@@ -295,16 +340,6 @@ class DriveMonitor:
         )
 
     def _process_single_file(self, file: dict) -> bool:
-        """
-        Processa um único arquivo:
-          - Baixa do Drive
-          - Transcreve se for mídia
-          - Extrai brief
-          - Gera assets
-          - Faz upload dos resultados
-
-        Retorna True se concluído com sucesso.
-        """
         from app.transcriber import transcribe_media
         from app.content_brief import extract_brief_from_text
         from app.generate_assets import generate_assets_for_brief
@@ -368,6 +403,12 @@ class DriveMonitor:
                 from docx import Document
                 doc = Document(path)
                 return "\n".join(p.text for p in doc.paragraphs if p.text.strip())
+            except ImportError:
+                logger.error(
+                    "[DriveMonitor] python-docx não instalado. "
+                    "Execute: pip install python-docx"
+                )
+                return ""
             except Exception as e:
                 logger.error(f"[DriveMonitor] Erro ao ler DOCX '{path}': {e}")
                 return ""
