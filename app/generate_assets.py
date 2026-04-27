@@ -1,8 +1,14 @@
 # generate_assets.py
+"""
+Pipeline de geração de materiais de marketing para a campanha
+"Compre 3 Leve 4 — DLAB" da Forlab.
+
+LLM utilizado: Google Gemini (google-genai SDK) — sem custo de créditos OpenAI.
+TTS utilizado: Google Cloud Text-to-Speech — compartilha credenciais OAuth2 do Drive.
+"""
 import os
 import logging
 from dotenv import load_dotenv
-from openai import OpenAI
 
 from app.ficha_pdf import save_ficha_as_pdf
 from app.slides_ppt import (
@@ -15,8 +21,15 @@ from app.podcast_tts import generate_podcast_audio
 load_dotenv()
 logger = logging.getLogger(__name__)
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4o")
+# ── Configuração do LLM (Gemini) ─────────────────────────────────────
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+LLM_MODEL = os.getenv("LLM_MODEL", "gemini-2.0-flash")
+
+if not GEMINI_API_KEY:
+    logger.warning(
+        "[LLM] GEMINI_API_KEY não definida no .env. "
+        "Obtenha sua chave gratuita em: https://aistudio.google.com/app/apikey"
+    )
 
 
 # ─────────────────────────────────────────────
@@ -94,6 +107,8 @@ O roteiro deve ter entre 800 e 1200 palavras e incluir:
 
 Tom: Profissional mas acessível. Direto ao ponto. Sem jargões excessivos.
 Escreva em português brasileiro.
+ATENÇÃO: O texto será convertido em áudio por TTS. NÃO use markdown,
+símbolos especiais ([, ], *, #) nem emojis — apenas texto corrido com pontuação normal.
 
 BRIEFING:
 {brief}"""
@@ -209,33 +224,46 @@ BRIEFING:
 
 
 # ─────────────────────────────────────────────
-# LLM + HELPERS
+# LLM (Gemini) + HELPERS
 # ─────────────────────────────────────────────
 
 def call_llm_api(prompt: str, temperature: float = 0.7) -> str:
     """
-    Envia um prompt para o modelo LLM configurado e retorna o texto gerado.
+    Envia um prompt para o Google Gemini e retorna o texto gerado.
+    Usa o SDK google-genai (já presente no requirements.txt).
 
     Args:
         prompt: Texto completo do prompt.
-        temperature: Criatividade da resposta (0.0 = determinístico, 1.0 = criativo).
+        temperature: Criatividade (0.0 = determinístico, 1.0 = criativo).
 
     Returns:
         Texto gerado pelo modelo.
     """
     try:
-        logger.info(f"[LLM] Chamando {LLM_MODEL} (temperature={temperature})...")
-        response = client.chat.completions.create(
-            model=LLM_MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=temperature,
-            max_tokens=4096,
+        from google import genai
+        from google.genai import types
+
+        client = genai.Client(api_key=GEMINI_API_KEY)
+
+        logger.info(
+            f"[LLM] Chamando {LLM_MODEL} via Gemini (temperature={temperature})..."
         )
-        content = response.choices[0].message.content or ""
+
+        response = client.models.generate_content(
+            model=LLM_MODEL,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                temperature=temperature,
+                max_output_tokens=8192,
+            ),
+        )
+
+        content = response.text or ""
         logger.info(f"[LLM] ✅ Resposta recebida ({len(content)} caracteres)")
         return content
+
     except Exception as e:
-        logger.error(f"[LLM] Erro na chamada da API: {e}")
+        logger.error(f"[LLM] Erro na chamada Gemini API: {e}")
         raise
 
 
@@ -245,14 +273,14 @@ def load_example_text(asset_key: str) -> str:
     Usado como fallback ou referência de estilo.
     """
     examples_map = {
-        "ficha":               "ficha_tecnica_exemplo.txt",
-        "slides":              "slides_exemplo.txt",
-        "podcast":             "podcast_exemplo.txt",
-        "folheto_a4":          "folheto_a4_exemplo.txt",
-        "emails_revendedores": "emails_revendedores_exemplo.txt",
-        "emails_cliente_final":"emails_cliente_final_exemplo.txt",
-        "posts_social":        "posts_social_exemplo.txt",
-        "roteiro_video":       "roteiro_video_exemplo.txt",
+        "ficha":                "ficha_tecnica_exemplo.txt",
+        "slides":               "slides_exemplo.txt",
+        "podcast":              "podcast_exemplo.txt",
+        "folheto_a4":           "folheto_a4_exemplo.txt",
+        "emails_revendedores":  "emails_revendedores_exemplo.txt",
+        "emails_cliente_final": "emails_cliente_final_exemplo.txt",
+        "posts_social":         "posts_social_exemplo.txt",
+        "roteiro_video":        "roteiro_video_exemplo.txt",
     }
     filename = examples_map.get(asset_key)
     if not filename:
@@ -279,7 +307,7 @@ def generate_assets_for_brief(
 
     Fluxo por asset:
       1. Monta o prompt específico com o briefing
-      2. Chama o LLM para gerar o conteúdo
+      2. Chama o Gemini para gerar o conteúdo textual
       3. Salva no formato correto (.pdf, .pptx, .mp3, .txt)
 
     Args:
@@ -306,14 +334,14 @@ def generate_assets_for_brief(
     # Declaração do pipeline:
     # (chave, nome_do_arquivo, função_builder, temperatura, formato_de_saída)
     assets_pipeline = [
-        ("ficha",               "ficha_tecnica.pdf",          build_ficha_prompt,               0.3,  "pdf"),
-        ("slides",              "apresentacao_dlab.pptx",     build_slides_prompt,              0.5,  "pptx"),
-        ("podcast",             "podcast_dlab.mp3",           build_podcast_prompt,             0.7,  "mp3"),
-        ("folheto_a4",          "folheto_a4.txt",             build_folheto_a4_prompt,          0.7,  "txt"),
-        ("emails_revendedores", "emails_revendedores.txt",    build_emails_revendedores_prompt, 0.6,  "txt"),
-        ("emails_cliente_final","emails_cliente_final.txt",   build_emails_cliente_final_prompt,0.6,  "txt"),
-        ("posts_social",        "posts_social.txt",           build_posts_social_prompt,        0.8,  "txt"),
-        ("roteiro_video",       "roteiro_video.txt",          build_roteiro_video_prompt,       0.75, "txt"),
+        ("ficha",                "ficha_tecnica.pdf",           build_ficha_prompt,                0.3,  "pdf"),
+        ("slides",               "apresentacao_dlab.pptx",      build_slides_prompt,               0.5,  "pptx"),
+        ("podcast",              "podcast_dlab.mp3",            build_podcast_prompt,              0.7,  "mp3"),
+        ("folheto_a4",           "folheto_a4.txt",              build_folheto_a4_prompt,           0.7,  "txt"),
+        ("emails_revendedores",  "emails_revendedores.txt",     build_emails_revendedores_prompt,  0.6,  "txt"),
+        ("emails_cliente_final", "emails_cliente_final.txt",    build_emails_cliente_final_prompt, 0.6,  "txt"),
+        ("posts_social",         "posts_social.txt",            build_posts_social_prompt,         0.8,  "txt"),
+        ("roteiro_video",        "roteiro_video.txt",           build_roteiro_video_prompt,        0.75, "txt"),
     ]
 
     results: dict[str, str] = {}
