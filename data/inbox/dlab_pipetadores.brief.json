@@ -1,0 +1,65 @@
+{
+  "campanha": "Compre 3 Leve 4 — DLAB Pipetadores",
+  "empresa": "Forlab",
+  "marca_produto": "DLAB",
+  "linha": "Pipetadores",
+  "subcategorias": [
+    {
+      "nome": "Micropipetas Monocanal",
+      "destaque": "Linha HiPette Color — pistão em aço inoxidável, autoclavável completo, ergonomia avançada, certificação ISO 8655",
+      "volumes": "0,1 µL a 10 mL (14 modelos)"
+    },
+    {
+      "nome": "Micropipetas Multicanal",
+      "destaque": "8 e 12 canais, alinhamento automático de ponteiras, ideal para ELISA e PCR em placa",
+      "volumes": "0,5 µL a 300 µL"
+    },
+    {
+      "nome": "Auxiliar de Pipetagem",
+      "destaque": "Motorizado, bateria 8h, elimina fadiga e risco de contaminação, compatível com pipetas sorológicas 1-100 mL"
+    },
+    {
+      "nome": "Micropipetas Eletrônicas",
+      "destaque": "Modos: simples, repetitivo, dispensador, diluição. Memória de 12 programas. Display LCD retroiluminado"
+    },
+    {
+      "nome": "Dispensadores",
+      "destaque": "Volumes fixos 0,5-100 mL, válvula antirretorno dupla, troca de seringa em 30s sem ferramentas"
+    },
+    {
+      "nome": "Buretas Digitais",
+      "destaque": "Precisão ±0,01 mL, display digital, sem risco de vazamento, conexão direta ao frasco do reagente"
+    },
+    {
+      "nome": "Repipetadores",
+      "destaque": "Seringas intercambiáveis 0,5-50 mL, material PTFE/PP resistente a solventes, encaixe rápido"
+    }
+  ],
+  "oferta": {
+    "mecanica": "Compre 3 pipetadores DLAB, leve o 4º de menor valor grátis",
+    "validade": "Enquanto durar o estoque",
+    "bonificacao_vendedor": "Vendedores que atingirem R$ 30.000 em vendas recebem bonificação especial"
+  },
+  "ecossistema_forlab": [
+    "Calibração RBC acreditada pelo INMETRO (rastreável para auditorias ISO 17025 e RDC 302)",
+    "Consumíveis originais DLAB: ponteiras e reservatórios certificados",
+    "Peças de reposição e manutenção preventiva/corretiva",
+    "Programa Trade-in DLAB: troca de pipetas antigas com desconto"
+  ],
+  "publicos_alvo": [
+    "Revendedores de equipamentos laboratoriais",
+    "Laboratórios clínicos e de pesquisa",
+    "Indústrias farmacêuticas e de biotecnologia",
+    "Gestores de compras de laboratório"
+  ],
+  "diferenciais_dlab": [
+    "Líder mundial em liquid handling — presente em +100 países",
+    "Certificação ISO 8655 de fábrica em toda a linha",
+    "Melhor custo-benefício frente a marcas premium europeias",
+    "Portfólio completo: 7 categorias, um fornecedor"
+  ],
+  "tom_comunicacao": {
+    "revendedores": "Comercial, direto, foco em margem e volume",
+    "cliente_final": "Consultivo, técnico, foco em qualidade e economia"
+  }
+}
