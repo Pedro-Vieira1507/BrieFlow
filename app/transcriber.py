@@ -87,6 +87,82 @@ def transcribe_video(video_path: str) -> str:
     return transcript
 
 
+def read_or_transcribe(file_path: str) -> str:
+    """
+    Entry point unificado do pipeline:
+    - .mp4 / .mov / .avi / .webm  → extrai áudio + Whisper
+    - .mp3 / .wav / .m4a / .ogg   → Whisper direto
+    - .txt                         → leitura direta
+    - .docx                        → extração de texto com python-docx
+
+    Args:
+        file_path: Caminho local do arquivo a processar.
+
+    Returns:
+        Texto transcrito ou lido.
+    """
+    ext = os.path.splitext(file_path)[1].lower()
+
+    if ext in (".mp4", ".mov", ".avi", ".webm"):
+        logger.info(
+            f"[Transcriber] Detectado vídeo — iniciando pipeline completo: {file_path}"
+        )
+        return transcribe_video(file_path)
+
+    if ext in (".mp3", ".wav", ".m4a", ".ogg"):
+        logger.info(f"[Transcriber] Detectado áudio — transcrevendo: {file_path}")
+        return transcribe_audio(file_path)
+
+    if ext == ".txt":
+        with open(file_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        logger.info(
+            f"[Transcriber] Texto lido: {file_path} ({len(content)} caracteres)"
+        )
+        return content
+
+    if ext == ".docx":
+        from docx import Document
+        doc = Document(file_path)
+        content = "\n".join(
+            p.text for p in doc.paragraphs if p.text.strip()
+        )
+        logger.info(
+            f"[Transcriber] DOCX lido: {file_path} ({len(content)} caracteres)"
+        )
+        return content
+
+    raise ValueError(
+        f"[Transcriber] Formato de arquivo não suportado: {ext}. "
+        f"Formatos aceitos: .mp4, .mov, .avi, .webm, .mp3, .wav, .m4a, .ogg, .txt, .docx"
+    )
+
+
+def transcribe_media(file_path: str) -> str | None:
+    """
+    Alias público de read_or_transcribe — mantém compatibilidade com
+    drive_monitor.py e outros módulos que importam este nome.
+
+    Processa qualquer arquivo de mídia ou texto suportado e retorna
+    o caminho do arquivo .txt com a transcrição salva ao lado do original.
+    Retorna None em caso de erro.
+    """
+    try:
+        text = read_or_transcribe(file_path)
+
+        # Salva a transcrição em um .txt ao lado do arquivo original
+        base = os.path.splitext(file_path)[0]
+        transcript_path = f"{base}_transcricao.txt"
+        with open(transcript_path, "w", encoding="utf-8") as f:
+            f.write(text)
+        logger.info(f"[Transcriber] ✅ Transcrição salva: {transcript_path}")
+        return transcript_path
+
+    except Exception as e:
+        logger.error(f"[Transcriber] Erro em transcribe_media('{file_path}'): {e}")
+        return None
+
+
 def download_and_transcribe_from_drive(
     service,
     folder_id: str,
@@ -230,54 +306,3 @@ def download_and_transcribe_from_drive(
             })
 
     return results
-
-
-def read_or_transcribe(file_path: str) -> str:
-    """
-    Entry point unificado do pipeline:
-    - .mp4 / .mov / .avi / .webm  → extrai áudio + Whisper
-    - .mp3 / .wav / .m4a / .ogg   → Whisper direto
-    - .txt                         → leitura direta
-    - .docx                        → extração de texto com python-docx
-
-    Args:
-        file_path: Caminho local do arquivo a processar.
-
-    Returns:
-        Texto transcrito ou lido.
-    """
-    ext = os.path.splitext(file_path)[1].lower()
-
-    if ext in (".mp4", ".mov", ".avi", ".webm"):
-        logger.info(
-            f"[Transcriber] Detectado vídeo — iniciando pipeline completo: {file_path}"
-        )
-        return transcribe_video(file_path)
-
-    if ext in (".mp3", ".wav", ".m4a", ".ogg"):
-        logger.info(f"[Transcriber] Detectado áudio — transcrevendo: {file_path}")
-        return transcribe_audio(file_path)
-
-    if ext == ".txt":
-        with open(file_path, "r", encoding="utf-8") as f:
-            content = f.read()
-        logger.info(
-            f"[Transcriber] Texto lido: {file_path} ({len(content)} caracteres)"
-        )
-        return content
-
-    if ext == ".docx":
-        from docx import Document
-        doc = Document(file_path)
-        content = "\n".join(
-            p.text for p in doc.paragraphs if p.text.strip()
-        )
-        logger.info(
-            f"[Transcriber] DOCX lido: {file_path} ({len(content)} caracteres)"
-        )
-        return content
-
-    raise ValueError(
-        f"[Transcriber] Formato de arquivo não suportado: {ext}. "
-        f"Formatos aceitos: .mp4, .mov, .avi, .webm, .mp3, .wav, .m4a, .ogg, .txt, .docx"
-    )
