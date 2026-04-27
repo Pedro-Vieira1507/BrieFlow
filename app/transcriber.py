@@ -23,16 +23,65 @@ VIDEO_MIME_TYPES = {
 }
 
 
+def _get_ffmpeg_binary() -> str:
+    """
+    Resolve o binário do ffmpeg com a seguinte prioridade:
+      1. Variável de ambiente FFMPEG_PATH (path completo)
+      2. 'ffmpeg' no PATH do sistema
+      3. imageio-ffmpeg (binário embutido — dispensa instalação manual no Windows)
+    Levanta RuntimeError se nenhuma das opções estiver disponível.
+    """
+    # 1. Variável de ambiente explicitada pelo usuário
+    env_path = os.getenv("FFMPEG_PATH")
+    if env_path and os.path.isfile(env_path):
+        logger.debug(f"[Transcriber] ffmpeg via FFMPEG_PATH: {env_path}")
+        return env_path
+
+    # 2. ffmpeg nativo no PATH do sistema
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-version"],
+            capture_output=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            logger.debug("[Transcriber] ffmpeg encontrado no PATH do sistema.")
+            return "ffmpeg"
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+
+    # 3. imageio-ffmpeg (binário embutido no pacote Python)
+    try:
+        import imageio_ffmpeg
+        ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
+        logger.info(
+            f"[Transcriber] ffmpeg via imageio-ffmpeg: {ffmpeg_path}"
+        )
+        return ffmpeg_path
+    except Exception:
+        pass
+
+    raise RuntimeError(
+        "[Transcriber] ffmpeg não encontrado.\n"
+        "Opções para corrigir:\n"
+        "  1. Instale imageio-ffmpeg:  pip install imageio-ffmpeg\n"
+        "  2. Instale o ffmpeg manualmente e adicione ao PATH\n"
+        "  3. Defina FFMPEG_PATH no .env apontando para o binário"
+    )
+
+
 def extract_audio_from_video(video_path: str) -> str:
     """
     Extrai o áudio de um vídeo (.mp4, .mov, .avi, .webm) usando ffmpeg.
+    Usa imageio-ffmpeg automaticamente se o ffmpeg não estiver no PATH.
     Retorna o caminho do .mp3 gerado (temporário).
     """
+    ffmpeg_bin = _get_ffmpeg_binary()
     audio_path = video_path.rsplit(".", 1)[0] + "_audio.mp3"
     try:
         subprocess.run(
             [
-                "ffmpeg", "-y", "-i", video_path,
+                ffmpeg_bin, "-y", "-i", video_path,
                 "-vn", "-ar", "16000", "-ac", "1",
                 "-b:a", "64k", audio_path,
             ],
@@ -94,12 +143,6 @@ def read_or_transcribe(file_path: str) -> str:
     - .mp3 / .wav / .m4a / .ogg   → Whisper direto
     - .txt                         → leitura direta
     - .docx                        → extração de texto com python-docx
-
-    Args:
-        file_path: Caminho local do arquivo a processar.
-
-    Returns:
-        Texto transcrito ou lido.
     """
     ext = os.path.splitext(file_path)[1].lower()
 
@@ -122,7 +165,13 @@ def read_or_transcribe(file_path: str) -> str:
         return content
 
     if ext == ".docx":
-        from docx import Document
+        try:
+            from docx import Document
+        except ImportError:
+            raise ImportError(
+                "[Transcriber] python-docx não instalado. "
+                "Execute: pip install python-docx"
+            )
         doc = Document(file_path)
         content = "\n".join(
             p.text for p in doc.paragraphs if p.text.strip()
@@ -171,24 +220,7 @@ def download_and_transcribe_from_drive(
     """
     Busca todos os arquivos de vídeo/áudio na pasta do Google Drive,
     baixa localmente e transcreve cada um via Whisper.
-
-    Ideal para o fluxo automático do pipeline: o agente monitora a pasta
-    de reuniões/treinamentos e extrai as transcrições sem intervenção manual.
-
-    Args:
-        service: Serviço autenticado do Google Drive API.
-        folder_id: ID da pasta no Google Drive a monitorar.
-        dest_folder: Pasta local onde os vídeos serão baixados.
-
-    Returns:
-        Lista de dicts com:
-          - 'file_name': nome do arquivo no Drive
-          - 'local_path': caminho local do vídeo baixado
-          - 'transcript': texto transcrito (str) ou None se erro
-          - 'transcript_path': caminho do .txt salvo com a transcrição
     """
-    from googleapiclient.http import MediaIoBaseDownload
-
     SUPPORTED = {
         "video/mp4": ".mp4",
         "video/quicktime": ".mov",
