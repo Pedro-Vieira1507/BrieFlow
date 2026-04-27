@@ -1,176 +1,67 @@
 # ficha_pdf.py
+"""
+Gera a Ficha Técnica em PDF usando ReportLab (100% Python, sem libs C externas).
+Substitui WeasyPrint que exige GTK/libgobject não disponível no Windows por padrão.
+"""
 import os
 import logging
-from weasyprint import HTML as WeasyprintHTML
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+# Paleta Forlab
+FORLAB_TEAL   = (1 / 255, 105 / 255, 111 / 255)   # #01696f
+FORLAB_DARK   = (12 / 255,  78 / 255,  84 / 255)   # #0c4e54
+FORLAB_LIGHT  = (240 / 255, 247 / 255, 247 / 255)  # #f0f7f7
+FORLAB_TEXT   = (26 / 255,  26 / 255,  46 / 255)   # #1a1a2e
+FORLAB_MUTED  = (100 / 255, 100 / 255, 100 / 255)
+FORLAB_WHITE  = (1.0, 1.0, 1.0)
+FORLAB_BORDER = (221 / 255, 221 / 255, 221 / 255)  # #dddddd
 
-def _build_html(content: str, title: str = "Ficha Técnica") -> str:
-    """Monta o HTML/CSS estilizado para a ficha técnica no formato A4."""
-    sections_html = ""
-    current_section_title = None
-    current_items: list[str] = []
+
+def _parse_sections(content: str) -> tuple[str, list[tuple[str, list[str]]]]:
+    """
+    Faz parse simples do conteúdo em:
+      - intro_text: parágrafo inicial (antes de qualquer seção)
+      - sections: lista de (título, [itens])
+    """
     intro_lines: list[str] = []
+    sections: list[tuple[str, list[str]]] = []
+    current_title: str | None = None
+    current_items: list[str] = []
     in_intro = True
 
-    def flush_section():
-        nonlocal sections_html
-        if current_section_title:
-            items_html = "".join(
-                f"<li>{item}</li>" for item in current_items if item
-            )
-            sections_html += f"""
-            <div class="section">
-                <h2>{current_section_title}</h2>
-                <ul>{items_html}</ul>
-            </div>"""
+    def flush():
+        if current_title is not None:
+            sections.append((current_title, list(current_items)))
 
-    for line in content.split("\n"):
-        stripped = line.strip()
-        if not stripped:
+    for raw in content.split("\n"):
+        line = raw.strip()
+        if not line:
             continue
 
-        is_heading = stripped.startswith("##") or stripped.startswith("# ")
-        is_all_caps = stripped.upper() == stripped and len(stripped) > 4 and stripped.isalpha() is False
+        is_heading = line.startswith("## ") or line.startswith("# ")
+        is_allcaps = (
+            len(line) > 4
+            and line == line.upper()
+            and any(c.isalpha() for c in line)
+        )
 
-        if is_heading or is_all_caps:
+        if is_heading or is_allcaps:
             in_intro = False
-            flush_section()
-            current_section_title = stripped.lstrip("# ").strip()
+            flush()
+            current_title = line.lstrip("# ").strip()
             current_items = []
-        elif stripped.startswith(("- ", "* ", "• ")):
+        elif line.startswith(("- ", "* ", "• ")):
             in_intro = False
-            current_items.append(stripped[2:])
-        elif stripped.startswith("**") and stripped.endswith("**"):
-            current_items.append(f"<strong>{stripped.strip('*')}</strong>")
+            current_items.append(line[2:].strip())
         elif in_intro:
-            intro_lines.append(stripped)
+            intro_lines.append(line)
         else:
-            current_items.append(stripped)
+            current_items.append(line)
 
-    flush_section()
-
-    intro_html = ""
-    if intro_lines:
-        intro_html = f"""<div class="intro"><p>{' '.join(intro_lines)}</p></div>"""
-
-    return f"""<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-<meta charset="UTF-8">
-<style>
-  @page {{
-    size: A4;
-    margin: 2cm 2.5cm 2.5cm 2.5cm;
-  }}
-  body {{
-    font-family: 'Helvetica Neue', Arial, sans-serif;
-    font-size: 10.5pt;
-    color: #1a1a2e;
-    line-height: 1.6;
-    margin: 0;
-    padding: 0;
-  }}
-  .header {{
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-end;
-    border-bottom: 3px solid #01696f;
-    padding-bottom: 14px;
-    margin-bottom: 26px;
-  }}
-  .header-left h1 {{
-    font-size: 20pt;
-    color: #01696f;
-    margin: 0 0 4px;
-    font-weight: 800;
-    letter-spacing: -0.02em;
-  }}
-  .header-left .subtitle {{
-    font-size: 9pt;
-    color: #666;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-  }}
-  .header-right .badge {{
-    display: inline-block;
-    background: #01696f;
-    color: white;
-    font-size: 8pt;
-    padding: 3px 10px;
-    border-radius: 20px;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-  }}
-  .intro {{
-    background: #f0f7f7;
-    border-left: 4px solid #01696f;
-    padding: 10px 14px;
-    margin-bottom: 22px;
-    border-radius: 0 6px 6px 0;
-    font-size: 10pt;
-    color: #334;
-  }}
-  .section {{
-    margin-bottom: 18px;
-    page-break-inside: avoid;
-  }}
-  .section h2 {{
-    font-size: 9.5pt;
-    font-weight: 700;
-    color: #0c4e54;
-    text-transform: uppercase;
-    letter-spacing: 0.07em;
-    border-left: 3px solid #01696f;
-    padding-left: 8px;
-    margin: 0 0 7px;
-    line-height: 1.3;
-  }}
-  .section ul {{
-    margin: 0;
-    padding-left: 16px;
-  }}
-  .section ul li {{
-    margin-bottom: 4px;
-    font-size: 10pt;
-  }}
-  .footer-note {{
-    margin-top: 32px;
-    border-top: 1px solid #ddd;
-    padding-top: 10px;
-    font-size: 7.5pt;
-    color: #aaa;
-    text-align: center;
-    position: running(footer);
-  }}
-  @page {{
-    @bottom-center {{
-      content: element(footer);
-    }}
-  }}
-</style>
-</head>
-<body>
-  <div class="header">
-    <div class="header-left">
-      <h1>{title}</h1>
-      <div class="subtitle">Campanha Compre 3 Leve 4 — DLAB • Forlab</div>
-    </div>
-    <div class="header-right">
-      <span class="badge">FORLAB</span>
-    </div>
-  </div>
-
-  {intro_html}
-  {sections_html}
-
-  <div class="footer-note">
-    Documento gerado automaticamente pelo Agente de Documentação Forlab.
-    Distribuição interna — proibida reprodução sem autorização.
-  </div>
-</body>
-</html>"""
+    flush()
+    return " ".join(intro_lines), sections
 
 
 def save_ficha_as_pdf(
@@ -179,7 +70,7 @@ def save_ficha_as_pdf(
     title: str = "Ficha Técnica",
 ) -> str:
     """
-    Gera a ficha técnica como PDF profissional usando WeasyPrint.
+    Gera a ficha técnica como PDF profissional usando ReportLab.
 
     Args:
         content: Texto da ficha (markdown simples ou texto corrido).
@@ -188,19 +79,198 @@ def save_ficha_as_pdf(
 
     Returns:
         Caminho do PDF gerado.
-
-    Raises:
-        Exception: Em caso de erro na geração do PDF.
     """
     try:
-        dest_dir = os.path.dirname(output_path)
-        if dest_dir:
-            os.makedirs(dest_dir, exist_ok=True)
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.units import cm, mm
+        from reportlab.lib import colors
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.enums import TA_LEFT, TA_CENTER
+        from reportlab.platypus import (
+            SimpleDocTemplate, Paragraph, Spacer, HRFlowable,
+            Table, TableStyle, KeepTogether,
+        )
+        from reportlab.platypus.flowables import HRFlowable
+    except ImportError as exc:
+        raise ImportError(
+            "reportlab não instalado. Execute: pip install reportlab"
+        ) from exc
 
-        html_content = _build_html(content, title)
-        WeasyprintHTML(string=html_content).write_pdf(output_path)
-        logger.info(f"[FichaPDF] ✅ PDF gerado: {output_path}")
-        return output_path
-    except Exception as e:
-        logger.error(f"[FichaPDF] Erro ao gerar PDF '{output_path}': {e}")
-        raise
+    dest_dir = os.path.dirname(output_path)
+    if dest_dir:
+        os.makedirs(dest_dir, exist_ok=True)
+
+    # ── Configurações do documento ──────────────────────────────────────
+    doc = SimpleDocTemplate(
+        output_path,
+        pagesize=A4,
+        leftMargin=2.5 * cm,
+        rightMargin=2.5 * cm,
+        topMargin=2.2 * cm,
+        bottomMargin=2.5 * cm,
+        title=title,
+        author="Agente Documentação Forlab",
+    )
+
+    W = A4[0] - 5 * cm  # largura útil
+
+    # ── Estilos ──────────────────────────────────────────────────────────
+    teal   = colors.Color(*FORLAB_TEAL)
+    dark   = colors.Color(*FORLAB_DARK)
+    light  = colors.Color(*FORLAB_LIGHT)
+    muted  = colors.Color(*FORLAB_MUTED)
+    txt    = colors.Color(*FORLAB_TEXT)
+    border = colors.Color(*FORLAB_BORDER)
+
+    base = getSampleStyleSheet()
+
+    style_title = ParagraphStyle(
+        "FichaTitle",
+        fontSize=20,
+        textColor=teal,
+        fontName="Helvetica-Bold",
+        leading=24,
+        spaceAfter=2,
+    )
+    style_subtitle = ParagraphStyle(
+        "FichaSubtitle",
+        fontSize=8,
+        textColor=muted,
+        fontName="Helvetica",
+        letterSpacing=1.2,
+        spaceAfter=0,
+    )
+    style_badge = ParagraphStyle(
+        "FichaBadge",
+        fontSize=8,
+        textColor=colors.white,
+        fontName="Helvetica-Bold",
+        alignment=TA_CENTER,
+    )
+    style_intro = ParagraphStyle(
+        "FichaIntro",
+        fontSize=9.5,
+        textColor=txt,
+        fontName="Helvetica",
+        leading=14,
+        leftIndent=10,
+        borderPad=8,
+        spaceAfter=0,
+    )
+    style_section_head = ParagraphStyle(
+        "FichaSectionHead",
+        fontSize=9,
+        textColor=dark,
+        fontName="Helvetica-Bold",
+        leading=12,
+        spaceBefore=6,
+        spaceAfter=4,
+        leftIndent=10,
+    )
+    style_item = ParagraphStyle(
+        "FichaItem",
+        fontSize=9.5,
+        textColor=txt,
+        fontName="Helvetica",
+        leading=13,
+        leftIndent=16,
+        bulletIndent=6,
+        spaceAfter=2,
+    )
+    style_footer = ParagraphStyle(
+        "FichaFooter",
+        fontSize=7,
+        textColor=muted,
+        fontName="Helvetica",
+        alignment=TA_CENTER,
+        spaceBefore=8,
+    )
+
+    # ── Parse do conteúdo ────────────────────────────────────────────────
+    intro_text, sections = _parse_sections(content)
+
+    # ── Monta o fluxo de elementos ───────────────────────────────────────
+    story = []
+
+    # Cabeçalho: título à esquerda + badge à direita
+    badge_cell = Paragraph("FORLAB", style_badge)
+    header_table = Table(
+        data=[
+            [
+                [Paragraph(title, style_title),
+                 Paragraph("Campanha Compre 3 Leve 4 — DLAB • Forlab", style_subtitle)],
+                badge_cell,
+            ]
+        ],
+        colWidths=[W - 2.2 * cm, 2.2 * cm],
+    )
+    header_table.setStyle(TableStyle([
+        ("VALIGN",      (0, 0), (-1, -1), "BOTTOM"),
+        ("ALIGN",       (1, 0), (1, 0),  "RIGHT"),
+        ("BACKGROUND",  (1, 0), (1, 0),  teal),
+        ("ROUNDEDCORNERS", (1, 0), (1, 0), [10]),
+        ("TOPPADDING",  (1, 0), (1, 0),  5),
+        ("BOTTOMPADDING", (1, 0), (1, 0), 5),
+        ("LEFTPADDING", (1, 0), (1, 0),  8),
+        ("RIGHTPADDING", (1, 0), (1, 0), 8),
+        ("LEFTPADDING", (0, 0), (0, 0),  0),
+        ("TOPPADDING",  (0, 0), (0, 0),  0),
+        ("BOTTOMPADDING", (0, 0), (0, 0), 0),
+    ]))
+    story.append(header_table)
+    story.append(Spacer(1, 4 * mm))
+    story.append(HRFlowable(width="100%", thickness=2.5, color=teal, spaceAfter=4 * mm))
+
+    # Bloco intro (fundo claro + borda esquerda teal)
+    if intro_text:
+        intro_table = Table(
+            data=[[Paragraph(intro_text, style_intro)]],
+            colWidths=[W],
+        )
+        intro_table.setStyle(TableStyle([
+            ("BACKGROUND",    (0, 0), (-1, -1), light),
+            ("LEFTPADDING",   (0, 0), (-1, -1), 14),
+            ("RIGHTPADDING",  (0, 0), (-1, -1), 10),
+            ("TOPPADDING",    (0, 0), (-1, -1), 8),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+            ("LINEAFTER",     (0, 0), (0, -1),  0, teal, 0),
+            ("LINEBEFORE",    (0, 0), (0, -1),  3.5, teal),
+            ("ROUNDEDCORNERS", (0, 0), (-1, -1), [0, 4, 4, 0]),
+        ]))
+        story.append(intro_table)
+        story.append(Spacer(1, 5 * mm))
+
+    # Seções
+    for sec_title, items in sections:
+        block = []
+        # Título da seção com borda esquerda teal
+        sec_head = Table(
+            data=[[Paragraph(sec_title.upper(), style_section_head)]],
+            colWidths=[W],
+        )
+        sec_head.setStyle(TableStyle([
+            ("LINEBEFORE",    (0, 0), (0, -1), 3, teal),
+            ("LEFTPADDING",   (0, 0), (-1, -1), 10),
+            ("TOPPADDING",    (0, 0), (-1, -1), 2),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+        ]))
+        block.append(sec_head)
+        for item in items:
+            if item:
+                block.append(Paragraph(f"• {item}", style_item))
+        block.append(Spacer(1, 3 * mm))
+        story.append(KeepTogether(block))
+
+    # Rodapé
+    story.append(Spacer(1, 6 * mm))
+    story.append(HRFlowable(width="100%", thickness=0.5, color=border, spaceAfter=3 * mm))
+    story.append(Paragraph(
+        "Documento gerado automaticamente pelo Agente de Documentação Forlab. "
+        "Distribuição interna — proibida reprodução sem autorização.",
+        style_footer,
+    ))
+
+    # ── Gera o PDF ───────────────────────────────────────────────────────
+    doc.build(story)
+    logger.info(f"[FichaPDF] ✅ PDF gerado: {output_path}")
+    return output_path
