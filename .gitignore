@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+venv/
+env/
+ENV/
+
+# Environment variables and secrets
+.env
+.env.*
+*.pem
+*.key
+credentials.json
+token.json
+
+# Logs
+*.log
+logs/
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Build / cache
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+dist/
+build/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Data outputs and large media
+data/processed/
+*.mp4
+*.mov
+*.avi
+*.mkv
+
+# Optional generated artifacts
+output/
