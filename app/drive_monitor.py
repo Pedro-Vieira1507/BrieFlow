@@ -31,6 +31,8 @@ MEDIA_MIME_TYPES = {
     "audio/mpeg", "audio/mp4", "audio/wav",
 }
 
+SCOPES = ["https://www.googleapis.com/auth/drive"]
+
 
 # ─────────────────────────────────────────────
 # FUNÇÕES UTILITÁRIAS (usadas pela classe e externamente)
@@ -144,6 +146,80 @@ def upload_file(service, local_path: str, folder_id: str) -> str | None:
         return None
 
 
+def build_drive_service(credentials_path: str = None, token_path: str = None):
+    """
+    Autentica no Google Drive usando OAuth 2.0 (fluxo de usuário).
+
+    - Na primeira execução: abre o browser para o usuário autorizar o acesso.
+      Um arquivo token.json é salvo para reutilização nas próximas execuções.
+    - Nas execuções seguintes: reusa o token.json (ou renova automaticamente).
+
+    Args:
+        credentials_path: Caminho para o credentials.json (OAuth2 Client ID).
+                          Padrão: variável GOOGLE_CREDENTIALS_PATH ou 'credentials.json'.
+        token_path: Caminho para salvar/ler o token autorizado.
+                    Padrão: variável GOOGLE_TOKEN_PATH ou 'credentials/token.json'.
+
+    Returns:
+        Objeto service autenticado do Google Drive v3.
+    """
+    from google.auth.transport.requests import Request
+    from google.oauth2.credentials import Credentials
+    from google_auth_oauthlib.flow import InstalledAppFlow
+    from googleapiclient.discovery import build
+
+    # Resolve os caminhos via parâmetros ou variáveis de ambiente
+    creds_path = (
+        credentials_path
+        or os.getenv("GOOGLE_CREDENTIALS_PATH")
+        or os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE")
+        or "credentials.json"
+    )
+    tok_path = (
+        token_path
+        or os.getenv("GOOGLE_TOKEN_PATH")
+        or "credentials/token.json"
+    )
+
+    if not os.path.exists(creds_path):
+        raise FileNotFoundError(
+            f"[Drive] Arquivo de credenciais não encontrado: '{creds_path}'\n"
+            "Configure GOOGLE_CREDENTIALS_PATH no .env apontando para o "
+            "credentials.json baixado do Google Cloud Console "
+            "(Tipo: OAuth 2.0 Client ID > Aplicativo Desktop)."
+        )
+
+    creds = None
+
+    # Tenta reutilizar token existente
+    os.makedirs(os.path.dirname(tok_path) or ".", exist_ok=True)
+    if os.path.exists(tok_path):
+        creds = Credentials.from_authorized_user_file(tok_path, SCOPES)
+        logger.info(f"[Drive] Token carregado de: {tok_path}")
+
+    # Renova ou inicia novo fluxo de autorização
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            logger.info("[Drive] Token expirado — renovando automaticamente...")
+            creds.refresh(Request())
+        else:
+            logger.info(
+                "[Drive] Nenhum token válido encontrado. "
+                "Abrindo browser para autorização..."
+            )
+            flow = InstalledAppFlow.from_client_secrets_file(creds_path, SCOPES)
+            creds = flow.run_local_server(port=0)
+
+        # Salva o token para próximas execuções
+        with open(tok_path, "w") as token_file:
+            token_file.write(creds.to_json())
+        logger.info(f"[Drive] ✅ Token salvo em: {tok_path}")
+
+    service = build("drive", "v3", credentials=creds)
+    logger.info("[Drive] ✅ Autenticado no Google Drive (OAuth2).")
+    return service
+
+
 # ─────────────────────────────────────────────
 # CLASSE ORQUESTRADORA
 # ─────────────────────────────────────────────
@@ -151,62 +227,39 @@ def upload_file(service, local_path: str, folder_id: str) -> str | None:
 class DriveMonitor:
     """
     Orquestra o ciclo completo:
-      1. Autentica no Google Drive
-      2. Lista arquivos novos na pasta de entrada (DRIVE_INPUT_FOLDER_ID)
+      1. Autentica no Google Drive via OAuth2 (abre browser na 1ª vez)
+      2. Lista arquivos novos na pasta de entrada (GOOGLE_DRIVE_INPUT_FOLDER_ID)
       3. Baixa cada arquivo para data/downloads/
       4. Se for vídeo/áudio → transcreve com Whisper
       5. Envia o texto para o pipeline de geração de assets
-      6. Faz upload dos entregáveis para a pasta de saída (DRIVE_OUTPUT_FOLDER_ID)
+      6. Faz upload dos entregáveis para a pasta de saída (GOOGLE_DRIVE_OUTPUT_FOLDER_ID)
     """
 
     def __init__(self):
         from dotenv import load_dotenv
         load_dotenv()
 
-        self.input_folder_id = os.getenv("DRIVE_INPUT_FOLDER_ID", "")
-        self.output_folder_id = os.getenv("DRIVE_OUTPUT_FOLDER_ID", "")
-        self.download_dir = os.getenv("DOWNLOAD_DIR", "data/downloads")
+        # Suporta tanto o nome antigo quanto o novo da variável de entrada
+        self.input_folder_id = (
+            os.getenv("GOOGLE_DRIVE_INPUT_FOLDER_ID")
+            or os.getenv("DRIVE_INPUT_FOLDER_ID")
+            or ""
+        )
+        self.output_folder_id = (
+            os.getenv("GOOGLE_DRIVE_OUTPUT_FOLDER_ID")
+            or os.getenv("DRIVE_OUTPUT_FOLDER_ID")
+            or ""
+        )
+        self.download_dir = os.getenv("VIDEO_DOWNLOAD_DIR") or os.getenv("DOWNLOAD_DIR") or "data/downloads"
         self.output_dir = os.getenv("OUTPUT_DIR", "data/output")
 
         if not self.input_folder_id:
             raise EnvironmentError(
-                "[DriveMonitor] Variável DRIVE_INPUT_FOLDER_ID não definida no .env"
+                "[DriveMonitor] Variável GOOGLE_DRIVE_INPUT_FOLDER_ID não definida no .env"
             )
 
-        self.service = self._authenticate()
+        self.service = build_drive_service()
         logger.info("[DriveMonitor] Inicializado com sucesso.")
-
-    # ------------------------------------------------------------------
-    # Autenticação
-    # ------------------------------------------------------------------
-
-    def _authenticate(self):
-        """
-        Autentica com a conta de serviço do Google (service account).
-        Espera o arquivo JSON em GOOGLE_SERVICE_ACCOUNT_FILE ou credenciais
-        via GOOGLE_APPLICATION_CREDENTIALS.
-        """
-        from google.oauth2 import service_account
-        from googleapiclient.discovery import build
-
-        scopes = ["https://www.googleapis.com/auth/drive"]
-        credentials_path = os.getenv(
-            "GOOGLE_SERVICE_ACCOUNT_FILE",
-            os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "credentials.json"),
-        )
-
-        if not os.path.exists(credentials_path):
-            raise FileNotFoundError(
-                f"[DriveMonitor] Arquivo de credenciais não encontrado: {credentials_path}\n"
-                "Configure a variável GOOGLE_SERVICE_ACCOUNT_FILE no .env."
-            )
-
-        credentials = service_account.Credentials.from_service_account_file(
-            credentials_path, scopes=scopes
-        )
-        service = build("drive", "v3", credentials=credentials)
-        logger.info("[DriveMonitor] ✅ Autenticado no Google Drive.")
-        return service
 
     # ------------------------------------------------------------------
     # Processamento
@@ -217,10 +270,6 @@ class DriveMonitor:
         Ponto de entrada principal. Lista, baixa, transcreve (se necessário)
         e aciona o pipeline de geração de assets para cada arquivo.
         """
-        from app.transcriber import transcribe_media
-        from app.content_brief import extract_brief_from_text
-        from app.generate_assets import generate_assets_for_brief
-
         logger.info(
             f"[DriveMonitor] Verificando pasta de entrada: {self.input_folder_id}"
         )
