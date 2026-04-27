@@ -172,6 +172,10 @@ Transcrição do vídeo:
     return out_path
 
 
+# ─────────────────────────────────────────────────────────────
+# FUNÇÃO PÚBLICA — importada por drive_monitor e outros módulos
+# ─────────────────────────────────────────────────────────────
+
 def extract_brief_from_text(raw_text: str) -> str:
     """
     Alias público para uso direto pelo drive_monitor e outros módulos.
