@@ -44,5 +44,8 @@ data/processed/
 *.avi
 *.mkv
 
+# Template baixado automaticamente do Drive (não versionar)
+data/template_slides.pptx
+
 # Optional generated artifacts
 output/
