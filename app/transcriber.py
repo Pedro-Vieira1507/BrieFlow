@@ -27,9 +27,13 @@ def _get_ffmpeg_binary() -> str:
     """
     Resolve o binário do ffmpeg com a seguinte prioridade:
       1. Variável de ambiente FFMPEG_PATH (path completo)
-      2. 'ffmpeg' no PATH do sistema
-      3. imageio-ffmpeg (binário embutido — dispensa instalação manual no Windows)
+      2. imageio-ffmpeg (binário embutido — dispensa instalação manual no Windows)
+      3. 'ffmpeg' no PATH do sistema
     Levanta RuntimeError se nenhuma das opções estiver disponível.
+
+    NOTA: imageio-ffmpeg tem prioridade sobre o PATH do sistema porque no Windows
+    o subprocess.run(["ffmpeg", ...]) lança OSError/WinError 2 quando ffmpeg não
+    está instalado, o que encerrava o processo antes de tentar o fallback.
     """
     # 1. Variável de ambiente explicitada pelo usuário
     env_path = os.getenv("FFMPEG_PATH")
@@ -37,7 +41,20 @@ def _get_ffmpeg_binary() -> str:
         logger.debug(f"[Transcriber] ffmpeg via FFMPEG_PATH: {env_path}")
         return env_path
 
-    # 2. ffmpeg nativo no PATH do sistema
+    # 2. imageio-ffmpeg (binário embutido no pacote Python)
+    #    Tem prioridade sobre o PATH para evitar WinError 2 no Windows.
+    try:
+        import imageio_ffmpeg
+        ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
+        if ffmpeg_path and os.path.isfile(ffmpeg_path):
+            logger.info(
+                f"[Transcriber] ffmpeg via imageio-ffmpeg: {ffmpeg_path}"
+            )
+            return ffmpeg_path
+    except Exception as exc:
+        logger.debug(f"[Transcriber] imageio-ffmpeg não disponível: {exc}")
+
+    # 3. ffmpeg nativo no PATH do sistema
     try:
         result = subprocess.run(
             ["ffmpeg", "-version"],
@@ -47,26 +64,21 @@ def _get_ffmpeg_binary() -> str:
         if result.returncode == 0:
             logger.debug("[Transcriber] ffmpeg encontrado no PATH do sistema.")
             return "ffmpeg"
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
-
-    # 3. imageio-ffmpeg (binário embutido no pacote Python)
-    try:
-        import imageio_ffmpeg
-        ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
-        logger.info(
-            f"[Transcriber] ffmpeg via imageio-ffmpeg: {ffmpeg_path}"
-        )
-        return ffmpeg_path
-    except Exception:
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+        # FileNotFoundError e OSError cobrem WinError 2 no Windows
         pass
 
     raise RuntimeError(
         "[Transcriber] ffmpeg não encontrado.\n"
-        "Opções para corrigir:\n"
-        "  1. Instale imageio-ffmpeg:  pip install imageio-ffmpeg\n"
-        "  2. Instale o ffmpeg manualmente e adicione ao PATH\n"
-        "  3. Defina FFMPEG_PATH no .env apontando para o binário"
+        "Para corrigir, execute UM dos comandos abaixo:\n\n"
+        "  Opção 1 (recomendada — sem instalação manual):\n"
+        "    pip install imageio-ffmpeg\n\n"
+        "  Opção 2 (instalar ffmpeg no sistema):\n"
+        "    Windows: winget install ffmpeg   ou   choco install ffmpeg\n"
+        "    macOS  : brew install ffmpeg\n"
+        "    Linux  : sudo apt install ffmpeg\n\n"
+        "  Opção 3 (path manual no .env):\n"
+        "    FFMPEG_PATH=C:/caminho/para/ffmpeg.exe"
     )
 
 
@@ -221,6 +233,8 @@ def download_and_transcribe_from_drive(
     Busca todos os arquivos de vídeo/áudio na pasta do Google Drive,
     baixa localmente e transcreve cada um via Whisper.
     """
+    from googleapiclient.http import MediaIoBaseDownload
+
     SUPPORTED = {
         "video/mp4": ".mp4",
         "video/quicktime": ".mov",
