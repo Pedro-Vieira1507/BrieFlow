@@ -3,6 +3,7 @@ from pathlib import Path
 import json
 import os
 import logging
+import tempfile
 
 from dotenv import load_dotenv
 from google import genai
@@ -169,6 +170,54 @@ Transcrição do vídeo:
     out_path.write_text(content, encoding="utf-8")
     logger.info(f"[ContentBrief] Brief salvo: {out_path}")
     return out_path
+
+
+def extract_brief_from_text(raw_text: str) -> str:
+    """
+    Alias público para uso direto pelo drive_monitor e outros módulos.
+
+    Recebe o texto bruto da transcrição (string), chama o Gemini para
+    estruturar o brief e retorna o conteúdo JSON como string.
+
+    Se a API Gemini não estiver configurada (GEMINI_API_KEY ausente),
+    retorna o próprio texto bruto como fallback para não travar o pipeline.
+
+    Args:
+        raw_text: Texto bruto da transcrição ou documento.
+
+    Returns:
+        String com o JSON do brief estruturado (ou texto bruto em fallback).
+    """
+    try:
+        # Escreve em arquivo temporário para reutilizar build_brief_for_file
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=".txt",
+            encoding="utf-8",
+            delete=False,
+        ) as tmp:
+            tmp.write(raw_text)
+            tmp_path = Path(tmp.name)
+
+        brief_path = build_brief_for_file(tmp_path)
+        result = brief_path.read_text(encoding="utf-8")
+
+        # Limpeza dos temporários
+        tmp_path.unlink(missing_ok=True)
+        brief_path.unlink(missing_ok=True)
+
+        return result
+
+    except RuntimeError as e:
+        # GEMINI_API_KEY não configurado — retorna texto bruto como fallback
+        logger.warning(
+            f"[ContentBrief] Gemini não configurado, usando texto bruto como brief: {e}"
+        )
+        return raw_text
+    except Exception as e:
+        logger.error(f"[ContentBrief] Erro em extract_brief_from_text: {e}")
+        # Fallback: retorna o texto bruto para não travar o pipeline
+        return raw_text
 
 
 def build_brief_from_drive(
