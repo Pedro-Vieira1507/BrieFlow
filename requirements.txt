@@ -4,7 +4,10 @@ google-auth-oauthlib>=1.2.0
 google-auth-httplib2>=0.2.0
 google-api-python-client>=2.125.0
 
-# LLM
+# Google Gemini SDK (usado em content_brief.py)
+google-genai>=1.0.0
+
+# LLM + TTS + Whisper
 openai>=1.30.0
 
 # Documentos
