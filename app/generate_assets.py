@@ -1,378 +1,365 @@
-"""generate_assets.py — Orquestra a geração dos 8 materiais de marketing DLAB.
-
-Fluxo completo por arquivo de brief:
-  1. Lê o brief em data/inbox/*.txt
-  2. Chama a API do LLM para cada um dos 8 materiais
-  3. Salva os outputs em data/processed/<nome_campanha>/:
-       - slides.txt              → slides_ppt.py  → slides.pptx  (template do Drive)
-       - ficha_tecnica.txt       → ficha_pdf.py   → ficha_tecnica.pdf
-       - podcast_roteiro.txt     → podcast_tts.py → podcast.mp3
-       - email_revendedores.txt
-       - email_cliente_final.txt
-       - posts_social.txt
-       - roteiro_video.txt
-       - folheto_a4.txt
-"""
-from __future__ import annotations
-
-import logging
+# generate_assets.py
 import os
-import re
-from pathlib import Path
-
+import logging
 from dotenv import load_dotenv
+from openai import OpenAI
+
+from app.ficha_pdf import save_ficha_as_pdf
+from app.slides_ppt import (
+    build_presentation_from_template,
+    download_template_from_drive,
+    parse_slides_content,
+)
+from app.podcast_tts import generate_podcast_audio
 
 load_dotenv()
-
 logger = logging.getLogger(__name__)
 
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4o")
 
-# ---------------------------------------------------------------------------
-# LLM client helper
-# ---------------------------------------------------------------------------
 
-def _get_llm_client():
-    """Retorna (client, model_name) para o LLM configurado no .env."""
-    provider = os.getenv("LLM_PROVIDER", "openai").strip().lower()
+# ─────────────────────────────────────────────
+# PROMPT BUILDERS
+# ─────────────────────────────────────────────
 
-    if provider == "openai":
-        from openai import OpenAI
-        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY", ""))
-        model  = os.getenv("OPENAI_MODEL", "gpt-4o")
-        return client, model
+def build_ficha_prompt(brief: str) -> str:
+    return f"""Você é um especialista em produtos laboratoriais da Forlab.
+Com base no briefing abaixo, gere uma FICHA TÉCNICA completa para a campanha
+\"Compre 3 Leve 4 — DLAB\".
 
-    if provider == "perplexity":
-        from openai import OpenAI
-        client = OpenAI(
-            api_key=os.getenv("PERPLEXITY_API_KEY", ""),
-            base_url="https://api.perplexity.ai",
+A ficha deve cobrir obrigatoriamente as 7 subcategorias DLAB:
+1. Vidraria
+2. Plásticos
+3. Reagentes
+4. Equipamentos
+5. EPI
+6. Descartáveis
+7. Papelaria Técnica
+
+Para cada subcategoria, inclua:
+- Nome dos produtos elegíveis
+- Código SKU (se disponível)
+- Faixa de preço sugerida
+- Pontos de diferenciação técnica
+- Observações de uso/armazenamento
+
+Formato de saída: Markdown estruturado com ## para cada subcategoria.
+
+BRIEFING:
+{brief}"""
+
+
+def build_slides_prompt(brief: str) -> str:
+    return f"""Você é um especialista em apresentações comerciais e marketing B2B.
+Com base no briefing abaixo, crie o CONTEÚDO para uma apresentação PowerPoint
+da campanha \"Compre 3 Leve 4 — DLAB\" da Forlab.
+
+Gere exatamente 10 slides no formato:
+SLIDE 1 | <Título>
+- <bullet 1>
+- <bullet 2>
+- <bullet 3>
+
+SLIDE 2 | <Título>
+...
+
+Estrutura recomendada:
+- Slide 1: Capa (Título da campanha + subtítulo)
+- Slide 2: Sobre a Forlab
+- Slide 3: O que é a campanha Compre 3 Leve 4
+- Slide 4-8: Uma subcategoria DLAB por slide (Vidraria, Plásticos, Reagentes, Equipamentos, EPI)
+- Slide 9: Descartáveis + Papelaria Técnica
+- Slide 10: Como participar / CTA
+
+BRIEFING:
+{brief}"""
+
+
+def build_podcast_prompt(brief: str) -> str:
+    return f"""Você é um roteirista de podcast de negócios e marketing B2B.
+Com base no briefing abaixo, escreva um ROTEIRO COMPLETO para um episódio de podcast
+sobre a campanha \"Compre 3 Leve 4 — DLAB\" da Forlab.
+
+O roteiro deve ter entre 800 e 1200 palavras e incluir:
+
+[ABERTURA] — Saudação + apresentação do tema (2-3 frases)
+[CONTEXTO] — Por que a campanha existe, o problema que resolve
+[LINHA DLAB] — Apresentação das 7 subcategorias: Vidraria, Plásticos, Reagentes,
+               Equipamentos, EPI, Descartáveis, Papelaria Técnica
+[OFERTA] — Mecânica do Compre 3 Leve 4, como funciona na prática
+[BENEFÍCIOS] — Para o revendedor e para o cliente final
+[CTA] — Como participar, onde encontrar, próximos passos
+[ENCERRAMENTO] — Frase de impacto + despedida
+
+Tom: Profissional mas acessível. Direto ao ponto. Sem jargões excessivos.
+Escreva em português brasileiro.
+
+BRIEFING:
+{brief}"""
+
+
+def build_folheto_a4_prompt(brief: str) -> str:
+    return f"""Você é um redator especialista em materiais promocionais para laboratórios.
+Com base no briefing abaixo, crie o TEXTO COMPLETO para um FOLHETO A4 impresso
+da campanha \"Compre 3 Leve 4 — DLAB\" da Forlab.
+
+O folheto deve conter:
+[CABEÇALHO] — Título chamativo da campanha (máx. 10 palavras)
+[SUBTÍTULO] — Reforço do benefício (máx. 15 palavras)
+[DESTAQUE CENTRAL] — Bloco visual: \"Compre 3 produtos DLAB, leve o 4º grátis!\"
+[CATEGORIAS] — Lista visual das 7 subcategorias com 1 produto destaque cada
+[CONDIÇÕES] — Validade, como participar, restrições
+[RODAPÉ] — Site, WhatsApp, e-mail de contato da Forlab
+
+Tom: Impactante, claro e comercial. Linguagem para cliente final.
+
+BRIEFING:
+{brief}"""
+
+
+def build_emails_revendedores_prompt(brief: str) -> str:
+    return f"""Você é um especialista em e-mail marketing B2B para distribuidores.
+Com base no briefing abaixo, escreva UMA SEQUÊNCIA DE 2 E-MAILS para revendedores
+sobre a campanha \"Compre 3 Leve 4 — DLAB\" da Forlab.
+
+E-MAIL 1 — Lançamento da campanha:
+- Assunto impactante
+- Apresentação da mecânica
+- Benefícios de margem para o revendedor
+- CTA: acessar tabela de preços ou falar com representante
+
+E-MAIL 2 — Lembrete (enviar 5 dias depois):
+- Assunto com senso de urgência
+- Reforço dos produtos mais rentáveis
+- Depoimento ou case de sucesso fictício
+- CTA: Fechar pedido agora
+
+Tom: Profissional, parceiro, focado em negócio.
+
+BRIEFING:
+{brief}"""
+
+
+def build_emails_cliente_final_prompt(brief: str) -> str:
+    return f"""Você é um especialista em e-mail marketing B2C para laboratórios.
+Com base no briefing abaixo, escreva UMA SEQUÊNCIA DE 3 E-MAILS para cliente final
+sobre a campanha \"Compre 3 Leve 4 — DLAB\" da Forlab.
+
+E-MAIL 1 (Topo do funil) — Conscientização:
+- Assunto: curiosidade/benefício
+- Apresenta o problema (necessidade de suprimentos)
+- Introduz a solução Forlab/DLAB
+
+E-MAIL 2 (Meio do funil) — Consideração:
+- Assunto: prova social ou dado
+- Detalha a campanha e os produtos
+- Lista as 7 subcategorias com exemplos práticos
+
+E-MAIL 3 (Fundo do funil) — Conversão:
+- Assunto: urgência/oferta
+- Mecânica clara do Compre 3 Leve 4
+- CTA direto: comprar agora / falar com consultor
+
+Tom: Educativo, confiável, com senso de oportunidade.
+
+BRIEFING:
+{brief}"""
+
+
+def build_posts_social_prompt(brief: str) -> str:
+    return f"""Você é um social media especialista em marcas B2B de laboratório.
+Com base no briefing abaixo, crie 6 POSTS para redes sociais da Forlab
+sobre a campanha \"Compre 3 Leve 4 — DLAB\".
+
+- 2 posts para LinkedIn (tom profissional, foco em revendedores e gestores)
+- 2 posts para Facebook (tom mais acessível, foco em clientes finais)
+- 2 posts para Instagram (tom visual e dinâmico, com sugestão de hashtags)
+
+Cada post deve ter:
+- Texto principal (máx. 150 palavras)
+- Sugestão de CTA
+- Para Instagram: lista de 5-8 hashtags relevantes
+- Sugestão de tipo de imagem/visual a acompanhar
+
+BRIEFING:
+{brief}"""
+
+
+def build_roteiro_video_prompt(brief: str) -> str:
+    return f"""Você é um roteirista especialista em vídeos curtos para redes sociais B2B.
+Com base no briefing abaixo, crie um ROTEIRO PARA VÍDEO CURTO (Reels/YouTube Shorts)
+sobre a campanha \"Compre 3 Leve 4 — DLAB\" da Forlab.
+
+O roteiro deve ter exatamente 4 cenas para um vídeo de 25-35 segundos:
+
+CENA 1 (0-5s) — GANCHO: Frase de impacto ou pergunta instigante (narração + texto na tela)
+CENA 2 (5-15s) — PROBLEMA/CONTEXTO: O desafio do laboratório e como a Forlab resolve
+CENA 3 (15-25s) — SOLUÇÃO: A campanha Compre 3 Leve 4 — produtos destaque DLAB
+CENA 4 (25-35s) — CTA: Call-to-action claro + onde acessar
+
+Para cada cena, especifique:
+- Narração (texto falado)
+- Texto na tela (legenda ou overlay)
+- Sugestão de imagem/clipe
+- Duração em segundos
+
+BRIEFING:
+{brief}"""
+
+
+# ─────────────────────────────────────────────
+# LLM + HELPERS
+# ─────────────────────────────────────────────
+
+def call_llm_api(prompt: str, temperature: float = 0.7) -> str:
+    """
+    Envia um prompt para o modelo LLM configurado e retorna o texto gerado.
+
+    Args:
+        prompt: Texto completo do prompt.
+        temperature: Criatividade da resposta (0.0 = determinístico, 1.0 = criativo).
+
+    Returns:
+        Texto gerado pelo modelo.
+    """
+    try:
+        logger.info(f"[LLM] Chamando {LLM_MODEL} (temperature={temperature})...")
+        response = client.chat.completions.create(
+            model=LLM_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=temperature,
+            max_tokens=4096,
         )
-        model = os.getenv("PERPLEXITY_MODEL", "sonar-pro")
-        return client, model
+        content = response.choices[0].message.content or ""
+        logger.info(f"[LLM] ✅ Resposta recebida ({len(content)} caracteres)")
+        return content
+    except Exception as e:
+        logger.error(f"[LLM] Erro na chamada da API: {e}")
+        raise
 
-    if provider == "gemini":
-        import google.generativeai as genai
-        genai.configure(api_key=os.getenv("GOOGLE_GEMINI_API_KEY", ""))
-        model = os.getenv("GEMINI_MODEL", "gemini-1.5-pro")
-        return genai, model
-
-    raise ValueError(f"LLM_PROVIDER desconhecido: '{provider}'. Use openai, perplexity ou gemini.")
-
-
-def call_llm_api(system_prompt: str, user_content: str, temperature: float = 0.7) -> str:
-    """Envia o prompt ao LLM e devolve o texto gerado."""
-    provider = os.getenv("LLM_PROVIDER", "openai").strip().lower()
-    client, model = _get_llm_client()
-
-    if provider == "gemini":
-        full_prompt = f"{system_prompt}\n\n---\n\n{user_content}"
-        response    = client.GenerativeModel(model).generate_content(full_prompt)
-        return response.text.strip()
-
-    response = client.chat.completions.create(
-        model=model,
-        temperature=temperature,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user",   "content": user_content},
-        ],
-    )
-    return response.choices[0].message.content.strip()
-
-
-# ---------------------------------------------------------------------------
-# Example text loader
-# ---------------------------------------------------------------------------
 
 def load_example_text(asset_key: str) -> str:
     """
-    Carrega um texto de exemplo para o asset_key, se existir.
-    Os exemplos ficam em data/examples/<asset_key>.txt
+    Carrega texto de exemplo da pasta data/examples/ para um determinado asset.
+    Usado como fallback ou referência de estilo.
     """
-    examples_dir = Path("data/examples")
-    examples_dir.mkdir(parents=True, exist_ok=True)
-    path = examples_dir / f"{asset_key}.txt"
-    if path.exists():
-        return path.read_text(encoding="utf-8").strip()
+    examples_map = {
+        "ficha":               "ficha_tecnica_exemplo.txt",
+        "slides":              "slides_exemplo.txt",
+        "podcast":             "podcast_exemplo.txt",
+        "folheto_a4":          "folheto_a4_exemplo.txt",
+        "emails_revendedores": "emails_revendedores_exemplo.txt",
+        "emails_cliente_final":"emails_cliente_final_exemplo.txt",
+        "posts_social":        "posts_social_exemplo.txt",
+        "roteiro_video":       "roteiro_video_exemplo.txt",
+    }
+    filename = examples_map.get(asset_key)
+    if not filename:
+        return ""
+    path = os.path.join("data", "examples", filename)
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read()
     return ""
 
 
-# ---------------------------------------------------------------------------
-# Prompt builders — um por material
-# ---------------------------------------------------------------------------
+# ─────────────────────────────────────────────
+# PIPELINE PRINCIPAL
+# ─────────────────────────────────────────────
 
-SYSTEM_BASE = (
-    "Você é um especialista em marketing técnico para o laboratório Forlab, "
-    "focado na linha de diagnóstico DLAB (kits para veterinários e técnicos). "
-    "A campanha atual é 'Compre 3 Leve 4'. "
-    "Escreva em português do Brasil. Seja específico, persuasivo e use as informações "
-    "da transcrição fornecida."
-)
-
-
-def build_slides_prompt(brief: str) -> tuple[str, str]:
-    system = (
-        f"{SYSTEM_BASE}\n\n"
-        "Crie o conteúdo para uma apresentação de slides de capacitação técnica de revendedores DLAB. "
-        "Formato obrigatório:\n"
-        "Slide 1 - Título: <título da apresentação>\n"
-        "Slide 2 - Agenda: <tópico 1> | <tópico 2> | <tópico 3>\n"
-        "Slide 3 - Sobre o DLAB: <3 a 5 bullets sobre os kits DLAB>\n"
-        "Slide 4 - Subcategorias: <as 7 subcategorias: Canino, Felino, Bovino, Equino, Suíno, Avícola, Outros>\n"
-        "Slide 5 - Detalhamento: <especificações técnicas principais>\n"
-        "Slide 6 - Aplicações Clínicas: <3 a 5 casos de uso>\n"
-        "Slide 7 - Diferenciais Forlab: <vantagens competitivas>\n"
-        "Slide 8 - A Oferta: Compre 3 Leve 4 — <descrição da promoção>\n"
-        "Slide 9 - Ecossistema Forlab: <outros produtos/serviços Forlab que complementam o DLAB>\n"
-        "Slide 10 - Próximos Passos: <CTA para revendedores + contatos>\n"
-        "Use marcadores com '- ' para bullets. Máximo 5 bullets por slide."
-    )
-    return system, brief
-
-
-def build_ficha_prompt(brief: str) -> tuple[str, str]:
-    system = (
-        f"{SYSTEM_BASE}\n\n"
-        "Gere uma Ficha Técnica completa dos kits DLAB para vendedores e revendedores. "
-        "Estruture com seções em MAIÚSCULAS seguidas de tópicos. Inclua obrigatoriamente:\n"
-        "DESCRIÇÃO DO PRODUTO\n"
-        "SUBCATEGORIAS DISPONÍVEIS (Canino, Felino, Bovino, Equino, Suíno, Avícola, Outros — detalhe cada uma)\n"
-        "ESPECIFICAÇÕES TÉCNICAS\n"
-        "INDICAÇÕES E CONTRAINDICAÇÕES\n"
-        "COMO USAR — PASSO A PASSO\n"
-        "VANTAGENS COMPETITIVAS\n"
-        "PÚBLICO-ALVO\n"
-        "PREÇO SUGERIDO E CONDIÇÕES COMERCIAIS\n"
-        "SUPORTE E CONTATO FORLAB\n"
-        "Use formato 'Chave: Valor' onde aplicável."
-    )
-    return system, brief
-
-
-def build_podcast_prompt(brief: str) -> tuple[str, str]:
-    system = (
-        f"{SYSTEM_BASE}\n\n"
-        "Escreva um roteiro completo de podcast de vendas chamado 'DLAB em Foco' (duração ~8 min, ~1200 palavras). "
-        "Estrutura:\n"
-        "[ABERTURA] Saudação animada, apresentação do tema do episódio e da promoção Compre 3 Leve 4.\n"
-        "[LINHA DLAB] Explique cada uma das 7 subcategorias: Canino, Felino, Bovino, Equino, Suíno, Avícola, Outros.\n"
-        "[POR QUE VENDER] 3 argumentos de negócio para o revendedor incluir DLAB no portfólio.\n"
-        "[A OFERTA] Detalhes da promoção Compre 3 Leve 4: como funciona, prazo, como pedir.\n"
-        "[CTA FINAL] Convite para contato, site e encerramento.\n"
-        "Tom: conversacional, entusiasmado, educativo. "
-        "NÃO inclua indicações de música ou efeitos sonoros. Escreva apenas o texto falado."
-    )
-    return system, brief
-
-
-def build_folheto_a4_prompt(brief: str) -> tuple[str, str]:
-    system = (
-        f"{SYSTEM_BASE}\n\n"
-        "Crie o conteúdo textual de um folheto A4 frente e verso para cliente final (veterinários e clínicos). "
-        "Estruture com 7 blocos de conteúdo, cada um com um título impactante e 2-3 linhas de texto:\n"
-        "BLOCO 1 — HEADLINE PRINCIPAL (chamada de atenção)\n"
-        "BLOCO 2 — O QUE É O DLAB (apresentação dos kits)\n"
-        "BLOCO 3 — PARA QUEM É (espécies / indicações)\n"
-        "BLOCO 4 — POR QUE ESCOLHER (diferenciais)\n"
-        "BLOCO 5 — A OFERTA COMPRE 3 LEVE 4 (destaque visual textual)\n"
-        "BLOCO 6 — DEPOIMENTO / PROVA SOCIAL (crie um depoimento fictício convincente de um veterinário)\n"
-        "BLOCO 7 — CALL-TO-ACTION (onde comprar / contato / QR code placeholder)\n"
-    )
-    return system, brief
-
-
-def build_emails_revendedores_prompt(brief: str) -> tuple[str, str]:
-    system = (
-        f"{SYSTEM_BASE}\n\n"
-        "Escreva uma sequência de 2 e-mails para revendedores sobre a campanha Compre 3 Leve 4 DLAB:\n"
-        "E-MAIL 1 — LANÇAMENTO DA CAMPANHA:\n"
-        "  Assunto: <linha de assunto impactante>\n"
-        "  Corpo: anúncio da promoção, condições comerciais, estoque, prazo e CTA para pedido.\n"
-        "E-MAIL 2 — LEMBRETE / URGÊNCIA (enviar 5 dias antes do fim):\n"
-        "  Assunto: <linha de assunto com urgência>\n"
-        "  Corpo: reforço da oportunidade, destaque de quem já comprou (prova social genérica), CTA final.\n"
-        "Tom: B2B, profissional, direto ao ponto."
-    )
-    return system, brief
-
-
-def build_emails_cliente_final_prompt(brief: str) -> tuple[str, str]:
-    system = (
-        f"{SYSTEM_BASE}\n\n"
-        "Escreva uma sequência de 3 e-mails para clientes finais (veterinários / clínicas) sobre o DLAB:\n"
-        "E-MAIL 1 — TOPO DE FUNIL (Conscientização):\n"
-        "  Assunto: <curiosidade ou problema que o produto resolve>\n"
-        "  Corpo: problema de diagnóstico no dia a dia clínico + como o DLAB resolve.\n"
-        "E-MAIL 2 — MEIO DE FUNIL (Consideração):\n"
-        "  Assunto: <benefício específico ou comparação>\n"
-        "  Corpo: diferenciais técnicos, facilidade de uso, resultado rápido + CTA para solicitar amostra/orçamento.\n"
-        "E-MAIL 3 — FUNDO DE FUNIL (Conversão — Oferta):\n"
-        "  Assunto: <urgência + benefício direto>\n"
-        "  Corpo: destaque da promoção Compre 3 Leve 4, prazo, como pedir, CTA claro.\n"
-        "Tom: educativo, empático, voltado ao profissional de saúde animal."
-    )
-    return system, brief
-
-
-def build_posts_social_prompt(brief: str) -> tuple[str, str]:
-    system = (
-        f"{SYSTEM_BASE}\n\n"
-        "Crie 6 posts de mídia social para a campanha DLAB Compre 3 Leve 4:\n"
-        "POST 1 — LinkedIn (lançamento da campanha, tom profissional, 150-200 palavras + 5 hashtags)\n"
-        "POST 2 — LinkedIn (conteúdo educativo sobre diagnóstico rápido, 120-150 palavras + 5 hashtags)\n"
-        "POST 3 — Facebook (post de engajamento com pergunta, 80-100 palavras + 3 hashtags)\n"
-        "POST 4 — Facebook (depoimento fictício de revendedor, 80-100 palavras + 3 hashtags)\n"
-        "POST 5 — Instagram (legenda para imagem de produto, 60-80 palavras + 10 hashtags)\n"
-        "POST 6 — Instagram (legenda com countdown / urgência, 60-80 palavras + 10 hashtags)\n"
-        "Formate cada post com cabeçalho: '=== POST N — PLATAFORMA ==='"
-    )
-    return system, brief
-
-
-def build_roteiro_video_prompt(brief: str) -> tuple[str, str]:
-    system = (
-        f"{SYSTEM_BASE}\n\n"
-        "Escreva um roteiro para vídeo curto de 15-30 segundos (Reels/YouTube Shorts) sobre a campanha DLAB. "
-        "Estruture em 4 cenas:\n"
-        "CENA 1 — GANCHO (0-3s): frase de abertura que prende atenção imediata\n"
-        "CENA 2 — PROBLEMA/SOLUÇÃO (3-12s): dor do veterinário + como o DLAB resolve em uma linha\n"
-        "CENA 3 — OFERTA (12-22s): destaque da promoção Compre 3 Leve 4 com condições\n"
-        "CENA 4 — CTA (22-30s): onde comprar / contato / link na bio\n"
-        "Para cada cena informe: TEXTO EM TELA, NARRAÇÃO (fala) e SUGESTÃO DE IMAGEM/AÇÃO.\n"
-        "Tom: dinâmico, visual, urgente."
-    )
-    return system, brief
-
-
-# ---------------------------------------------------------------------------
-# Parser de conteúdo
-# ---------------------------------------------------------------------------
-
-def parse_content(raw_text: str, markers: list[str] | None = None) -> dict[str, str]:
+def generate_assets_for_brief(
+    brief_text: str,
+    output_folder: str,
+    drive_service=None,
+) -> dict[str, str]:
     """
-    Divide o texto gerado pelo LLM em partes usando marcadores.
-    Se markers for None, devolve {"full": raw_text}.
-    """
-    if not markers:
-        return {"full": raw_text}
+    Executa o pipeline completo de geração de materiais de marketing
+    para um briefing de campanha.
 
-    result: dict[str, str] = {}
-    pattern = "|".join(re.escape(m) for m in markers)
-    parts   = re.split(f"({pattern})", raw_text, flags=re.IGNORECASE)
-
-    current_key = "header"
-    buffer: list[str] = []
-    marker_index = 0
-
-    for part in parts:
-        is_marker = any(part.strip().upper() == m.upper() for m in markers)
-        if is_marker:
-            if buffer:
-                result[current_key] = "\n".join(buffer).strip()
-                buffer = []
-            current_key  = markers[marker_index] if marker_index < len(markers) else part.strip()
-            marker_index += 1
-        else:
-            buffer.append(part)
-
-    if buffer:
-        result[current_key] = "\n".join(buffer).strip()
-
-    return result
-
-
-# ---------------------------------------------------------------------------
-# Output savers
-# ---------------------------------------------------------------------------
-
-def save_to_output(content: str, output_path: Path) -> Path:
-    """Salva texto em arquivo, criando o diretório se necessário."""
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(content, encoding="utf-8")
-    logger.info(f"[SALVO] {output_path}")
-    return output_path
-
-
-def _run_post_processing(txt_path: Path, asset_key: str) -> None:
-    """
-    Executa o pós-processamento específico de cada asset:
-      slides   → gera .pptx via Drive template
-      ficha    → gera .pdf
-      podcast  → gera .mp3 via TTS
-    """
-    if asset_key == "slides":
-        try:
-            from app.slides_ppt import slides_txt_to_ppt
-            pptx_path = slides_txt_to_ppt(txt_path)
-            logger.info(f"[PPTX] {pptx_path}")
-        except Exception as exc:
-            logger.error(f"[ERRO slides→pptx] {exc}")
-
-    elif asset_key == "ficha":
-        try:
-            from app.ficha_pdf import ficha_txt_to_pdf
-            pdf_path = ficha_txt_to_pdf(txt_path)
-            logger.info(f"[PDF] {pdf_path}")
-        except Exception as exc:
-            logger.error(f"[ERRO ficha→pdf] {exc}")
-
-    elif asset_key == "podcast":
-        try:
-            from app.podcast_tts import podcast_txt_to_mp3
-            mp3_path = podcast_txt_to_mp3(txt_path)
-            logger.info(f"[MP3] {mp3_path}")
-        except Exception as exc:
-            logger.error(f"[ERRO podcast→mp3] {exc}")
-
-
-# ---------------------------------------------------------------------------
-# Pipeline principal
-# ---------------------------------------------------------------------------
-
-def generate_assets_for_brief(brief_path: Path | str) -> dict[str, Path]:
-    """
-    Gera todos os 8 materiais de marketing a partir de um arquivo de brief.
+    Fluxo por asset:
+      1. Monta o prompt específico com o briefing
+      2. Chama o LLM para gerar o conteúdo
+      3. Salva no formato correto (.pdf, .pptx, .mp3, .txt)
 
     Args:
-        brief_path: caminho do .txt com a transcrição/brief da campanha
+        brief_text: Texto do briefing extraído do arquivo de reunião.
+        output_folder: Pasta local onde os arquivos gerados serão salvos.
+        drive_service: Serviço autenticado do Google Drive API (necessário
+                       para baixar o template de slides).
 
     Returns:
-        dict mapeando asset_key → Path do arquivo .txt gerado
+        Dict com {asset_key: caminho_local_do_arquivo_gerado}.
     """
-    brief_path = Path(brief_path)
-    brief_text = brief_path.read_text(encoding="utf-8").strip()
+    os.makedirs(output_folder, exist_ok=True)
 
-    campaign_name = brief_path.stem
-    output_dir    = Path("data/processed") / campaign_name
-    output_dir.mkdir(parents=True, exist_ok=True)
+    # Baixa o template de slides do Drive (apenas na primeira execução)
+    if drive_service:
+        try:
+            download_template_from_drive(drive_service)
+        except Exception as e:
+            logger.warning(
+                f"[Pipeline] Não foi possível baixar template do Drive: {e}. "
+                "Usando template local se disponível."
+            )
 
-    logger.info(f"[PIPELINE] Iniciando geração para: {campaign_name}")
-
-    # (key, nome_arquivo, builder_fn, temperature)
-    assets_pipeline: list[tuple[str, str, callable, float]] = [
-        ("slides",               "slides.txt",               build_slides_prompt,               0.5),
-        ("ficha",                "ficha_tecnica.txt",         build_ficha_prompt,                0.4),
-        ("podcast",              "podcast_roteiro.txt",       build_podcast_prompt,              0.8),
-        ("folheto_a4",           "folheto_a4.txt",            build_folheto_a4_prompt,           0.7),
-        ("emails_revendedores",  "email_revendedores.txt",    build_emails_revendedores_prompt,  0.7),
-        ("emails_cliente_final", "email_cliente_final.txt",   build_emails_cliente_final_prompt, 0.7),
-        ("posts_social",         "posts_social.txt",          build_posts_social_prompt,         0.8),
-        ("roteiro_video",        "roteiro_video.txt",         build_roteiro_video_prompt,        0.8),
+    # Declaração do pipeline:
+    # (chave, nome_do_arquivo, função_builder, temperatura, formato_de_saída)
+    assets_pipeline = [
+        ("ficha",               "ficha_tecnica.pdf",          build_ficha_prompt,               0.3,  "pdf"),
+        ("slides",              "apresentacao_dlab.pptx",     build_slides_prompt,              0.5,  "pptx"),
+        ("podcast",             "podcast_dlab.mp3",           build_podcast_prompt,             0.7,  "mp3"),
+        ("folheto_a4",          "folheto_a4.txt",             build_folheto_a4_prompt,          0.7,  "txt"),
+        ("emails_revendedores", "emails_revendedores.txt",    build_emails_revendedores_prompt, 0.6,  "txt"),
+        ("emails_cliente_final","emails_cliente_final.txt",   build_emails_cliente_final_prompt,0.6,  "txt"),
+        ("posts_social",        "posts_social.txt",           build_posts_social_prompt,        0.8,  "txt"),
+        ("roteiro_video",       "roteiro_video.txt",          build_roteiro_video_prompt,       0.75, "txt"),
     ]
 
-    generated: dict[str, Path] = {}
+    results: dict[str, str] = {}
 
-    for asset_key, filename, builder, temperature in assets_pipeline:
-        logger.info(f"[{asset_key.upper()}] Gerando...")
+    for key, filename, builder_fn, temp, fmt in assets_pipeline:
+        output_path = os.path.join(output_folder, filename)
+        logger.info(f"[Pipeline] ▶ Gerando: {key} → {filename} (formato: {fmt})")
+
         try:
-            system_prompt, user_content = builder(brief_text)
-            raw_output  = call_llm_api(system_prompt, user_content, temperature=temperature)
-            txt_path    = save_to_output(raw_output, output_dir / filename)
-            generated[asset_key] = txt_path
-            # Pós-processamento: converte txt → pptx / pdf / mp3
-            _run_post_processing(txt_path, asset_key)
-        except Exception as exc:
-            logger.error(f"[ERRO] {asset_key}: {exc}")
+            prompt = builder_fn(brief_text)
+            raw_text = call_llm_api(prompt, temperature=temp)
 
-    logger.info(f"[PIPELINE] Concluído. {len(generated)}/8 assets gerados em: {output_dir}")
-    return generated
+            if fmt == "pdf":
+                save_ficha_as_pdf(
+                    content=raw_text,
+                    output_path=output_path,
+                    title="Ficha Técnica DLAB — Compre 3 Leve 4",
+                )
+
+            elif fmt == "pptx":
+                slides_data = parse_slides_content(raw_text)
+                build_presentation_from_template(
+                    slides_content=slides_data,
+                    output_path=output_path,
+                )
+
+            elif fmt == "mp3":
+                generate_podcast_audio(
+                    script=raw_text,
+                    output_path=output_path,
+                )
+
+            else:  # txt
+                with open(output_path, "w", encoding="utf-8") as f:
+                    f.write(raw_text)
+
+            results[key] = output_path
+            logger.info(f"[Pipeline] ✅ {key} → {output_path}")
+
+        except Exception as e:
+            logger.error(f"[Pipeline] ❌ Erro ao gerar '{key}': {e}")
+            results[key] = f"ERRO: {e}"
+
+    logger.info(
+        f"[Pipeline] Pipeline concluído. "
+        f"{sum(1 for v in results.values() if not v.startswith('ERRO'))} de "
+        f"{len(results)} asset(s) gerado(s) com sucesso."
+    )
+    return results

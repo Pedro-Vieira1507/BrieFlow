@@ -1,53 +1,26 @@
-"""podcast_tts.py — Converte o roteiro de podcast (texto) em áudio MP3 via OpenAI TTS.
-
-Pré-requisito:
-  pip install openai
-
-Variáveis de ambiente (.env):
-  OPENAI_API_KEY   — chave da API OpenAI
-  TTS_VOICE        — voz a usar (padrão: "alloy"). Opções: alloy, echo, fable, onyx, nova, shimmer
-  TTS_MODEL        — modelo TTS (padrão: "tts-1"). Para maior qualidade: "tts-1-hd"
-  TTS_SPEED        — velocidade de fala, 0.25–4.0 (padrão: 1.0)
-
-Como funciona:
-  - Textos curtos (<= 4096 chars): enviados diretamente à API.
-  - Textos longos: divididos em blocos por pontuação/parágrafo e concatenados via pydub.
-"""
-from __future__ import annotations
-
-import logging
+# podcast_tts.py
 import os
-import re
-from pathlib import Path
-
+import logging
+import openai
 from dotenv import load_dotenv
 
 load_dotenv()
-
 logger = logging.getLogger(__name__)
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
-TTS_VOICE      = os.getenv("TTS_VOICE",  "alloy")
-TTS_MODEL      = os.getenv("TTS_MODEL",  "tts-1")
-TTS_SPEED      = float(os.getenv("TTS_SPEED", "1.0"))
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
-MAX_CHUNK_CHARS = 4096  # limite da API OpenAI TTS por chamada
+# Modelo e voz configuráveis via .env
+TTS_MODEL = os.getenv("TTS_MODEL", "tts-1-hd")
+TTS_VOICE = os.getenv("TTS_VOICE", "nova")  # nova | alloy | echo | fable | onyx | shimmer
+TTS_MAX_CHARS = 4096  # Limite por requisição da API OpenAI TTS
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _split_into_chunks(text: str, max_chars: int = MAX_CHUNK_CHARS) -> list[str]:
+def _split_into_chunks(text: str, max_chars: int = TTS_MAX_CHARS) -> list[str]:
     """
-    Divide o texto em blocos que respeitam os limites da API.
-    Tenta quebrar em parágrafos ou, se necessário, em frases.
+    Divide o roteiro em chunks respeitando quebras de parágrafo.
+    Garante que cada chunk não ultrapasse max_chars caracteres.
     """
-    if len(text) <= max_chars:
-        return [text]
-
-    # Tenta dividir por parágrafos duplos
-    paragraphs = re.split(r'\n\s*\n', text)
+    paragraphs = text.split("\n\n")
     chunks: list[str] = []
     current = ""
 
@@ -55,27 +28,25 @@ def _split_into_chunks(text: str, max_chars: int = MAX_CHUNK_CHARS) -> list[str]
         para = para.strip()
         if not para:
             continue
-        if len(current) + len(para) + 2 <= max_chars:
-            current = (current + "\n\n" + para).strip()
+        # Se o parágrafo sozinho já excede o limite, divide por frases
+        if len(para) > max_chars:
+            sentences = para.replace(". ", ".\n").split("\n")
+            for sentence in sentences:
+                sentence = sentence.strip()
+                if not sentence:
+                    continue
+                if len(current) + len(sentence) + 1 <= max_chars:
+                    current += (" " if current else "") + sentence
+                else:
+                    if current:
+                        chunks.append(current)
+                    current = sentence
+        elif len(current) + len(para) + 2 <= max_chars:
+            current += ("\n\n" if current else "") + para
         else:
             if current:
                 chunks.append(current)
-            # Parágrafo maior que o limite → divide por frase
-            if len(para) > max_chars:
-                sentences = re.split(r'(?<=[.!?])\s+', para)
-                sub = ""
-                for s in sentences:
-                    if len(sub) + len(s) + 1 <= max_chars:
-                        sub = (sub + " " + s).strip()
-                    else:
-                        if sub:
-                            chunks.append(sub)
-                        sub = s
-                if sub:
-                    chunks.append(sub)
-                current = ""
-            else:
-                current = para
+            current = para
 
     if current:
         chunks.append(current)
@@ -83,106 +54,63 @@ def _split_into_chunks(text: str, max_chars: int = MAX_CHUNK_CHARS) -> list[str]
     return chunks
 
 
-def _tts_chunk(client, text: str, voice: str, model: str, speed: float) -> bytes:
-    """Gera áudio para um único bloco de texto."""
-    response = client.audio.speech.create(
-        model=model,
-        voice=voice,
-        input=text,
-        speed=speed,
-        response_format="mp3",
-    )
-    return response.content
-
-
-def _concatenate_mp3(parts: list[bytes]) -> bytes:
+def generate_podcast_audio(script: str, output_path: str) -> str:
     """
-    Concatena múltiplos blobs MP3 em um único arquivo.
-    Usa pydub se disponível; senão faz concatenação binária simples.
-    """
-    if len(parts) == 1:
-        return parts[0]
+    Converte o roteiro completo do podcast em arquivo .mp3
+    usando a API de Text-to-Speech da OpenAI.
 
-    try:
-        from pydub import AudioSegment
-        import io
-
-        combined = AudioSegment.empty()
-        for part in parts:
-            segment = AudioSegment.from_mp3(io.BytesIO(part))
-            combined += segment
-
-        out = io.BytesIO()
-        combined.export(out, format="mp3")
-        return out.getvalue()
-
-    except ImportError:
-        logger.warning(
-            "[TTS] pydub não instalado — concatenando MP3 binariamente (pode causar artefatos). "
-            "Instale pydub + ffmpeg para qualidade perfeita."
-        )
-        return b"".join(parts)
-
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
-
-def podcast_txt_to_mp3(txt_path: Path | str, voice: str | None = None) -> Path:
-    """
-    Converte o arquivo de texto do roteiro de podcast em um arquivo MP3.
+    Processa o texto em chunks para respeitar o limite de 4096 caracteres
+    por requisição e concatena os segmentos em um único arquivo de áudio.
 
     Args:
-        txt_path : caminho do .txt gerado pelo LLM (roteiro do podcast)
-        voice    : voz TTS (padrão: valor de TTS_VOICE no .env ou 'alloy')
+        script: Texto completo do roteiro do podcast.
+        output_path: Caminho de saída do arquivo .mp3.
 
     Returns:
-        caminho do .mp3 gerado
+        Caminho do arquivo .mp3 gerado.
 
     Raises:
-        ImportError  : se 'openai' não estiver instalado
-        ValueError   : se OPENAI_API_KEY não estiver configurado
-        RuntimeError : se a chamada à API falhar
+        openai.APIError: Em caso de erro na API OpenAI TTS.
     """
-    try:
-        from openai import OpenAI
-    except ImportError as exc:
-        raise ImportError(
-            "A biblioteca 'openai' é necessária para gerar áudio. "
-            "Instale com: pip install openai"
-        ) from exc
+    dest_dir = os.path.dirname(output_path)
+    if dest_dir:
+        os.makedirs(dest_dir, exist_ok=True)
 
-    if not OPENAI_API_KEY:
-        raise ValueError(
-            "OPENAI_API_KEY não configurado. Adicione ao arquivo .env."
-        )
-
-    txt_path  = Path(txt_path)
-    text      = txt_path.read_text(encoding="utf-8").strip()
-    voice_use = voice or TTS_VOICE
-
-    if not text:
-        raise ValueError(f"Arquivo de roteiro vazio: {txt_path}")
-
-    logger.info(f"[TTS] Iniciando geração de áudio | voz={voice_use} modelo={TTS_MODEL}")
-
-    client = OpenAI(api_key=OPENAI_API_KEY)
-    chunks = _split_into_chunks(text)
-    logger.info(f"[TTS] Texto dividido em {len(chunks)} bloco(s)")
+    chunks = _split_into_chunks(script)
+    total = len(chunks)
+    logger.info(
+        f"[PodcastTTS] Iniciando geração de áudio: {total} chunk(s), "
+        f"voz='{TTS_VOICE}', modelo='{TTS_MODEL}'"
+    )
 
     audio_parts: list[bytes] = []
-    for idx, chunk in enumerate(chunks, 1):
-        logger.info(f"[TTS] Gerando bloco {idx}/{len(chunks)} ({len(chunk)} chars)")
-        try:
-            audio_parts.append(_tts_chunk(client, chunk, voice_use, TTS_MODEL, TTS_SPEED))
-        except Exception as exc:
-            raise RuntimeError(
-                f"Falha ao gerar áudio para o bloco {idx}/{len(chunks)}: {exc}"
-            ) from exc
 
-    audio_bytes = _concatenate_mp3(audio_parts)
+    try:
+        for i, chunk in enumerate(chunks, start=1):
+            logger.info(
+                f"[PodcastTTS] Chunk {i}/{total} ({len(chunk)} caracteres)"
+            )
+            response = openai.audio.speech.create(
+                model=TTS_MODEL,
+                voice=TTS_VOICE,
+                input=chunk,
+            )
+            audio_parts.append(response.content)
 
-    mp3_path = txt_path.with_suffix(".mp3")
-    mp3_path.write_bytes(audio_bytes)
-    logger.info(f"[OK] Podcast MP3 gerado em: {mp3_path}")
-    return mp3_path
+        # Concatena todos os segmentos e salva como .mp3
+        with open(output_path, "wb") as f:
+            for part in audio_parts:
+                f.write(part)
+
+        size_kb = os.path.getsize(output_path) / 1024
+        logger.info(
+            f"[PodcastTTS] ✅ Áudio gerado: {output_path} ({size_kb:.1f} KB)"
+        )
+        return output_path
+
+    except openai.APIError as e:
+        logger.error(f"[PodcastTTS] Erro na API OpenAI TTS: {e}")
+        raise
+    except IOError as e:
+        logger.error(f"[PodcastTTS] Erro ao salvar arquivo de áudio: {e}")
+        raise
