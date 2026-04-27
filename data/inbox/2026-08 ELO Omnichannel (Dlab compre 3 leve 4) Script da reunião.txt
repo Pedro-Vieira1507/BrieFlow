@@ -1,0 +1,45 @@
+﻿📝 Observações
+9 de abr. de 2026
+Apresentação ELO Omnichannel (semanal)
+Convidados Thainah Henrique | Forlab Express Pedro Leira Thainah Mariane Costa | Forlab Express Pedro Leira André Felipe | Forlab Express Comercial Interno
+Anexos Apresentação ELO Omnichannel (semanal) 
+Registros da reunião Gravação 
+
+
+Resumo
+Revisão detalhada da nova campanha promocional de pipetadores Delab, focando na abrangência de estoque e estratégias de marketing integradas com o esclarecimento de regras de descontos e limites de alçada dos vendedores.
+
+Apresentação e Estrutura da Campanha
+A campanha Compre 3 Leve 4 da Delab foi apresentada, onde a quarta pipeta gratuita é o modelo de menor custo, processada em um pedido separado e representando 10% do valor total da venda. Todos os pipetadores Delab em estoque, abrangendo toda a linha liquid handling, estão inclusos na promoção, conforme confirmado pelas equipes.
+
+Estratégias de Marketing e Vendas
+As estratégias de divulgação incluem mídias sociais, pop-ups e banners no site, blog e captação de leads via Meta, com foco em cross-sell com a linha PCR e serviço de calibração RBC. Foi estabelecida uma bonificação para vendedores que atingirem R$ 30.000 em vendas dos produtos da campanha.
+
+Regras de Descontos e Alçada
+Foi definida a alçada de 5% de desconto para os vendedores, correspondendo ao aviso de venda a prazo no site, e negociações fora deste limite, ou que envolvam o acúmulo da pipeta grátis com altos descontos, requerem a aprovação de André Felipe. Foi decidido que o link promocional para a nova campanha de tubos e microtubos já está ativo no site para visualização dos vendedores.
+
+
+Detalhes
+* Apresentação da Campanha Compre 3 Leve 4 da Delab: Henrique da Forlab Express apresentou a campanha promocional de pipetadores Delab, onde o cliente compra três itens de livre escolha e recebe um quarto item gratuito. A quarta pipeta gratuita será o modelo de menor custo dentre os três itens adquiridos pelo cliente, sendo que a bonificação deve ser processada em um pedido separado, representando 10% do valor de venda dos três itens. Caso seja necessário aplicar um formato de desconto diferente que diminua a margem, como fracionar o valor do desconto nos itens, é necessário obter autorização de André.
+* Subcategorias de Pipetadores Delab e Estoque: As subcategorias de pipetadores Delab que fazem parte da campanha incluem micropipetas monocanal e multicanal, auxiliar de pipetagem motorizado, micropipetas eletrônicas, dispensadores, buretas digitais e repipetadores. Pamela Garbim confirmou que todos os pipetadores Delab em estoque se enquadram na campanha, o que Mariane Costa | Forlab Express sumarizou como toda a linha de manuseio de líquidos ("liquid handling") da Delab. Mailane Pinto | Forlab Express confirmou que, caso o cliente escolha três pipetas de alto valor agregado, a quarta bonificada seguirá a mesma linha, sendo a de menor valor.
+* Estratégias de Marketing e Vendas para a Campanha: As estratégias de divulgação da campanha incluem mídias sociais, um banner no site com a família de produtos Delab, testes com *pop-ups*, artigos de blog, e melhoria de ranqueamento. O Google e a captação de leads via Meta (Facebook e Instagram) serão trabalhados com o mote "Compre 3 Leve 4", além do uso de maletas de demonstração em campo, campanhas ativas de WhatsApp, e-mail marketing e automações de CRM. O *cross-sell* recomendado é a linha de PCR, suportes para micropipetas e ponteiras, e o serviço agregado de calibração RBC deve ser promovido, bem como a venda de produtos recorrentes.
+* Incentivo de Vendas e Brindes: Haverá uma bonificação para todo vendedor que atingir R$ 30.000 em vendas dos produtos da campanha. A Delab oferecerá como brinde 100 canetas em formato de pipeta, mas esta previsão de entrega é somente para julho, momento em que será promovida nas mídias sociais para atrair clientes.
+* Regras de Acúmulo de Descontos na Campanha: Mariane Costa | Forlab Express levantou a preocupação sobre clientes que buscam acumular descontos, descontos e ainda uma micropipeta grátis, necessitando de alinhamento sobre o que é aplicável. Henrique | Forlab Express esclareceu que o agregado da pipeta grátis pode ser incluído se o vendedor tiver alçada, mas não em casos excepcionais onde já foi concedido alto percentual de desconto. André Felipe | Forlab Express definiu que a alçada dos vendedores é de 5%, que corresponde ao valor de aviso do site vendendo a prazo, e qualquer negociação diferente disso deve ser levada à atenção dele.
+* Status das Campanhas Vigentes: Henrique | Forlab Express informou que, além da nova campanha "Compre 3 Leve 4" de pipetadores, cinco outras campanhas já estão em vigor, e mais duas estão em implementação (cashback e tubos/microtubos). O link promocional para a campanha de tubos e microtubos já foi criado no site, permitindo aos vendedores visualizar os produtos pertinentes.
+
+
+Próximas etapas sugeridas
+* [Henrique | Forlab Express] Definir Link: Definir a criação de um link dedicado da campanha com o time de cadastro.
+* [O grupo] Autorização Desconto: Obter autorização de André para aplicar formatos alternativos de desconto em pedidos de venda, especialmente fracionamento de valor.
+* [O grupo] Criar Banner: Criar banner no site com toda a família de produtos Delab.
+* [O grupo] Testar Popup: Testar a implementação de um popup no site.
+* [O grupo] Escrever Blog: Fazer artigo para blog sobre a campanha.
+* [O grupo] Melhorar Ranqueamento: Fazer melhoria de ranqueamento nas subcategorias de produtos Delab.
+* [O grupo] Trabalhar Google: Trabalhar as ferramentas Google no máximo possível.
+* [O grupo] Captar Leads: Captar leads utilizando Meta, Facebook e Instagram com o tema Compre 3 Leve 4.
+* [O grupo] Movimentar Mídias: Movimentar o YouTube e Reels com demonstrações de produto.
+* [Henrique | Forlab Express] Adicionar Alçada: Adicionar detalhadamente a alçada de 5% de desconto permitida para vendedores, conforme conversado com André.
+
+
+Revise as anotações do Gemini para checar se estão corretas. Confira dicas e saiba como o Gemini faz anotações
+Envie feedback sobre o uso do Gemini para criar notas breve pesquisa.

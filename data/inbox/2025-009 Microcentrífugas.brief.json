@@ -1,0 +1,70 @@
+{
+  "contexto_marca": {
+    "marca": "DLAB (via For Lab)",
+    "posicionamento": "Fornecedor de equipamentos laboratoriais de alta performance com foco em agilidade e disponibilidade de estoque.",
+    "segmento": "Equipamentos para laboratórios de pesquisa, clínicos e industriais.",
+    "publico_alvo_principal": "Gestores de laboratório, pesquisadores e compradores técnicos que buscam custo-benefício e pronta entrega."
+  },
+  "linha_produtos": {
+    "categoria_geral": "Microcentrífugas DLAB",
+    "subcategorias": [
+      {
+        "nome": "Microcentrífugas Refrigeradas",
+        "descricao": "Equipamentos de alta precisão para processamento de amostras sensíveis à temperatura (assumido).",
+        "principais_caracteristicas": [
+          "Controle preciso de temperatura",
+          "Alta velocidade de rotação",
+          "Design compacto para bancada"
+        ],
+        "diferenciais": [
+          "Pronta entrega",
+          "Excelente relação custo-benefício frente aos concorrentes",
+          "Alta confiabilidade em processos críticos"
+        ]
+      }
+    ]
+  },
+  "argumentos_comerciais": {
+    "beneficios_para_revendedor": [
+      "Suporte de marketing com materiais prontos (cards para WhatsApp)",
+      "Campanhas ativas gerando leads qualificados",
+      "Flexibilidade na negociação de preços para fechamento de grandes contas"
+    ],
+    "beneficios_para_cliente_final": [
+      "Disponibilidade imediata (pronta entrega)",
+      "Desconto promocional de 7% em itens selecionados",
+      "Equipamento essencial com performance superior para o laboratório"
+    ],
+    "motivos_para_comprar_agora": [
+      "Condições comerciais agressivas e imperdíveis",
+      "Estoque limitado com envio imediato",
+      "Oportunidade de upgrade tecnológico com custo reduzido"
+    ]
+  },
+  "argumentos_tecnicos": {
+    "performance": [
+      "Aceleração e desaceleração rápida (assumido)",
+      "Estabilidade térmica garantida em modelos refrigerados",
+      "Motor de alta eficiência para uso contínuo"
+    ],
+    "ergonomia": [
+      "Interface intuitiva para operação rápida (assumido)",
+      "Design otimizado para economia de espaço em bancada (assumido)"
+    ],
+    "seguranca_qualidade": [
+      "Construção robusta conforme normas laboratoriais (assumido)",
+      "Sistema de travamento de segurança (assumido)"
+    ]
+  },
+  "campanha_compre3_leve4": {
+    "descricao_oferta": "Campanha promocional de incentivo ao volume (assumido como estratégia padrão de mercado).",
+    "regras_principais": [
+      "Compra de 3 unidades garante a 4ª unidade como cortesia (assumido)",
+      "Válido para modelos específicos da linha DLAB (assumido)"
+    ],
+    "observacoes_importantes": [
+      "Necessário validar disponibilidade de estoque antes da oferta",
+      "Condições de desconto (ex: 7%) podem não ser cumulativas com a oferta de volume (assumido)"
+    ]
+  }
+}

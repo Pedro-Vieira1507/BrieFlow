@@ -1,0 +1,78 @@
+{
+  "contexto_marca": {
+    "marca": "DLAB",
+    "posicionamento": "Equipamentos de laboratório com excelente custo-benefício, foco em alta precisão e confiabilidade para rotinas de manuseio de líquidos.",
+    "segmento": "Instrumentação Científica / Liquid Handling",
+    "publico_alvo_principal": "Laboratórios de pesquisa, controle de qualidade, indústrias farmacêuticas e clínicas que buscam renovação de inventário com eficiência orçamentária."
+  },
+  "linha_produtos": {
+    "categoria_geral": "Pipetadores DLAB",
+    "subcategorias": [
+      {
+        "nome": "Micropipetas (Monocanal e Multicanal)",
+        "descricao": "Pipetas de volume variável com alta precisão para manipulação de líquidos em volumes micro.",
+        "principais_caracteristicas": [
+          "Design ergonômico",
+          "Leveza",
+          "Calibração simplificada"
+        ],
+        "diferenciais": [
+          "Excelente custo-benefício",
+          "Compatibilidade com ponteiras universais (assumido)"
+        ]
+      },
+      {
+        "nome": "Equipamentos de Manuseio de Líquidos (Eletrônicos e Dispensadores)",
+        "descricao": "Linha completa incluindo auxiliares de pipetagem motorizados, buretas digitais e repipetadores.",
+        "principais_caracteristicas": [
+          "Automação de processos",
+          "Display digital intuitivo"
+        ],
+        "diferenciais": [
+          "Redução de fadiga do operador",
+          "Alta repetibilidade"
+        ]
+      }
+    ]
+  },
+  "argumentos_comerciais": {
+    "beneficios_para_revendedor": [
+      "Campanha agressiva de vendas (Compre 3 Leve 4) para alavancar volume",
+      "Bonificação por atingimento de meta (R$ 30.000 em vendas)"
+    ],
+    "beneficios_para_cliente_final": [
+      "Renovação de estoque com custo reduzido (4ª unidade gratuita)",
+      "Possibilidade de cross-sell com serviços de calibração RBC"
+    ],
+    "motivos_para_comprar_agora": [
+      "Promoção por tempo limitado",
+      "Oportunidade de adquirir equipamentos de alto valor agregado com bonificação proporcional"
+    ]
+  },
+  "argumentos_tecnicos": {
+    "performance": [
+      "Alta precisão e exatidão em toda a linha de liquid handling",
+      "Conformidade com normas internacionais de calibração (assumido)"
+    ],
+    "ergonomia": [
+      "Projetadas para minimizar a fadiga em uso prolongado",
+      "Peso reduzido e acionamento suave (assumido)"
+    ],
+    "seguranca_qualidade": [
+      "Materiais resistentes a produtos químicos (assumido)",
+      "Compatibilidade total com serviços de calibração RBC para garantia de qualidade"
+    ]
+  },
+  "campanha_compre3_leve4": {
+    "descricao_oferta": "Na compra de 3 pipetadores DLAB, o cliente ganha o 4º item (o de menor valor entre os escolhidos) gratuitamente.",
+    "regras_principais": [
+      "A 4ª unidade deve ser processada em pedido separado",
+      "O valor do brinde representa aproximadamente 10% do valor total da venda",
+      "Alçada de desconto padrão para vendedores é de 5%"
+    ],
+    "observacoes_importantes": [
+      "Negociações que excedam 5% de desconto ou acumulem benefícios exigem aprovação da gerência (André Felipe)",
+      "A campanha abrange todo o portfólio de liquid handling em estoque"
+    ]
+  }
+}

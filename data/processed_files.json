@@ -1,0 +1,34 @@
+{
+  "files": [
+    {
+      "id": "136N2rstnp0Ye7vIe0OPV27QTxx5JEahcPeRqyWMS4uY",
+      "status": "processed",
+      "name": "2026-08 ELO Omnichannel (Dlab compre 3 leve 4) Script da reunião",
+      "mimeType": "application/vnd.google-apps.document",
+      "output_path": "data/inbox\\2026-08 ELO Omnichannel (Dlab compre 3 leve 4) Script da reunião.txt"
+    },
+    {
+      "id": "1qJAt_BDQYj44Z0VLdqf41Po3XWJHATPT",
+      "status": "blocked",
+      "name": "2026-08 ELO Omnichannel (Dlab compre 3 leve 4)",
+      "mimeType": "video/mp4",
+      "reason": "capabilities.canDownload = false",
+      "webViewLink": "https://drive.google.com/file/d/1qJAt_BDQYj44Z0VLdqf41Po3XWJHATPT/view?usp=drivesdk"
+    },
+    {
+      "id": "1yLluoDsxRei8CP89MpL0Zhf4Mxdf63IH",
+      "status": "blocked",
+      "name": "2026-003 ELO Omnichannel (Mevalabs e Dlab)",
+      "mimeType": "video/mp4",
+      "reason": "capabilities.canDownload = false",
+      "webViewLink": "https://drive.google.com/file/d/1yLluoDsxRei8CP89MpL0Zhf4Mxdf63IH/view?usp=drivesdk"
+    },
+    {
+      "id": "1Mq7kXlcXEfE2EC-NDzTuIdXKpY7o8Hu3",
+      "status": "processed",
+      "name": "2025-009 Microcentrífugas.mp4",
+      "mimeType": "video/mp4",
+      "output_path": "data/inbox\\2025-009 Microcentrífugas.mp4"
+    }
+  ]
+}
