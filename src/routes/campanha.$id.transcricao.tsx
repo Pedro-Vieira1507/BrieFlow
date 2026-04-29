@@ -5,7 +5,7 @@ import { getActiveKey } from "@/lib/aiConfig";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Sparkles, Save, Loader2, Zap } from "lucide-react";
 import { toast } from "sonner";
 
@@ -20,24 +20,45 @@ function Page() {
   const [text, setText] = useState(c?.transcricao ?? "");
   const [inferring, setInferring] = useState(false);
 
+  // Ref gives us the CURRENT textarea value regardless of React render timing.
+  // useSyncExternalStore can force a re-render between setState and the next
+  // event-handler execution, causing a stale-closure where `text` is still "".
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Only initialise from store on first load (or when campaign switches).
+  // We deliberately avoid resetting after every store.emit() to prevent
+  // overwriting text the user has already typed.
+  const initializedId = useRef("");
   useEffect(() => {
-    setText(c?.transcricao ?? "");
-  }, [c?.transcricao]);
+    if (initializedId.current !== id) {
+      setText(c?.transcricao ?? "");
+      initializedId.current = id;
+    }
+  }, [id, c?.transcricao]);
 
   if (!c) return null;
 
   const hasKey = !!getActiveKey();
 
+  /** Returns the most up-to-date text: DOM first, then React state. */
+  function currentText(): string {
+    return textareaRef.current?.value ?? text;
+  }
+
   function salvar() {
-    store.setTranscricao(id, text);
+    const t = currentText();
+    setText(t);
+    store.setTranscricao(id, t);
     toast.success("Transcrição salva");
   }
 
   // Lightweight local inference (no API)
   function gerarBriefLocal() {
-    if (!text.trim()) return toast.error("Transcrição vazia.");
-    store.setTranscricao(id, text);
-    const brief = inferBriefFromTranscript(c?.nome ?? "Campanha", text);
+    const t = currentText();
+    if (!t.trim()) return toast.error("Transcrição vazia.");
+    setText(t);
+    store.setTranscricao(id, t);
+    const brief = inferBriefFromTranscript(c?.nome ?? "Campanha", t);
     brief.campanha = c?.nome ?? brief.campanha;
     store.setBrief(id, brief);
     toast.success("Brief gerado localmente (heurística).");
@@ -46,16 +67,22 @@ function Page() {
 
   // AI-powered inference
   async function gerarBriefIA() {
-    if (!text.trim()) return toast.error("Transcrição vazia.");
+    // Always read from DOM ref to bypass stale-closure issues
+    const t = currentText();
+    if (!t.trim()) return toast.error("Transcrição vazia.");
     setInferring(true);
     try {
-      store.setTranscricao(id, text);
-      const raw = await inferBriefFromTranscriptAI(c?.nome ?? "Campanha", text);
+      // Persist to store before API call (status update triggers re-render,
+      // but we already captured `t` from the DOM — safe)
+      setText(t);
+      store.setTranscricao(id, t);
+
+      const raw = await inferBriefFromTranscriptAI(c?.nome ?? "Campanha", t);
       let brief: StructuredBrief;
       try {
         brief = JSON.parse(raw);
       } catch {
-        // Gemini sometimes wraps JSON in markdown fences
+        // Some models wrap JSON in markdown fences
         const match = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
         brief = JSON.parse(match?.[1] ?? raw);
       }
@@ -93,12 +120,18 @@ function Page() {
         </CardHeader>
         <CardContent>
           <Textarea
+            ref={textareaRef}
             value={text}
             onChange={(e) => setText(e.target.value)}
             rows={22}
             className="font-mono text-sm leading-relaxed"
-            placeholder="A transcrição aparecerá aqui. Você pode editar livremente antes de gerar o brief."
+            placeholder="Cole aqui a transcrição ou resumo da reunião. A IA usará esse texto para estruturar o brief."
           />
+          {text.length > 0 && (
+            <p className="mt-1.5 text-xs text-muted-foreground text-right">
+              {text.length.toLocaleString("pt-BR")} caracteres
+            </p>
+          )}
         </CardContent>
       </Card>
       <div className="space-y-6">
