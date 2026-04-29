@@ -216,13 +216,57 @@ async function callAI(prompt: string): Promise<string> {
 
 // ─── Brief inference ─────────────────────────────────────────────────────────────────
 
+/**
+ * Builds the final prompt for brief inference, always ensuring the transcription
+ * is present in the user message — regardless of whether a customPrompt is configured.
+ *
+ * If a customPrompt is saved in settings:
+ *   - If it contains the placeholder {{transcricao}}, the placeholder is replaced.
+ *   - Otherwise, the transcription block is appended at the end.
+ *
+ * This prevents the Groq/OpenAI model from responding with
+ * "Não há transcrição fornecida" when customPrompt replaces the entire prompt.
+ */
+function buildBriefPrompt(
+  nome: string,
+  transcricao: string,
+  customPrompt?: string,
+): string {
+  const transcriptionBlock = `\nNome: ${nome}\n=== TRANSCRIÇÃO ===\n${transcricao}\n===================`;
+
+  if (!customPrompt) {
+    return (
+      `Extraia um JSON estruturado da transcrição abaixo com os campos:\n` +
+      `marca, campanha, publico_alvo, proposta_comercial, oferta_promocional,\n` +
+      `subcategorias (array), diferenciais_tecnicos (array), beneficios_revendedor (array),\n` +
+      `beneficio_cliente_final (array), objecoes_argumentos (array de {objecao, argumento}),\n` +
+      `tom_comunicacao, observacoes, inferencias_ia (array).\n` +
+      `Use SOMENTE o que está na transcrição. Responda APENAS com JSON válido, sem markdown.` +
+      transcriptionBlock
+    );
+  }
+
+  // Support explicit {{transcricao}} placeholder in custom prompts
+  if (customPrompt.includes("{{transcricao}}")) {
+    return customPrompt
+      .replace("{{nome}}", nome)
+      .replace("{{transcricao}}", transcricao);
+  }
+
+  // No placeholder — append the transcription so the model always has context
+  return customPrompt + "\n" + transcriptionBlock;
+}
+
 export async function inferBriefFromTranscriptAI(nome: string, transcricao: string): Promise<string> {
+  if (!transcricao || !transcricao.trim()) {
+    throw new Error(
+      "Transcrição vazia. Grave ou cole o texto da reunião antes de gerar o briefing.",
+    );
+  }
+
   const config = loadAIConfig();
   const customPrompt = config.prompts["brief"];
-
-  const prompt =
-    customPrompt ||
-    `Extraia um JSON estruturado da transcrição abaixo com os campos:\nmarca, campanha, publico_alvo, proposta_comercial, oferta_promocional,\nsubcategorias (array), diferenciais_tecnicos (array), beneficios_revendedor (array),\nbeneficio_cliente_final (array), objecoes_argumentos (array de {objecao, argumento}),\ntom_comunicacao, observacoes, inferencias_ia (array).\nUse SOMENTE o que está na transcrição. Responda APENAS com JSON válido, sem markdown.\n\nNome: ${nome}\n=== TRANSCRIÇÃO ===\n${transcricao}\n===================`;
+  const prompt = buildBriefPrompt(nome, transcricao, customPrompt);
 
   return callAI(prompt);
 }
