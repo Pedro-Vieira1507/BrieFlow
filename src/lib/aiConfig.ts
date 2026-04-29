@@ -2,25 +2,29 @@
 // localStorage is blocked in sandboxed iframes (e.g. Lovable preview);
 // we fall back to a module-level in-memory store so the app never crashes.
 
-// ─── Model definitions ─────────────────────────────────────────────────────
+// ─── Model definitions ──────────────────────────────────────────────────
 
-export type AIProvider = "gemini" | "openai" | "grok" | "anthropic" | "mistral";
+export type AIProvider = "gemini" | "openai" | "grok" | "anthropic" | "mistral" | "groq";
 
 export type AIModel =
-  // Gemini
+  // Gemini (gratuito)
   | "gemini-2.0-flash"
   | "gemini-2.5-flash"
   | "gemini-2.5-pro"
-  // OpenAI
+  // Groq — gratuito, ultra-rápido (Llama / Gemma)
+  | "llama-3.3-70b-versatile"
+  | "llama-3.1-8b-instant"
+  | "gemma2-9b-it"
+  // OpenAI (pago)
   | "gpt-4o-mini"
   | "gpt-4o"
-  // Grok (xAI) — OpenAI-compatible
+  // Grok / xAI (pago)
   | "grok-3"
   | "grok-3-mini"
-  // Mistral — OpenAI-compatible
+  // Mistral (pago)
   | "mistral-large-latest"
   | "mistral-small-latest"
-  // Anthropic
+  // Anthropic (pago)
   | "claude-3-5-sonnet-20241022"
   | "claude-3-haiku-20240307";
 
@@ -35,7 +39,7 @@ export type ModelMeta = {
 };
 
 export const MODEL_CATALOG: Record<AIModel, ModelMeta> = {
-  // ── Gemini ──────────────────────────────────────────────────────────────────
+  // ── Gemini ─────────────────────────────────────────────────────────────
   "gemini-2.0-flash": {
     label: "Gemini 2.0 Flash",
     provider: "gemini",
@@ -63,7 +67,35 @@ export const MODEL_CATALOG: Record<AIModel, ModelMeta> = {
     badge: "limited",
     note: "Máxima qualidade Gemini. 5 req/min — use para briefings complexos.",
   },
-  // ── OpenAI ──────────────────────────────────────────────────────────────────
+  // ── Groq (gratuito, ultra-rápido) ──────────────────────────────────────────
+  "llama-3.3-70b-versatile": {
+    label: "Llama 3.3 70B (Groq)",
+    provider: "groq",
+    apiId: "llama-3.3-70b-versatile",
+    freeRpm: 30,
+    freeTpm: 6_000,
+    badge: "free",
+    note: "30 req/min gratuitos via Groq. Modelo open-source de alta qualidade. Ótimo em português.",
+  },
+  "llama-3.1-8b-instant": {
+    label: "Llama 3.1 8B Instant (Groq)",
+    provider: "groq",
+    apiId: "llama-3.1-8b-instant",
+    freeRpm: 30,
+    freeTpm: 20_000,
+    badge: "free",
+    note: "30 req/min gratuitos via Groq. Ultra-rápido. Ideal para rascunhos e textos curtos.",
+  },
+  "gemma2-9b-it": {
+    label: "Gemma 2 9B (Groq)",
+    provider: "groq",
+    apiId: "gemma2-9b-it",
+    freeRpm: 30,
+    freeTpm: 15_000,
+    badge: "free",
+    note: "30 req/min gratuitos via Groq. Modelo Google open-source, leve e preciso.",
+  },
+  // ── OpenAI (pago) ────────────────────────────────────────────────────────────
   "gpt-4o-mini": {
     label: "GPT-4o Mini",
     provider: "openai",
@@ -82,7 +114,7 @@ export const MODEL_CATALOG: Record<AIModel, ModelMeta> = {
     badge: "paid",
     note: "Melhor qualidade OpenAI. Requer chave OpenAI com créditos.",
   },
-  // ── Grok (xAI) ──────────────────────────────────────────────────────────────
+  // ── Grok / xAI (pago) ────────────────────────────────────────────────────────
   "grok-3": {
     label: "Grok 3",
     provider: "grok",
@@ -101,7 +133,7 @@ export const MODEL_CATALOG: Record<AIModel, ModelMeta> = {
     badge: "paid",
     note: "Versão leve e econômica do Grok 3. Requer chave xAI.",
   },
-  // ── Mistral ─────────────────────────────────────────────────────────────────
+  // ── Mistral (pago) ───────────────────────────────────────────────────────────
   "mistral-large-latest": {
     label: "Mistral Large",
     provider: "mistral",
@@ -120,7 +152,7 @@ export const MODEL_CATALOG: Record<AIModel, ModelMeta> = {
     badge: "paid",
     note: "Versão econômica Mistral. Bom custo-benefício. Requer chave Mistral.",
   },
-  // ── Anthropic ───────────────────────────────────────────────────────────────
+  // ── Anthropic (pago) ─────────────────────────────────────────────────────────
   "claude-3-5-sonnet-20241022": {
     label: "Claude 3.5 Sonnet",
     provider: "anthropic",
@@ -149,6 +181,10 @@ export function isOpenAIModel(model: AIModel): boolean {
   return getModelProvider(model) === "openai";
 }
 
+export function isGroqModel(model: AIModel): boolean {
+  return getModelProvider(model) === "groq";
+}
+
 export function isGrokModel(model: AIModel): boolean {
   return getModelProvider(model) === "grok";
 }
@@ -165,7 +201,7 @@ export function geminiApiId(model: AIModel): string {
   return MODEL_CATALOG[model]?.apiId ?? "gemini-2.0-flash";
 }
 
-// ─── Config type ─────────────────────────────────────────────────────────
+// ─── Config type ──────────────────────────────────────────────────
 
 export type AIConfig = {
   openaiKey: string;
@@ -173,6 +209,7 @@ export type AIConfig = {
   grokKey: string;
   anthropicKey: string;
   mistralKey: string;
+  groqKey: string;
   model: AIModel;
   driveEnabled: boolean;
   drivePath: string;
@@ -188,6 +225,7 @@ const DEFAULT_CONFIG: AIConfig = {
   grokKey: "",
   anthropicKey: "",
   mistralKey: "",
+  groqKey: "",
   model: "gemini-2.0-flash",
   driveEnabled: false,
   drivePath: "/Forlab/Campanhas",
@@ -195,7 +233,7 @@ const DEFAULT_CONFIG: AIConfig = {
   prompts: {},
 };
 
-// ─── Safe storage helpers ─────────────────────────────────────────────────
+// ─── Safe storage helpers ───────────────────────────────────────────────
 
 function storageAvailable(): boolean {
   try {
@@ -223,7 +261,7 @@ function writeRaw(value: string): void {
   }
 }
 
-// ─── Public API ─────────────────────────────────────────────────────────
+// ─── Public API ───────────────────────────────────────────────────────
 
 export function loadAIConfig(): AIConfig {
   try {
@@ -248,6 +286,7 @@ export function getGeminiKey(): string    { return loadAIConfig().geminiKey; }
 export function getGrokKey(): string      { return loadAIConfig().grokKey; }
 export function getAnthropicKey(): string { return loadAIConfig().anthropicKey; }
 export function getMistralKey(): string   { return loadAIConfig().mistralKey; }
+export function getGroqKey(): string      { return loadAIConfig().groqKey; }
 export function getActiveModel(): AIModel { return loadAIConfig().model; }
 
 export function getActiveKey(): string {
@@ -257,5 +296,6 @@ export function getActiveKey(): string {
   if (p === "grok")      return config.grokKey;
   if (p === "anthropic") return config.anthropicKey;
   if (p === "mistral")   return config.mistralKey;
+  if (p === "groq")      return config.groqKey;
   return config.geminiKey;
 }
