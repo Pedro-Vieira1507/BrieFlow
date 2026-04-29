@@ -9,9 +9,15 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
 import { Stepper } from "@/components/Stepper";
 import { store, type SourceFile } from "@/lib/store";
-import { transcribeFile, isTranscribable, type WhisperProgress } from "@/lib/whisper";
+import {
+  transcribeFile,
+  isTranscribable,
+  type WhisperProgress,
+  type WhisperModel,
+  MODEL_LABELS,
+} from "@/lib/whisper";
 import { useRef, useState } from "react";
-import { CloudUpload, FileText, FolderInput, Loader2, Mic, Info } from "lucide-react";
+import { CloudUpload, FileText, FolderInput, Loader2, Mic, Info, Zap, Target } from "lucide-react";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/nova-campanha")({
@@ -40,6 +46,7 @@ function NovaCampanha() {
   const [drivePath, setDrivePath] = useState("");
   const [processing, setProcessing] = useState(false);
   const [whisperProgress, setWhisperProgress] = useState<WhisperProgress | null>(null);
+  const [model, setModel] = useState<WhisperModel>("small");
   const [drag, setDrag] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -57,7 +64,7 @@ function NovaCampanha() {
 
     if (isTranscribable(file)) {
       try {
-        const result = await transcribeFile(file, (p) => setWhisperProgress(p));
+        const result = await transcribeFile(file, (p) => setWhisperProgress(p), "portuguese", model);
         const created = store.create({ nome, source, transcricao: result.text });
         toast.success(
           `Transcrição concluída${result.duration ? ` — ${Math.round(result.duration / 60)}min de áudio` : ""}.`,
@@ -71,12 +78,8 @@ function NovaCampanha() {
       return;
     }
 
-    // Non-audio file: go straight to transcription editor
     const created = store.create({ nome, source });
-    store.setTranscricao(
-      created.id,
-      `Arquivo "${file.name}" carregado. Cole ou edite o conteúdo abaixo.`,
-    );
+    store.setTranscricao(created.id, `Arquivo "${file.name}" carregado. Cole ou edite o conteúdo abaixo.`);
     nav({ to: "/campanha/$id/transcricao", params: { id: created.id } });
   }
 
@@ -147,11 +150,52 @@ function NovaCampanha() {
                 <div className="flex items-start gap-2 rounded-md border border-accent/30 bg-accent/5 px-3 py-2 text-xs">
                   <Mic className="h-4 w-4 shrink-0 mt-0.5 text-accent" />
                   <span>
-                    <strong>Transcrição gratuita</strong> via Whisper local (Transformers.js) — sem API key.
-                    O modelo (~150 MB) é baixado uma vez e fica em cache no seu navegador.
+                    <strong>Transcrição gratuita</strong> via Whisper local — sem API key, 100% no seu navegador.
+                    O modelo é baixado uma vez e fica em cache.
                   </span>
                 </div>
 
+                {/* Model selector */}
+                <div className="space-y-2">
+                  <Label className="text-xs text-muted-foreground">Modelo de transcrição</Label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {(["tiny", "small"] as WhisperModel[]).map((m) => {
+                      const meta = MODEL_LABELS[m];
+                      const isActive = model === m;
+                      return (
+                        <button
+                          key={m}
+                          type="button"
+                          disabled={processing}
+                          onClick={() => setModel(m)}
+                          className={
+                            "flex items-start gap-2 rounded-lg border p-3 text-left text-sm transition-colors " +
+                            (isActive
+                              ? "border-accent bg-accent/10 text-accent"
+                              : "border-border hover:border-accent/40 text-muted-foreground")
+                          }
+                        >
+                          {m === "tiny" ? (
+                            <Zap className="h-4 w-4 shrink-0 mt-0.5" />
+                          ) : (
+                            <Target className="h-4 w-4 shrink-0 mt-0.5" />
+                          )}
+                          <div>
+                            <div className="font-medium">{meta.label}</div>
+                            <div className="text-xs opacity-70">{meta.size} · {meta.speed}</div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {model === "tiny" && (
+                    <p className="text-xs text-muted-foreground">
+                      ⚡ Recomendado para vídeos longos (&gt;15 min) ou máquinas mais lentas.
+                    </p>
+                  )}
+                </div>
+
+                {/* Drop zone */}
                 <div
                   onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
                   onDragLeave={() => setDrag(false)}
@@ -186,21 +230,21 @@ function NovaCampanha() {
                   />
                 </div>
 
-                {/* Whisper progress */}
+                {/* Progress */}
                 {whisperProgress && (
                   <div className="space-y-2 rounded-md border border-border bg-muted/40 px-4 py-3">
                     <div className="flex items-center gap-2 text-sm">
                       <Loader2 className="h-4 w-4 animate-spin text-accent shrink-0" />
-                      <span className="text-muted-foreground">{whisperProgress.stage}</span>
-                      <span className="ml-auto text-xs font-mono text-muted-foreground">
+                      <span className="text-muted-foreground truncate">{whisperProgress.stage}</span>
+                      <span className="ml-auto text-xs font-mono text-muted-foreground shrink-0">
                         {Math.round(whisperProgress.value)}%
                       </span>
                     </div>
                     <Progress value={whisperProgress.value} className="h-1.5" />
-                    {whisperProgress.value < 95 && (
+                    {whisperProgress.value < 90 && (
                       <p className="text-xs text-muted-foreground">
                         <Info className="inline h-3 w-3 mr-1" />
-                        Primeira execução baixa o modelo (~150 MB). Próximas serão instantâneas.
+                        Primeira execução baixa o modelo ({MODEL_LABELS[model].size}). Próximas serão instantâneas.
                       </p>
                     )}
                   </div>
