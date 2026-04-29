@@ -5,7 +5,7 @@ import { getActiveKey } from "@/lib/aiConfig";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { Sparkles, Save, Loader2, Zap } from "lucide-react";
 import { toast } from "sonner";
 
@@ -18,85 +18,49 @@ function Page() {
   const c = useCampaign(id);
   const nav = useNavigate();
 
-  const [text, setText] = useState(c?.transcricao ?? "");
   const [charCount, setCharCount] = useState((c?.transcricao ?? "").length);
   const [inferring, setInferring] = useState(false);
 
-  // DOM ref is the single source of truth — it reflects exactly what the user sees,
-  // regardless of React state timing or iframe sandboxing issues.
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-
   /**
-   * Always returns the current textarea content.
-   * Priority: DOM element value (ground truth) > React state.
-   * The DOM value is what was last rendered/typed, including pastes that may
-   * not have triggered React’s synthetic onChange in sandboxed environments.
+   * Uncontrolled textarea: React only seeds the initial value via `defaultValue`.
+   * After mount, the DOM is the owner — React never overwrites user input on re-render.
+   * We read the current content exclusively from the DOM ref.
    */
-  function currentText(): string {
-    return textareaRef.current?.value ?? text;
-  }
-
-  // Initialise text from store on first load for this campaign only.
-  // Never auto-reset while the user is actively editing.
-  const initializedId = useRef("");
-  useEffect(() => {
-    if (initializedId.current !== id) {
-      const t = c?.transcricao ?? "";
-      setText(t);
-      setCharCount(t.length);
-      initializedId.current = id;
-      // Also seed the DOM node if it already exists
-      if (textareaRef.current) textareaRef.current.value = t;
-    }
-  }, [id, c?.transcricao]);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   if (!c) return null;
 
   const hasKey = !!getActiveKey();
 
-  /** Called for every keystroke/paste — keep React state and char-counter in sync. */
-  function handleChange(value: string) {
-    setText(value);
-    setCharCount(value.length);
-  }
-
-  /**
-   * Native onInput — fires even when React synthetic events are suppressed.
-   * Updates charCount so the user can verify capture, but doesn’t need to
-   * update React state because currentText() reads from the DOM directly.
-   */
-  function handleNativeInput(e: React.FormEvent<HTMLTextAreaElement>) {
-    setCharCount((e.target as HTMLTextAreaElement).value.length);
+  /** Ground-truth text: always reads from the live DOM node. */
+  function getText(): string {
+    return textareaRef.current?.value ?? "";
   }
 
   function salvar() {
-    const t = currentText();
-    setText(t);
+    const t = getText();
     store.setTranscricao(id, t);
     toast.success("Transcrição salva");
   }
 
   function gerarBriefLocal() {
-    const t = currentText();
+    const t = getText();
     if (!t.trim()) return toast.error("Transcrição vazia.");
     store.setTranscricao(id, t);
-    const brief = inferBriefFromTranscript(c?.nome ?? "Campanha", t);
-    brief.campanha = c?.nome ?? brief.campanha;
+    const brief = inferBriefFromTranscript(c.nome, t);
+    brief.campanha = c.nome;
     store.setBrief(id, brief);
     toast.success("Brief gerado localmente (heurística).");
     nav({ to: "/campanha/$id/brief", params: { id } });
   }
 
   async function gerarBriefIA() {
-    // Read from DOM — immune to React stale-closure and useSyncExternalStore races
-    const t = currentText();
+    const t = getText();
     if (!t.trim()) return toast.error("Transcrição vazia.");
-
     setInferring(true);
     try {
       store.setTranscricao(id, t);
-      const raw = await inferBriefFromTranscriptAI(c?.nome ?? "Campanha", t);
-
+      const raw = await inferBriefFromTranscriptAI(c.nome, t);
       let brief: StructuredBrief;
       try {
         brief = JSON.parse(raw);
@@ -104,7 +68,7 @@ function Page() {
         const match = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
         brief = JSON.parse(match?.[1] ?? raw);
       }
-      brief.campanha = c?.nome ?? brief.campanha;
+      brief.campanha = c.nome;
       store.setBrief(id, brief);
       toast.success("Brief gerado pela IA com sucesso!");
       nav({ to: "/campanha/$id/brief", params: { id } });
@@ -139,11 +103,16 @@ function Page() {
           </div>
         </CardHeader>
         <CardContent>
+          {/*
+            defaultValue (not value) — uncontrolled.
+            React seeds the initial content once and never touches it again.
+            The user can type/paste freely; React re-renders do NOT erase their input.
+          */}
           <Textarea
             ref={textareaRef}
-            value={text}
-            onChange={(e) => handleChange(e.target.value)}
-            onInput={handleNativeInput}
+            defaultValue={c.transcricao}
+            key={id}  // remount when campaign changes so defaultValue re-seeds
+            onInput={(e) => setCharCount((e.target as HTMLTextAreaElement).value.length)}
             rows={22}
             className="font-mono text-sm leading-relaxed"
             placeholder="Cole aqui a transcrição ou resumo da reunião. A IA usará esse texto para estruturar o brief."
