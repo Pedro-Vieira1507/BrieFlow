@@ -7,9 +7,16 @@ LLM utilizado: Google Gemini (google-genai SDK).
 TTS utilizado: Google Cloud Text-to-Speech.
 
 RESILIÊNCIA:
+  - Throttle global compartilhado: MIN_CALL_INTERVAL entre TODAS as chamadas
+    (inclusive as de content_brief.py, via módulo app.llm_throttle)
   - Retry automático com backoff exponencial para erros 429 (rate-limit)
+  - Respeita o retryDelay sugerido pela própria API Google
   - Fallback de modelo: gemini-2.0-flash → gemini-1.5-flash
-  - Intervalo mínimo entre chamadas para respeitar cota Free Tier
+
+COTAS FREE TIER (referência):
+  - 15 req/min por modelo
+  - 1.500 req/dia por modelo
+  - Intervalo mínimo recomendado: 5s entre chamadas
 """
 import os
 import time
@@ -32,8 +39,8 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 LLM_MODEL = os.getenv("LLM_MODEL", "gemini-2.0-flash")
 LLM_FALLBACK_MODEL = os.getenv("LLM_FALLBACK_MODEL", "gemini-1.5-flash")
 
-# Intervalo mínimo entre chamadas à API (segundos) — evita 429 no Free Tier
-# Free Tier: 15 req/min → ~4s entre chamadas é seguro
+# Intervalo mínimo entre chamadas (segundos)
+# Free Tier: 15 req/min → 4s mínimo; 5s garante margem segura.
 MIN_CALL_INTERVAL = float(os.getenv("LLM_MIN_INTERVAL", "5"))
 
 # Retry: número máximo de tentativas e backoff base (segundos)
@@ -46,8 +53,21 @@ if not GEMINI_API_KEY:
         "Obtenha sua chave gratuita em: https://aistudio.google.com/app/apikey"
     )
 
-# Timestamp da última chamada (throttle global)
+# ── Throttle global compartilhado entre todos os módulos ─────────────
+# Ao importar este módulo (ou app.llm_throttle), todos os chamadores
+# enxergam o mesmo timestamp da última chamada.
 _last_call_ts: float = 0.0
+
+
+def _throttle():
+    """Garante o intervalo mínimo entre chamadas à API Gemini."""
+    global _last_call_ts
+    elapsed = time.time() - _last_call_ts
+    if elapsed < MIN_CALL_INTERVAL:
+        wait = MIN_CALL_INTERVAL - elapsed
+        logger.debug(f"[LLM] Throttle: aguardando {wait:.1f}s antes da chamada...")
+        time.sleep(wait)
+    _last_call_ts = time.time()
 
 
 # ─────────────────────────────────────────────
@@ -242,30 +262,34 @@ BRIEFING:
 
 
 # ─────────────────────────────────────────────
-# LLM (Gemini) — com retry e backoff
+# LLM (Gemini) — com retry, backoff e throttle
 # ─────────────────────────────────────────────
 
 def _parse_retry_delay(error_message: str, default: float = BACKOFF_BASE) -> float:
     """
-    Tenta extrair o retryDelay sugerido pela API Google no corpo do erro.
+    Extrai o retryDelay sugerido pela API Google no corpo do erro.
     Exemplo: 'Please retry in 10.44s'
+    Adiciona +3s de margem de segurança.
     """
     import re
     match = re.search(r"retry in ([\d.]+)s", str(error_message))
     if match:
-        return float(match.group(1)) + 2  # +2s de margem
+        return float(match.group(1)) + 3
     return default
 
 
 def call_llm_api(prompt: str, temperature: float = 0.7) -> str:
     """
-    Envia um prompt para o Google Gemini com retry automático.
+    Envia um prompt para o Google Gemini com throttle global e retry automático.
 
     Comportamento em caso de erro 429 (RESOURCE_EXHAUSTED):
-      1. Extrai o retryDelay sugerido pela API
-      2. Aguarda o tempo indicado + margem
-      3. Tenta até MAX_RETRIES vezes com backoff exponencial
-      4. Se ainda falhar, tenta o modelo de fallback (LLM_FALLBACK_MODEL)
+      1. Extrai o retryDelay sugerido pela API e aguarda
+      2. Aplica backoff exponencial entre tentativas
+      3. Após MAX_RETRIES, tenta o modelo de fallback
+      4. Se ambos os modelos falharem, re-lança a exceção
+
+    O throttle global (_throttle()) garante MIN_CALL_INTERVAL entre TODAS
+    as chamadas, inclusive as feitas por content_brief.py.
 
     Args:
         prompt: Texto completo do prompt.
@@ -274,8 +298,6 @@ def call_llm_api(prompt: str, temperature: float = 0.7) -> str:
     Returns:
         Texto gerado pelo modelo.
     """
-    global _last_call_ts
-
     from google import genai
     from google.genai import types
 
@@ -289,20 +311,14 @@ def call_llm_api(prompt: str, temperature: float = 0.7) -> str:
 
     for model in models_to_try:
         for attempt in range(1, MAX_RETRIES + 1):
-            # Throttle global: garante intervalo mínimo entre chamadas
-            elapsed = time.time() - _last_call_ts
-            if elapsed < MIN_CALL_INTERVAL:
-                wait = MIN_CALL_INTERVAL - elapsed
-                logger.debug(f"[LLM] Throttle: aguardando {wait:.1f}s antes da chamada...")
-                time.sleep(wait)
+            _throttle()  # Garante intervalo mínimo antes de cada chamada
 
             logger.info(
-                f"[LLM] Chamando {model} "
+                f"[LLM] Chamando {model} via Gemini "
                 f"(temperature={temperature}, tentativa {attempt}/{MAX_RETRIES})..."
             )
 
             try:
-                _last_call_ts = time.time()
                 response = client.models.generate_content(
                     model=model,
                     contents=prompt,
@@ -325,23 +341,25 @@ def call_llm_api(prompt: str, temperature: float = 0.7) -> str:
                     if attempt < MAX_RETRIES:
                         wait = _parse_retry_delay(err_str, BACKOFF_BASE * attempt)
                         logger.warning(
-                            f"[LLM] 429 em {model} (tentativa {attempt}). "
-                            f"Aguardando {wait:.0f}s..."
+                            f"[LLM] 429 em {model} (tentativa {attempt}/{MAX_RETRIES}). "
+                            f"Aguardando {wait:.0f}s conforme sugerido pela API..."
                         )
                         time.sleep(wait)
                         continue
                     else:
                         logger.warning(
-                            f"[LLM] Esgotadas tentativas em {model}. "
+                            f"[LLM] Esgotadas {MAX_RETRIES} tentativas em {model}. "
                             "Tentando próximo modelo (se disponível)..."
                         )
                         break  # tenta próximo modelo
                 else:
-                    # Erro não relacionado a rate-limit: falha imediata
                     logger.error(f"[LLM] Erro não recuperável em {model}: {e}")
                     raise
 
-    logger.error(f"[LLM] Todos os modelos falharam. Último erro: {last_exception}")
+    logger.error(
+        f"[LLM] Todos os modelos falharam após {MAX_RETRIES} tentativas cada. "
+        f"Último erro: {last_exception}"
+    )
     raise last_exception
 
 
@@ -385,7 +403,7 @@ def generate_assets_for_brief(
 
     Fluxo por asset:
       1. Monta o prompt específico com o briefing
-      2. Chama o Gemini com retry automático (backoff em caso de 429)
+      2. Chama o Gemini com throttle + retry automático (backoff em caso de 429)
       3. Salva no formato correto (.pdf, .pptx, .mp3, .txt)
 
     Args:

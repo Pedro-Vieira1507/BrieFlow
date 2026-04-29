@@ -22,6 +22,7 @@ PPTX_MIME = (
     "application/vnd.openxmlformats-officedocument"
     ".presentationml.presentation"
 )
+GSLIDES_MIME = "application/vnd.google-apps.presentation"
 
 
 def _extract_file_id(url: str) -> str:
@@ -29,7 +30,6 @@ def _extract_file_id(url: str) -> str:
     match = re.search(r"/d/([a-zA-Z0-9_-]{25,})", url)
     if match:
         return match.group(1)
-    # Tenta como ID direto (sem barra)
     if re.fullmatch(r"[a-zA-Z0-9_-]{25,}", url):
         return url
     raise ValueError(
@@ -43,10 +43,15 @@ def download_template_from_drive(
     """
     Baixa o template de slides do Google Drive via API.
 
-    Estratégia em 3 tentativas (em ordem):
-      1. Export como PPTX  — funciona se o arquivo for Google Slides nativo
-      2. Download direto   — funciona se o arquivo já for um .pptx enviado
-      3. Raise             — lança exceção para o chamador usar template local
+    Lógica de download:
+      1. Consulta o mimeType real do arquivo no Drive
+      2. Se for Google Slides nativo  → export_media como PPTX
+      3. Se já for .pptx enviado       → get_media (download binário direto)
+      4. Qualquer outro tipo           → raise com mensagem clara
+
+    IMPORTANTE: O erro 403 'Export only supports Docs Editors files' acontece
+    quando se tenta export_media em um arquivo .pptx nativo (não Google Slides).
+    Esta versão verifica o mimeType antes e usa o método correto.
 
     Args:
         service: Serviço autenticado do Google Drive API v3.
@@ -70,51 +75,61 @@ def download_template_from_drive(
     if dest_dir:
         os.makedirs(dest_dir, exist_ok=True)
 
-    # ── Tentativa 1: export (Google Slides nativo → PPTX) ──────────────
+    # ── Passo 1: descobre o mimeType real do arquivo ──────────────────
     try:
-        request = service.files().export_media(
-            fileId=file_id, mimeType=PPTX_MIME
-        )
-        buffer = io.BytesIO()
-        downloader = MediaIoBaseDownload(buffer, request)
-        done = False
-        while not done:
-            status, done = downloader.next_chunk()
-            if status:
-                logger.info(
-                    f"[SlidesTemplate] Export: {int(status.progress() * 100)}%"
-                )
-        with open(output_path, "wb") as f:
-            f.write(buffer.getvalue())
-        logger.info(f"[SlidesTemplate] ✅ Template salvo via export: {output_path}")
-        return output_path
-
-    except Exception as e_export:
-        logger.warning(
-            f"[SlidesTemplate] export_media falhou ({e_export}). "
-            "Tentando download direto (arquivo PPTX nativo)..."
-        )
-
-    # ── Tentativa 2: download direto (arquivo .pptx enviado no Drive) ──
-    try:
-        # Verifica o mimeType real do arquivo
         meta = service.files().get(
             fileId=file_id, fields="id,name,mimeType"
         ).execute()
-        mime = meta.get("mimeType", "")
-        logger.info(f"[SlidesTemplate] mimeType do arquivo no Drive: {mime}")
+    except Exception as e:
+        raise RuntimeError(
+            f"[SlidesTemplate] Falha ao consultar metadados do arquivo "
+            f"(ID: {file_id}): {e}"
+        ) from e
 
-        if mime == PPTX_MIME or "presentation" in mime:
-            request = service.files().get_media(fileId=file_id)
-            buffer = io.BytesIO()
+    mime = meta.get("mimeType", "")
+    name = meta.get("name", file_id)
+    logger.info(f"[SlidesTemplate] Arquivo no Drive: '{name}' | mimeType: {mime}")
+
+    buffer = io.BytesIO()
+
+    # ── Passo 2: Google Slides nativo → export como PPTX ─────────────
+    if mime == GSLIDES_MIME:
+        logger.info("[SlidesTemplate] Detectado Google Slides nativo → export_media")
+        try:
+            request = service.files().export_media(
+                fileId=file_id, mimeType=PPTX_MIME
+            )
             downloader = MediaIoBaseDownload(buffer, request)
             done = False
             while not done:
                 status, done = downloader.next_chunk()
                 if status:
                     logger.info(
-                        f"[SlidesTemplate] Download: "
-                        f"{int(status.progress() * 100)}%"
+                        f"[SlidesTemplate] Export: {int(status.progress() * 100)}%"
+                    )
+            with open(output_path, "wb") as f:
+                f.write(buffer.getvalue())
+            logger.info(f"[SlidesTemplate] ✅ Template salvo via export: {output_path}")
+            return output_path
+        except Exception as e:
+            raise RuntimeError(
+                f"[SlidesTemplate] Falha ao exportar Google Slides como PPTX: {e}"
+            ) from e
+
+    # ── Passo 3: arquivo .pptx enviado no Drive → download binário ────
+    if mime == PPTX_MIME or mime.endswith("presentation"):
+        logger.info(
+            "[SlidesTemplate] Detectado arquivo .pptx nativo → get_media (download direto)"
+        )
+        try:
+            request = service.files().get_media(fileId=file_id)
+            downloader = MediaIoBaseDownload(buffer, request)
+            done = False
+            while not done:
+                status, done = downloader.next_chunk()
+                if status:
+                    logger.info(
+                        f"[SlidesTemplate] Download: {int(status.progress() * 100)}%"
                     )
             with open(output_path, "wb") as f:
                 f.write(buffer.getvalue())
@@ -122,20 +137,16 @@ def download_template_from_drive(
                 f"[SlidesTemplate] ✅ Template salvo via get_media: {output_path}"
             )
             return output_path
-        else:
-            raise ValueError(
-                f"Arquivo no Drive não é um PPTX (mimeType={mime}). "
-                "Envie o template como .pptx no Drive ou use um Google Slides nativo."
-            )
+        except Exception as e:
+            raise RuntimeError(
+                f"[SlidesTemplate] Falha ao fazer download direto do .pptx: {e}"
+            ) from e
 
-    except Exception as e_direct:
-        logger.error(
-            f"[SlidesTemplate] Download direto também falhou: {e_direct}"
-        )
-        raise RuntimeError(
-            f"Não foi possível baixar o template do Drive. "
-            f"Erro export: {e_export} | Erro direto: {e_direct}"
-        ) from e_direct
+    # ── Passo 4: tipo não suportado ───────────────────────────────────
+    raise ValueError(
+        f"[SlidesTemplate] O arquivo '{name}' no Drive tem mimeType '{mime}', "
+        "que não é suportado. Envie um arquivo .pptx ou crie um Google Slides nativo."
+    )
 
 
 def parse_slides_content(raw_text: str) -> list[dict]:
@@ -185,7 +196,6 @@ def parse_slides_content(raw_text: str) -> list[dict]:
     flush()
 
     if not slides:
-        # Fallback: divide por linhas duplas se nao encontrar marcadores
         blocks = [b.strip() for b in raw_text.split("\n\n") if b.strip()]
         for i, block in enumerate(blocks):
             lines = [ln.strip() for ln in block.split("\n") if ln.strip()]
@@ -226,7 +236,6 @@ def build_presentation_from_template(
     try:
         prs = Presentation(template_path)
 
-        # Usa o layout 1 (Title and Content) como padrão
         available_layouts = prs.slide_layouts
         content_layout = (
             available_layouts[1]
@@ -247,14 +256,12 @@ def build_presentation_from_template(
 
             slide = prs.slides.add_slide(content_layout)
 
-            # Preenche o placeholder de título
             if slide.shapes.title:
                 slide.shapes.title.text = title_text
                 runs = slide.shapes.title.text_frame.paragraphs[0].runs
                 if runs:
                     runs[0].font.size = Pt(28)
 
-            # Preenche o placeholder de corpo
             body_ph = (
                 slide.placeholders[1]
                 if len(slide.placeholders) > 1
