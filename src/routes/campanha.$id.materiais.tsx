@@ -1,10 +1,13 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useCampaign, MATERIAL_META, type MaterialKey, store } from "@/lib/store";
+import { generateAllMaterials, type GenerationProgress } from "@/lib/generateMaterials";
+import { getActiveKey, loadAIConfig } from "@/lib/aiConfig";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import { Copy, Download, Sparkles } from "lucide-react";
+import { Progress } from "@/components/ui/progress";
+import { Copy, Download, Sparkles, Loader2, Zap } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -17,6 +20,8 @@ function Page() {
   const c = useCampaign(id);
   const [active, setActive] = useState<MaterialKey | "">("");
   const [edited, setEdited] = useState<Partial<Record<MaterialKey, string>>>({});
+  const [generating, setGenerating] = useState(false);
+  const [progress, setProgress] = useState<GenerationProgress | null>(null);
 
   const keys = c?.materiais ? (Object.keys(c.materiais) as MaterialKey[]) : [];
 
@@ -25,19 +30,59 @@ function Page() {
   }, [keys, active]);
 
   if (!c) return null;
+
+  const hasKey = !!getActiveKey();
+  const activeModel = loadAIConfig().model;
+
+  async function gerarComIA() {
+    if (!c?.brief) return toast.error("Configure o brief antes de gerar materiais.");
+    if (!hasKey) return toast.error("Configure sua chave de API em Configurações.");
+    setGenerating(true);
+    setProgress(null);
+    try {
+      const materiais = await generateAllMaterials(c.brief, (p) => setProgress(p));
+      store.update(id, { materiais, status: "materiais_gerados" });
+      toast.success("Todos os materiais gerados com sucesso!");
+      setActive("");
+    } catch (err) {
+      toast.error(`Erro: ${(err as Error).message}`);
+    } finally {
+      setGenerating(false);
+      setProgress(null);
+    }
+  }
+
+  function gerarMock() {
+    store.generateMaterials(id);
+    toast.success("Materiais de exemplo gerados (mock).");
+    setActive("");
+  }
+
   if (keys.length === 0) {
     return (
       <Card>
-        <CardContent className="p-8 text-center space-y-3">
+        <CardContent className="p-8 text-center space-y-4">
           <p className="text-sm text-muted-foreground">Nenhum material gerado ainda.</p>
-          <div className="flex gap-2 justify-center">
+          <div className="flex gap-2 justify-center flex-wrap">
             <Button asChild variant="outline">
               <Link to="/campanha/$id/brief" params={{ id }}>Abrir brief</Link>
             </Button>
-            <Button onClick={() => { store.generateMaterials(id); toast.success("Materiais gerados"); }}>
-              <Sparkles className="h-4 w-4" /> Gerar agora
-            </Button>
+            {hasKey ? (
+              <Button onClick={gerarComIA} disabled={generating}>
+                {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                Gerar com IA ({activeModel})
+              </Button>
+            ) : (
+              <Button variant="outline" onClick={gerarMock}>
+                <Zap className="h-4 w-4" /> Usar exemplo (mock)
+              </Button>
+            )}
           </div>
+          {!hasKey && (
+            <p className="text-xs text-muted-foreground">
+              <a href="/configuracoes" className="underline">Configure sua chave de API</a> para gerar materiais reais.
+            </p>
+          )}
         </CardContent>
       </Card>
     );
@@ -64,6 +109,34 @@ function Page() {
 
   return (
     <div className="space-y-4">
+      {/* Generation progress overlay */}
+      {generating && progress && (
+        <Card className="border-accent/40 bg-accent/5">
+          <CardContent className="p-4 space-y-3">
+            <div className="flex items-center gap-2 text-sm font-medium">
+              <Loader2 className="h-4 w-4 animate-spin text-accent" />
+              Gerando: {progress.label}
+              <span className="ml-auto text-xs text-muted-foreground">{progress.current}/{progress.total}</span>
+            </div>
+            <Progress value={Math.round((progress.current / progress.total) * 100)} className="h-2" />
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Regenerate button */}
+      <div className="flex justify-end gap-2">
+        {hasKey ? (
+          <Button size="sm" onClick={gerarComIA} disabled={generating}>
+            {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+            Regerar com IA
+          </Button>
+        ) : (
+          <Button size="sm" variant="outline" onClick={gerarMock}>
+            <Zap className="h-4 w-4" /> Regerar mock
+          </Button>
+        )}
+      </div>
+
       <Tabs value={currentKey} onValueChange={(v) => setActive(v as MaterialKey)}>
         <div className="overflow-x-auto pb-1 scrollbar-thin">
           <TabsList className="inline-flex w-max">

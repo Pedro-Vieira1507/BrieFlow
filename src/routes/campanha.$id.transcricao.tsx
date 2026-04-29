@@ -1,10 +1,12 @@
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
-import { useCampaign, store, inferBriefFromTranscript } from "@/lib/store";
+import { useCampaign, store, inferBriefFromTranscript, type StructuredBrief } from "@/lib/store";
+import { inferBriefFromTranscriptAI } from "@/lib/generateMaterials";
+import { getActiveKey } from "@/lib/aiConfig";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { useEffect, useState } from "react";
-import { Sparkles, Save } from "lucide-react";
+import { Sparkles, Save, Loader2, Zap } from "lucide-react";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/campanha/$id/transcricao")({
@@ -16,6 +18,7 @@ function Page() {
   const c = useCampaign(id);
   const nav = useNavigate();
   const [text, setText] = useState(c?.transcricao ?? "");
+  const [inferring, setInferring] = useState(false);
 
   useEffect(() => {
     setText(c?.transcricao ?? "");
@@ -23,19 +26,48 @@ function Page() {
 
   if (!c) return null;
 
+  const hasKey = !!getActiveKey();
+
   function salvar() {
     store.setTranscricao(id, text);
     toast.success("Transcrição salva");
   }
 
-  function gerarBrief() {
+  // Lightweight local inference (no API)
+  function gerarBriefLocal() {
     if (!text.trim()) return toast.error("Transcrição vazia.");
     store.setTranscricao(id, text);
     const brief = inferBriefFromTranscript(c?.nome ?? "Campanha", text);
     brief.campanha = c?.nome ?? brief.campanha;
     store.setBrief(id, brief);
-    toast.success("Brief estruturado gerado pela IA");
+    toast.success("Brief gerado localmente (heurística).");
     nav({ to: "/campanha/$id/brief", params: { id } });
+  }
+
+  // AI-powered inference
+  async function gerarBriefIA() {
+    if (!text.trim()) return toast.error("Transcrição vazia.");
+    setInferring(true);
+    try {
+      store.setTranscricao(id, text);
+      const raw = await inferBriefFromTranscriptAI(c?.nome ?? "Campanha", text);
+      let brief: StructuredBrief;
+      try {
+        brief = JSON.parse(raw);
+      } catch {
+        // Gemini sometimes wraps JSON in markdown fences
+        const match = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
+        brief = JSON.parse(match?.[1] ?? raw);
+      }
+      brief.campanha = c?.nome ?? brief.campanha;
+      store.setBrief(id, brief);
+      toast.success("Brief gerado pela IA com sucesso!");
+      nav({ to: "/campanha/$id/brief", params: { id } });
+    } catch (err) {
+      toast.error(`Erro ao gerar brief: ${(err as Error).message}`);
+    } finally {
+      setInferring(false);
+    }
   }
 
   return (
@@ -47,9 +79,16 @@ function Page() {
             <Button variant="outline" size="sm" onClick={salvar}>
               <Save className="h-4 w-4" /> Salvar
             </Button>
-            <Button size="sm" onClick={gerarBrief}>
-              <Sparkles className="h-4 w-4" /> Gerar brief
-            </Button>
+            {hasKey ? (
+              <Button size="sm" onClick={gerarBriefIA} disabled={inferring}>
+                {inferring ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                Gerar brief com IA
+              </Button>
+            ) : (
+              <Button size="sm" variant="outline" onClick={gerarBriefLocal}>
+                <Zap className="h-4 w-4" /> Gerar brief (local)
+              </Button>
+            )}
           </div>
         </CardHeader>
         <CardContent>
@@ -76,6 +115,12 @@ function Page() {
               <li>Mantenha nomes de produtos e SKUs corretos.</li>
               <li>Confirme números, prazos e mecânicas promocionais.</li>
             </ul>
+            {!hasKey && (
+              <div className="rounded-md border border-warning/40 bg-warning/5 p-3 text-xs">
+                Sem chave de API: o brief será gerado por heurística local.
+                <a href="/configuracoes" className="underline ml-1">Configurar IA</a>
+              </div>
+            )}
           </CardContent>
         </Card>
         {c.brief && (
