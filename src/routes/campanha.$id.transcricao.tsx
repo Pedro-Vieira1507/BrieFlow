@@ -22,31 +22,31 @@ function Page() {
   const [charCount, setCharCount] = useState((c?.transcricao ?? "").length);
   const [inferring, setInferring] = useState(false);
 
-  // Three-layer text capture to beat any React / iframe / sandbox issue:
-  // 1. latestText — plain JS ref updated on every input event (native, pre-React)
-  // 2. textareaRef — DOM element ref for direct .value access
-  // 3. text       — React state (stale-closure fallback)
-  const latestText = useRef(c?.transcricao ?? "");
+  // DOM ref is the single source of truth — it reflects exactly what the user sees,
+  // regardless of React state timing or iframe sandboxing issues.
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  /** Always returns the most up-to-date textarea content. */
+  /**
+   * Always returns the current textarea content.
+   * Priority: DOM element value (ground truth) > React state.
+   * The DOM value is what was last rendered/typed, including pastes that may
+   * not have triggered React’s synthetic onChange in sandboxed environments.
+   */
   function currentText(): string {
-    return (
-      latestText.current ||
-      textareaRef.current?.value ||
-      text
-    );
+    return textareaRef.current?.value ?? text;
   }
 
-  // Initialise once per campaign, never reset while the user is typing.
+  // Initialise text from store on first load for this campaign only.
+  // Never auto-reset while the user is actively editing.
   const initializedId = useRef("");
   useEffect(() => {
     if (initializedId.current !== id) {
       const t = c?.transcricao ?? "";
       setText(t);
-      latestText.current = t;
       setCharCount(t.length);
       initializedId.current = id;
+      // Also seed the DOM node if it already exists
+      if (textareaRef.current) textareaRef.current.value = t;
     }
   }, [id, c?.transcricao]);
 
@@ -54,23 +54,24 @@ function Page() {
 
   const hasKey = !!getActiveKey();
 
+  /** Called for every keystroke/paste — keep React state and char-counter in sync. */
   function handleChange(value: string) {
-    latestText.current = value; // always update ref first
     setText(value);
     setCharCount(value.length);
   }
 
-  /** Native onInput handler — fires even when React synthetic events are suppressed in sandboxed iframes. */
+  /**
+   * Native onInput — fires even when React synthetic events are suppressed.
+   * Updates charCount so the user can verify capture, but doesn’t need to
+   * update React state because currentText() reads from the DOM directly.
+   */
   function handleNativeInput(e: React.FormEvent<HTMLTextAreaElement>) {
-    const value = (e.target as HTMLTextAreaElement).value;
-    latestText.current = value;
-    setCharCount(value.length);
+    setCharCount((e.target as HTMLTextAreaElement).value.length);
   }
 
   function salvar() {
     const t = currentText();
     setText(t);
-    latestText.current = t;
     store.setTranscricao(id, t);
     toast.success("Transcrição salva");
   }
@@ -78,8 +79,6 @@ function Page() {
   function gerarBriefLocal() {
     const t = currentText();
     if (!t.trim()) return toast.error("Transcrição vazia.");
-    setText(t);
-    latestText.current = t;
     store.setTranscricao(id, t);
     const brief = inferBriefFromTranscript(c?.nome ?? "Campanha", t);
     brief.campanha = c?.nome ?? brief.campanha;
@@ -89,13 +88,13 @@ function Page() {
   }
 
   async function gerarBriefIA() {
-    // Capture text through all three layers before any async/state operation
+    // Read from DOM — immune to React stale-closure and useSyncExternalStore races
     const t = currentText();
     if (!t.trim()) return toast.error("Transcrição vazia.");
 
     setInferring(true);
     try {
-      store.setTranscricao(id, t); // persist (triggers re-render — safe, t is already captured)
+      store.setTranscricao(id, t);
       const raw = await inferBriefFromTranscriptAI(c?.nome ?? "Campanha", t);
 
       let brief: StructuredBrief;
@@ -149,10 +148,10 @@ function Page() {
             className="font-mono text-sm leading-relaxed"
             placeholder="Cole aqui a transcrição ou resumo da reunião. A IA usará esse texto para estruturar o brief."
           />
-          <p className="mt-1.5 text-xs text-muted-foreground text-right">
+          <p className="mt-1.5 text-xs text-right">
             {charCount > 0
-              ? <span className="text-foreground font-medium">{charCount.toLocaleString("pt-BR")} caracteres capturados ✔</span>
-              : "Cole a transcrição acima antes de gerar o brief"}
+              ? <span className="text-foreground font-medium">{charCount.toLocaleString("pt-BR")} caracteres ✔️</span>
+              : <span className="text-muted-foreground">Cole a transcrição acima antes de gerar o brief</span>}
           </p>
         </CardContent>
       </Card>
@@ -163,9 +162,7 @@ function Page() {
             <CardTitle className="text-base">Sobre a transcrição</CardTitle>
           </CardHeader>
           <CardContent className="text-sm text-muted-foreground space-y-2">
-            <p>
-              A IA usa <strong>esse texto</strong> como fonte primária do brief. Quanto mais limpo e completo, melhores os materiais.
-            </p>
+            <p>A IA usa <strong>esse texto</strong> como fonte primária do brief. Quanto mais limpo e completo, melhores os materiais.</p>
             <ul className="list-disc pl-5 space-y-1">
               <li>Remova ruídos, falas duplicadas e digressões.</li>
               <li>Mantenha nomes de produtos e SKUs corretos.</li>
