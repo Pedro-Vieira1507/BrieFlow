@@ -12,6 +12,58 @@ export const Route = createFileRoute("/campanha/$id/transcricao")({
   component: Page,
 });
 
+/**
+ * Normalizes the raw JSON returned by the AI into a valid StructuredBrief.
+ *
+ * Problems solved:
+ * - AI may use singular 'beneficio_cliente_final' instead of the plural
+ *   'beneficios_cliente_final' expected by the TypeScript type.
+ * - Any array field may be missing or null — default to [].
+ * - objecoes_argumentos items may have different key names.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function normalizeBrief(raw: any): StructuredBrief {
+  const toArr = (v: unknown): string[] =>
+    Array.isArray(v) ? (v as string[]) : [];
+
+  const toObjArr = (
+    v: unknown,
+  ): { objecao: string; argumento: string }[] => {
+    if (!Array.isArray(v)) return [];
+    return (v as Record<string, string>[]).map((item) => ({
+      objecao: item.objecao ?? item.objeção ?? item.objecoes ?? "",
+      argumento: item.argumento ?? item.argumentos ?? "",
+    }));
+  };
+
+  return {
+    marca: raw.marca ?? "",
+    campanha: raw.campanha ?? "",
+    publico_alvo: raw.publico_alvo ?? raw.publico ?? "",
+    proposta_comercial: raw.proposta_comercial ?? raw.proposta ?? "",
+    oferta_promocional: raw.oferta_promocional ?? raw.oferta ?? "",
+    subcategorias: toArr(raw.subcategorias),
+    diferenciais_tecnicos: toArr(
+      raw.diferenciais_tecnicos ?? raw.diferenciais,
+    ),
+    beneficios_revendedor: toArr(
+      raw.beneficios_revendedor ?? raw.beneficios_revendedores,
+    ),
+    // Support both plural and singular forms returned by the AI
+    beneficios_cliente_final: toArr(
+      raw.beneficios_cliente_final ?? raw.beneficio_cliente_final,
+    ),
+    objecoes_argumentos: toObjArr(
+      raw.objecoes_argumentos ?? raw.objecoes,
+    ),
+    tom_comunicacao: raw.tom_comunicacao ?? raw.tom ?? "",
+    observacoes: raw.observacoes ?? raw.observacao ?? "",
+    inferencias_ia: toArr(
+      raw.inferencias_ia ?? raw.inferencias,
+    ),
+  };
+}
+
 function Page() {
   const { id } = Route.useParams();
   const nav = useNavigate();
@@ -34,14 +86,15 @@ function Page() {
     try {
       store.setTranscricao(id, text);
       const raw = await inferBriefFromTranscriptAI(c!.nome, text);
-      let brief: StructuredBrief;
+      let parsed: unknown;
       try {
-        brief = JSON.parse(raw);
+        parsed = JSON.parse(raw);
       } catch {
         const match = raw.match(/\{[\s\S]*\}/);
         if (!match) throw new Error(raw.slice(0, 200));
-        brief = JSON.parse(match[0]);
+        parsed = JSON.parse(match[0]);
       }
+      const brief: StructuredBrief = normalizeBrief(parsed);
       store.setBrief(id, brief);
       toast.success("Brief gerado pela IA com sucesso!");
       nav({ to: "/campanha/$id/brief", params: { id } });

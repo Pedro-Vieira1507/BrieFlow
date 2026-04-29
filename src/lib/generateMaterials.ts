@@ -11,7 +11,7 @@ import {
   type AIModel,
 } from "./aiConfig";
 
-// ─── Retry helper ────────────────────────────────────────────────────────────────
+// ─── Retry helper ────────────────────────────────────────────────────────────
 async function withRetry<T>(
   fn: () => Promise<T>,
   retries = 3,
@@ -37,7 +37,7 @@ async function withRetry<T>(
   throw lastError;
 }
 
-// ─── Prompt builders ──────────────────────────────────────────────────────────────
+// ─── Prompt builders ──────────────────────────────────────────────────────────
 
 function briefContext(brief: StructuredBrief): string {
   return `
@@ -214,34 +214,33 @@ async function callAI(prompt: string): Promise<string> {
   return withRetry(() => callGemini(prompt, model, config.geminiKey));
 }
 
-// ─── Brief inference ─────────────────────────────────────────────────────────────────
+// ─── Brief inference ──────────────────────────────────────────────────────────
 
 /**
- * Builds the final prompt for brief inference, always ensuring the transcription
- * is present in the user message — regardless of whether a customPrompt is configured.
- *
- * If a customPrompt is saved in settings:
- *   - If it contains the placeholder {{transcricao}}, the placeholder is replaced.
- *   - Otherwise, the transcription block is appended at the end.
- *
- * This prevents the Groq/OpenAI model from responding with
- * "Não há transcrição fornecida" when customPrompt replaces the entire prompt.
+ * Builds the brief extraction prompt.
+ * Field names match StructuredBrief exactly (plural forms).
+ * The transcription block is always injected — even when customPrompt is used.
  */
 function buildBriefPrompt(
   nome: string,
   transcricao: string,
   customPrompt?: string,
 ): string {
-  const transcriptionBlock = `\nNome: ${nome}\n=== TRANSCRIÇÃO ===\n${transcricao}\n===================`;
+  const transcriptionBlock =
+    `\nNome da campanha: ${nome}` +
+    `\n=== TRANSCRIÇÃO ===\n${transcricao}\n===================`;
 
   if (!customPrompt) {
     return (
-      `Extraia um JSON estruturado da transcrição abaixo com os campos:\n` +
-      `marca, campanha, publico_alvo, proposta_comercial, oferta_promocional,\n` +
-      `subcategorias (array), diferenciais_tecnicos (array), beneficios_revendedor (array),\n` +
-      `beneficio_cliente_final (array), objecoes_argumentos (array de {objecao, argumento}),\n` +
-      `tom_comunicacao, observacoes, inferencias_ia (array).\n` +
-      `Use SOMENTE o que está na transcrição. Responda APENAS com JSON válido, sem markdown.` +
+      `Extraia um JSON estruturado da transcrição abaixo com EXATAMENTE estes campos:\n` +
+      `marca (string), campanha (string), publico_alvo (string), proposta_comercial (string),\n` +
+      `oferta_promocional (string), subcategorias (array de strings),\n` +
+      `diferenciais_tecnicos (array de strings), beneficios_revendedor (array de strings),\n` +
+      `beneficios_cliente_final (array de strings),\n` +
+      `objecoes_argumentos (array de objetos {objecao: string, argumento: string}),\n` +
+      `tom_comunicacao (string), observacoes (string), inferencias_ia (array de strings).\n` +
+      `Use SOMENTE informações presentes na transcrição. Se um campo não estiver claro, retorne array vazio [] ou string vazia "".\n` +
+      `Responda APENAS com JSON válido, sem markdown, sem blocos de código.` +
       transcriptionBlock
     );
   }
@@ -271,7 +270,7 @@ export async function inferBriefFromTranscriptAI(nome: string, transcricao: stri
   return callAI(prompt);
 }
 
-// ─── Generate all materials ───────────────────────────────────────────────────────────
+// ─── Generate all materials ───────────────────────────────────────────────────
 
 export type GenerationProgress = {
   current: number;

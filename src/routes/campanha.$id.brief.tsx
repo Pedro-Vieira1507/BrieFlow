@@ -114,23 +114,23 @@ function Page() {
             </CardContent>
           </Card>
 
-          <ListCard title="Subcategorias / Produtos" items={brief.subcategorias} onChange={(i, v) => setListItem("subcategorias", i, v)} onAdd={() => addItem("subcategorias")} onDel={(i) => delItem("subcategorias", i)} placeholder="Ex.: Micropipetas monocanal" />
-          <ListCard title="Diferenciais técnicos" items={brief.diferenciais_tecnicos} onChange={(i, v) => setListItem("diferenciais_tecnicos", i, v)} onAdd={() => addItem("diferenciais_tecnicos")} onDel={(i) => delItem("diferenciais_tecnicos", i)} placeholder="Ex.: Calibração ISO" />
-          <ListCard title="Benefícios para revendedor" items={brief.beneficios_revendedor} onChange={(i, v) => setListItem("beneficios_revendedor", i, v)} onAdd={() => addItem("beneficios_revendedor")} onDel={(i) => delItem("beneficios_revendedor", i)} placeholder="Ex.: Margem ampliada" />
-          <ListCard title="Benefícios para cliente final" items={brief.beneficios_cliente_final} onChange={(i, v) => setListItem("beneficios_cliente_final", i, v)} onAdd={() => addItem("beneficios_cliente_final")} onDel={(i) => delItem("beneficios_cliente_final", i)} placeholder="Ex.: Precisão e conforto" />
+          <ListCard title="Subcategorias / Produtos" items={brief.subcategorias ?? []} onChange={(i, v) => setListItem("subcategorias", i, v)} onAdd={() => addItem("subcategorias")} onDel={(i) => delItem("subcategorias", i)} placeholder="Ex.: Micropipetas monocanal" />
+          <ListCard title="Diferenciais técnicos" items={brief.diferenciais_tecnicos ?? []} onChange={(i, v) => setListItem("diferenciais_tecnicos", i, v)} onAdd={() => addItem("diferenciais_tecnicos")} onDel={(i) => delItem("diferenciais_tecnicos", i)} placeholder="Ex.: Calibração ISO" />
+          <ListCard title="Benefícios para revendedor" items={brief.beneficios_revendedor ?? []} onChange={(i, v) => setListItem("beneficios_revendedor", i, v)} onAdd={() => addItem("beneficios_revendedor")} onDel={(i) => delItem("beneficios_revendedor", i)} placeholder="Ex.: Margem ampliada" />
+          <ListCard title="Benefícios para cliente final" items={brief.beneficios_cliente_final ?? []} onChange={(i, v) => setListItem("beneficios_cliente_final", i, v)} onAdd={() => addItem("beneficios_cliente_final")} onDel={(i) => delItem("beneficios_cliente_final", i)} placeholder="Ex.: Precisão e conforto" />
 
           <Card className="lg:col-span-2">
             <CardHeader>
               <CardTitle className="text-base">Objeções & argumentos</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              {brief.objecoes_argumentos.map((o, i) => (
+              {(brief.objecoes_argumentos ?? []).map((o, i) => (
                 <div key={i} className="grid grid-cols-1 md:grid-cols-2 gap-3 items-start">
                   <Textarea
                     value={o.objecao}
                     placeholder="Objeção"
                     onChange={(e) => {
-                      const arr = [...brief.objecoes_argumentos];
+                      const arr = [...(brief.objecoes_argumentos ?? [])];
                       arr[i] = { ...arr[i], objecao: e.target.value };
                       set("objecoes_argumentos", arr);
                     }}
@@ -140,13 +140,13 @@ function Page() {
                       value={o.argumento}
                       placeholder="Argumento"
                       onChange={(e) => {
-                        const arr = [...brief.objecoes_argumentos];
+                        const arr = [...(brief.objecoes_argumentos ?? [])];
                         arr[i] = { ...arr[i], argumento: e.target.value };
                         set("objecoes_argumentos", arr);
                       }}
                     />
                     <Button variant="ghost" size="icon" onClick={() => {
-                      const arr = [...brief.objecoes_argumentos];
+                      const arr = [...(brief.objecoes_argumentos ?? [])];
                       arr.splice(i, 1);
                       set("objecoes_argumentos", arr);
                     }}>
@@ -155,7 +155,7 @@ function Page() {
                   </div>
                 </div>
               ))}
-              <Button variant="outline" size="sm" onClick={() => set("objecoes_argumentos", [...brief.objecoes_argumentos, { objecao: "", argumento: "" }])}>
+              <Button variant="outline" size="sm" onClick={() => set("objecoes_argumentos", [...(brief.objecoes_argumentos ?? []), { objecao: "", argumento: "" }])}>
                 <Plus className="h-4 w-4" /> Adicionar
               </Button>
             </CardContent>
@@ -173,7 +173,7 @@ function Page() {
                 <ListCard
                   embedded
                   title=""
-                  items={brief.inferencias_ia}
+                  items={brief.inferencias_ia ?? []}
                   onChange={(i, v) => setListItem("inferencias_ia", i, v)}
                   onAdd={() => addItem("inferencias_ia")}
                   onDel={(i) => delItem("inferencias_ia", i)}
@@ -193,9 +193,9 @@ function Field({ label, value, onChange, multiline }: { label: string; value: st
     <div className="space-y-1.5">
       <Label>{label}</Label>
       {multiline ? (
-        <Textarea value={value} onChange={(e) => onChange(e.target.value)} rows={3} />
+        <Textarea value={value ?? ""} onChange={(e) => onChange(e.target.value)} rows={3} />
       ) : (
-        <Input value={value} onChange={(e) => onChange(e.target.value)} />
+        <Input value={value ?? ""} onChange={(e) => onChange(e.target.value)} />
       )}
     </div>
   );
@@ -212,11 +212,12 @@ function ListCard({
   placeholder?: string;
   embedded?: boolean;
 }) {
+  const safeItems = items ?? [];
   const body = (
     <div className="space-y-2">
-      {items.map((it, i) => (
+      {safeItems.map((it, i) => (
         <div key={i} className="flex gap-2">
-          <Input value={it} placeholder={placeholder} onChange={(e) => onChange(i, e.target.value)} />
+          <Input value={it ?? ""} placeholder={placeholder} onChange={(e) => onChange(i, e.target.value)} />
           <Button variant="ghost" size="icon" onClick={() => onDel(i)}>
             <Trash2 className="h-4 w-4" />
           </Button>
