@@ -1,14 +1,18 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useCampaign, MATERIAL_META, type MaterialKey, store } from "@/lib/store";
-import { generateAllMaterials, type GenerationProgress } from "@/lib/generateMaterials";
+import {
+  generateAllMaterials,
+  generatePodcastAudio,
+  type GenerationProgress,
+} from "@/lib/generateMaterials";
 import { getActiveKey, loadAIConfig } from "@/lib/aiConfig";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Progress } from "@/components/ui/progress";
-import { Copy, Download, Sparkles, Loader2, Zap } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Copy, Download, Sparkles, Loader2, Zap, Mic } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/campanha/$id/materiais")({
@@ -23,11 +27,21 @@ function Page() {
   const [generating, setGenerating] = useState(false);
   const [progress, setProgress] = useState<GenerationProgress | null>(null);
 
+  // ── Podcast TTS state ────────────────────────────────────────────────────
+  const [audioSrc, setAudioSrc] = useState<string | null>(null);
+  const [ttsLoading, setTtsLoading] = useState(false);
+  const audioRef = useRef<HTMLAudioElement>(null);
+
   const keys = c?.materiais ? (Object.keys(c.materiais) as MaterialKey[]) : [];
 
   useEffect(() => {
     if (keys.length && !active) setActive(keys[0]);
   }, [keys, active]);
+
+  // Clear audio when switching campaigns
+  useEffect(() => {
+    setAudioSrc(null);
+  }, [id]);
 
   if (!c) return null;
 
@@ -44,6 +58,7 @@ function Page() {
       store.update(id, { materiais, status: "materiais_gerados" });
       toast.success("Todos os materiais gerados com sucesso!");
       setActive("");
+      setAudioSrc(null); // reset audio when script changes
     } catch (err) {
       toast.error(`Erro: ${(err as Error).message}`);
     } finally {
@@ -56,6 +71,40 @@ function Page() {
     store.generateMaterials(id);
     toast.success("Materiais de exemplo gerados (mock).");
     setActive("");
+    setAudioSrc(null);
+  }
+
+  async function gerarAudio() {
+    const script = edited["podcast_revendedores"] ?? c?.materiais?.["podcast_revendedores"] ?? "";
+    if (!script) {
+      toast.error("Gere o roteiro do podcast antes de converter para áudio.");
+      return;
+    }
+    if (!loadAIConfig().groqKey) {
+      toast.error("TTS requer a chave Groq. Configure em ⚙️ Configurações.");
+      return;
+    }
+    setTtsLoading(true);
+    try {
+      const dataUrl = await generatePodcastAudio(script);
+      setAudioSrc(dataUrl);
+      toast.success("Áudio gerado com sucesso! 🎙️");
+      // Auto-play after a short delay
+      setTimeout(() => audioRef.current?.play(), 300);
+    } catch (err) {
+      toast.error(`Erro ao gerar áudio: ${(err as Error).message}`);
+    } finally {
+      setTtsLoading(false);
+    }
+  }
+
+  function downloadAudio() {
+    if (!audioSrc) return;
+    const a = document.createElement("a");
+    a.href = audioSrc;
+    a.download = `${c!.nome.replace(/[^a-z0-9]+/gi, "_")}_podcast.wav`;
+    a.click();
+    toast.success("Download do áudio iniciado");
   }
 
   if (keys.length === 0) {
@@ -90,6 +139,7 @@ function Page() {
 
   const currentKey = (active || keys[0]) as MaterialKey;
   const content = edited[currentKey] ?? c.materiais?.[currentKey] ?? "";
+  const isPodcastTab = currentKey === "podcast_revendedores";
 
   function copy() {
     navigator.clipboard.writeText(content);
@@ -154,9 +204,28 @@ function Page() {
               <CardHeader className="flex flex-row items-start justify-between gap-4">
                 <div>
                   <CardTitle className="text-base">{MATERIAL_META[k].label}</CardTitle>
-                  <p className="text-xs text-muted-foreground mt-1">{MATERIAL_META[k].descricao} · Exporta como .{MATERIAL_META[k].ext}</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {MATERIAL_META[k].descricao} · Exporta como .{MATERIAL_META[k].ext}
+                  </p>
                 </div>
-                <div className="flex gap-2 shrink-0">
+                <div className="flex gap-2 shrink-0 flex-wrap justify-end">
+                  {/* TTS button — only on podcast tab */}
+                  {k === "podcast_revendedores" && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={gerarAudio}
+                      disabled={ttsLoading}
+                      className="border-violet-500/40 text-violet-600 hover:bg-violet-50 dark:hover:bg-violet-950"
+                    >
+                      {ttsLoading ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Mic className="h-4 w-4" />
+                      )}
+                      {ttsLoading ? "Gerando áudio…" : "🎙️ Gerar Áudio"}
+                    </Button>
+                  )}
                   <Button variant="outline" size="sm" onClick={copy}>
                     <Copy className="h-4 w-4" /> Copiar
                   </Button>
@@ -165,13 +234,64 @@ function Page() {
                   </Button>
                 </div>
               </CardHeader>
-              <CardContent>
+              <CardContent className="space-y-4">
+                {/* Audio player — rendered only after TTS is generated, on podcast tab */}
+                {k === "podcast_revendedores" && audioSrc && (
+                  <div className="rounded-xl border border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-950/30 p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-medium text-violet-700 dark:text-violet-300 flex items-center gap-2">
+                        <Mic className="h-4 w-4" /> Áudio gerado · Orpheus TTS
+                      </p>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={downloadAudio}
+                        className="text-violet-600 hover:text-violet-800 h-7 px-2"
+                      >
+                        <Download className="h-3 w-3 mr-1" /> .wav
+                      </Button>
+                    </div>
+                    {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+                    <audio
+                      ref={audioRef}
+                      controls
+                      src={audioSrc}
+                      className="w-full h-10 accent-violet-600"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Voz: Celeste (PT-BR) · Modelo: PlayAI TTS via Groq · Formato: WAV
+                    </p>
+                  </div>
+                )}
+
+                {/* TTS loading state */}
+                {k === "podcast_revendedores" && ttsLoading && (
+                  <div className="rounded-xl border border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-950/30 p-4">
+                    <div className="flex items-center gap-3 text-sm text-violet-600 dark:text-violet-400">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Convertendo roteiro em áudio via Groq TTS… Pode levar até 30 segundos.
+                    </div>
+                  </div>
+                )}
+
                 <Textarea
                   value={edited[k] ?? c.materiais?.[k] ?? ""}
                   onChange={(e) => setEdited((prev) => ({ ...prev, [k]: e.target.value }))}
-                  rows={22}
+                  rows={isPodcastTab ? 16 : 22}
                   className="font-mono text-sm leading-relaxed"
+                  placeholder={
+                    k === "podcast_revendedores"
+                      ? "Roteiro do podcast aparece aqui. Edite o texto e clique em 🎙️ Gerar Áudio para converter."
+                      : ""
+                  }
                 />
+
+                {k === "podcast_revendedores" && !audioSrc && !ttsLoading && (
+                  <p className="text-xs text-muted-foreground text-center">
+                    💡 Edite o roteiro acima se necessário e clique em{" "}
+                    <strong>🎙️ Gerar Áudio</strong> para criar o arquivo WAV (requer chave Groq).
+                  </p>
+                )}
               </CardContent>
             </Card>
           </TabsContent>
