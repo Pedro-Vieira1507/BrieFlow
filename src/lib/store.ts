@@ -72,6 +72,8 @@ export type Campaign = {
   transcricao: string;
   brief?: StructuredBrief;
   materiais?: Partial<Record<MaterialKey, string>>;
+  /** data URL `data:audio/wav;base64,...` gerado pelo Groq TTS para o podcast */
+  podcastAudioUrl?: string;
 };
 
 const seed: Campaign[] = [
@@ -330,6 +332,10 @@ export const store = {
     const c = store.get(id);
     if (!c) return;
     store.update(id, { materiais: buildMockMaterials(), status: "materiais_gerados" });
+  },
+  /** Persiste a data URL do áudio do podcast (gerado pelo Groq TTS) */
+  setPodcastAudio: (id: string, podcastAudioUrl: string) => {
+    store.update(id, { podcastAudioUrl });
   },
   remove: (id: string) => {
     state = { campaigns: state.campaigns.filter((c) => c.id !== id) };

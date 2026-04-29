@@ -227,6 +227,128 @@ async function callAI(prompt: string): Promise<string> {
   return withRetry(() => callGemini(prompt, model, config.geminiKey));
 }
 
+// ─── Groq TTS — Orpheus ───────────────────────────────────────────────────────
+
+/**
+ * Modelo Orpheus da Groq para texto-para-fala.
+ * Para conteúdo em PT-BR, use "playai-tts" com voice "Celeste-PlayAI" (multilingual).
+ * O Orpheus-English funciona com texto PT-BR mas sotaque é neutro.
+ *
+ * Vozes Orpheus disponíveis: tara (female), leo (male), luna (female),
+ * aurora (female), troy (male), river (neutral), dan (male), will (male), ada (female)
+ */
+const TTS_MODEL = "playai-tts";         // multilingual — melhor para PT-BR
+const TTS_VOICE = "Celeste-PlayAI";    // voz feminina, som natural em PT
+const TTS_MODEL_EN = "canopylabs/orpheus-3b-0.1-ft"; // alternativa Orpheus English
+const TTS_VOICE_EN = "tara";           // fallback Orpheus
+
+/**
+ * Converte ArrayBuffer para base64 sem estourar a stack (chunked).
+ */
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  const chunkSize = 8192;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
+}
+
+/**
+ * Limpa o roteiro de podcast para TTS:
+ * - remove cabeçalhos markdown (# Podcast ...)
+ * - remove marcadores de tempo ([INTRO 0:00–0:20])
+ * - colapsa linhas em branco excessivas
+ * - trunca em ~3 000 caracteres (≈ 4–5 min de áudio no Orpheus)
+ */
+function cleanScriptForTTS(script: string): string {
+  return script
+    .replace(/^#+\s.*/gm, "")                   // remove ## headings
+    .replace(/^\[\d+:\d+.*?\]/gm, "")            // remove timestamps [0:00–0:20]
+    .replace(/^\[.*?\]\s*/gm, "")               // remove outros marcadores [BLOCO ...]
+    .replace(/\n{3,}/g, "\n\n")
+    .trim()
+    .slice(0, 3000);                              // limite seguro para o modelo
+}
+
+/**
+ * Gera áudio WAV do roteiro de podcast via Groq TTS.
+ * Requer que a chave Groq esteja configurada em Configurações.
+ * Retorna uma data URL `data:audio/wav;base64,...` pronta para <audio src="...">
+ *
+ * Lança erro se:
+ * - chave Groq não configurada
+ * - API retornar erro (modelo indisponível, cota excedida etc.)
+ */
+export async function generatePodcastAudio(script: string): Promise<string> {
+  const config = loadAIConfig();
+  if (!config.groqKey) {
+    throw new Error(
+      "TTS requer a API do Groq. Configure a chave Groq em ⚙️ Configurações.",
+    );
+  }
+
+  const inputText = cleanScriptForTTS(script);
+  if (!inputText) {
+    throw new Error("Roteiro vazio após limpeza. Gere o podcast antes de converter para áudio.");
+  }
+
+  const res = await fetch("https://api.groq.com/openai/v1/audio/speech", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${config.groqKey}`,
+    },
+    body: JSON.stringify({
+      model: TTS_MODEL,
+      voice: TTS_VOICE,
+      input: inputText,
+      response_format: "wav",
+    }),
+  });
+
+  // Se playai-tts falhar, tenta Orpheus English como fallback
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}));
+    const errMsg = (errBody as { error?: { message?: string } }).error?.message ?? res.statusText;
+
+    if (res.status === 404 || res.status === 400) {
+      // fallback: Orpheus English
+      console.warn(`[BriefFlow] TTS fallback para Orpheus English: ${errMsg}`);
+      const res2 = await fetch("https://api.groq.com/openai/v1/audio/speech", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${config.groqKey}`,
+        },
+        body: JSON.stringify({
+          model: TTS_MODEL_EN,
+          voice: TTS_VOICE_EN,
+          input: inputText,
+          response_format: "wav",
+        }),
+      });
+      if (!res2.ok) {
+        const err2 = await res2.json().catch(() => ({}));
+        throw new Error(
+          `Groq TTS error ${res2.status}: ${
+            (err2 as { error?: { message?: string } }).error?.message ?? res2.statusText
+          }`,
+        );
+      }
+      const buf2 = await res2.arrayBuffer();
+      return `data:audio/wav;base64,${arrayBufferToBase64(buf2)}`;
+    }
+
+    throw new Error(`Groq TTS error ${res.status}: ${errMsg}`);
+  }
+
+  const arrayBuffer = await res.arrayBuffer();
+  return `data:audio/wav;base64,${arrayBufferToBase64(arrayBuffer)}`;
+}
+
 // ─── Brief inference ──────────────────────────────────────────────────────────
 
 /**
