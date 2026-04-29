@@ -12,10 +12,12 @@ import {
   saveAIConfig,
   type AIConfig,
   type AIModel,
+  type AIProvider,
   MODEL_CATALOG,
+  getModelProvider,
 } from "@/lib/aiConfig";
 import { useState, useEffect } from "react";
-import { Save, Eye, EyeOff, CheckCircle2, ExternalLink } from "lucide-react";
+import { Save, Eye, EyeOff, CheckCircle2, ExternalLink, KeyRound } from "lucide-react";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/configuracoes")({
@@ -54,13 +56,76 @@ const BADGE_LABELS: Record<string, string> = {
   paid: "Pago",
 };
 
+// Provider metadata for the key fields section
+const PROVIDER_INFO: Record<AIProvider, {
+  label: string;
+  placeholder: string;
+  description: string;
+  linkLabel: string;
+  linkUrl: string;
+}> = {
+  gemini: {
+    label: "Google Gemini",
+    placeholder: "AIzaSy…",
+    description: "Necessária para modelos Gemini 2.0 Flash, 2.5 Flash e 2.5 Pro.",
+    linkLabel: "Obter chave gratuita no Google AI Studio",
+    linkUrl: "https://aistudio.google.com/app/apikey",
+  },
+  openai: {
+    label: "OpenAI (GPT-4o)",
+    placeholder: "sk-…",
+    description: "Necessária para modelos GPT-4o e GPT-4o Mini.",
+    linkLabel: "Painel OpenAI",
+    linkUrl: "https://platform.openai.com/api-keys",
+  },
+  grok: {
+    label: "Grok — xAI",
+    placeholder: "xai-…",
+    description: "Necessária para modelos Grok 3 e Grok 3 Mini.",
+    linkLabel: "Painel xAI",
+    linkUrl: "https://console.x.ai",
+  },
+  mistral: {
+    label: "Mistral AI",
+    placeholder: "…",
+    description: "Necessária para Mistral Large e Mistral Small.",
+    linkLabel: "Painel Mistral",
+    linkUrl: "https://console.mistral.ai/api-keys",
+  },
+  anthropic: {
+    label: "Anthropic (Claude)",
+    placeholder: "sk-ant-…",
+    description: "Necessária para Claude 3.5 Sonnet e Claude 3 Haiku.",
+    linkLabel: "Painel Anthropic",
+    linkUrl: "https://console.anthropic.com/settings/keys",
+  },
+};
+
+type KeyState = {
+  geminiKey: string;
+  openaiKey: string;
+  grokKey: string;
+  anthropicKey: string;
+  mistralKey: string;
+};
+
+type ShowState = Record<AIProvider, boolean>;
+
 function Configuracoes() {
-  // Inicializa tudo com valores fixos para evitar hydration mismatch.
-  // loadAIConfig() é chamado apenas no useEffect (client-side).
-  const [openaiKey, setOpenaiKey] = useState("");
-  const [geminiKey, setGeminiKey] = useState("");
-  const [showOpenai, setShowOpenai] = useState(false);
-  const [showGemini, setShowGemini] = useState(false);
+  const [keys, setKeys] = useState<KeyState>({
+    geminiKey: "",
+    openaiKey: "",
+    grokKey: "",
+    anthropicKey: "",
+    mistralKey: "",
+  });
+  const [show, setShow] = useState<ShowState>({
+    gemini: false,
+    openai: false,
+    grok: false,
+    anthropic: false,
+    mistral: false,
+  });
   const [drive, setDrive] = useState(false);
   const [drivePath, setDrivePath] = useState("/Forlab/Campanhas");
   const [outDir, setOutDir] = useState("/Forlab/Materiais");
@@ -69,11 +134,15 @@ function Configuracoes() {
   const [wasSaved, setWasSaved] = useState(false);
   const [hydrated, setHydrated] = useState(false);
 
-  // Carrega config salva somente no cliente, após hydration
   useEffect(() => {
     const saved = loadAIConfig();
-    setOpenaiKey(saved.openaiKey);
-    setGeminiKey(saved.geminiKey);
+    setKeys({
+      geminiKey: saved.geminiKey,
+      openaiKey: saved.openaiKey,
+      grokKey: saved.grokKey ?? "",
+      anthropicKey: saved.anthropicKey ?? "",
+      mistralKey: saved.mistralKey ?? "",
+    });
     setDrive(saved.driveEnabled);
     setDrivePath(saved.drivePath);
     setOutDir(saved.driveOutDir);
@@ -82,12 +151,16 @@ function Configuracoes() {
     setHydrated(true);
   }, []);
 
+  const activeProvider = getModelProvider(model);
   const selectedMeta = MODEL_CATALOG[model];
 
   function salvar() {
     const config: AIConfig = {
-      openaiKey,
-      geminiKey,
+      openaiKey: keys.openaiKey,
+      geminiKey: keys.geminiKey,
+      grokKey: keys.grokKey,
+      anthropicKey: keys.anthropicKey,
+      mistralKey: keys.mistralKey,
       model,
       driveEnabled: drive,
       drivePath,
@@ -99,6 +172,19 @@ function Configuracoes() {
     setTimeout(() => setWasSaved(false), 2500);
     toast.success("Configurações salvas com sucesso.");
   }
+
+  function keyFieldName(provider: AIProvider): keyof KeyState {
+    const map: Record<AIProvider, keyof KeyState> = {
+      gemini: "geminiKey",
+      openai: "openaiKey",
+      grok: "grokKey",
+      anthropic: "anthropicKey",
+      mistral: "mistralKey",
+    };
+    return map[provider];
+  }
+
+  const providerOrder: AIProvider[] = ["gemini", "openai", "grok", "mistral", "anthropic"];
 
   return (
     <AppShell>
@@ -162,68 +248,87 @@ function Configuracoes() {
                 <div className="rounded-md bg-muted/50 border border-border px-4 py-3 text-xs text-muted-foreground space-y-1">
                   <p>
                     <strong>Modelo selecionado:</strong> {selectedMeta.label} —{" "}
-                    {selectedMeta.badge === "paid"
-                      ? "Requer chave OpenAI com créditos."
-                      : `Free tier: ${selectedMeta.freeRpm} req/min · ${(selectedMeta.freeTpm / 1000).toFixed(0)}K tokens/min.`}
+                    {selectedMeta.badge === "free" || selectedMeta.badge === "limited"
+                      ? `Free tier: ${selectedMeta.freeRpm} req/min · ${(selectedMeta.freeTpm / 1000).toFixed(0)}K tokens/min.`
+                      : `Requer chave ${PROVIDER_INFO[activeProvider].label} com créditos.`}
                   </p>
                   <p>🤖 <strong>Brief e materiais</strong> usam o modelo selecionado acima.</p>
                   <p>🎤 <strong>Transcrição</strong> usa Whisper local (gratuito, sem chave).</p>
-                  {selectedMeta.provider === "gemini" && (
-                    <a
-                      href="https://aistudio.google.com/app/apikey"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 text-accent hover:underline"
-                    >
-                      Obter chave Gemini gratuita no Google AI Studio
-                      <ExternalLink className="h-3 w-3" />
-                    </a>
-                  )}
                 </div>
               )}
             </CardContent>
           </Card>
 
           {/* Chaves de API */}
-          <Card>
-            <CardHeader><CardTitle className="text-base">Chaves de API</CardTitle></CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-1.5">
-                <Label>Google Gemini</Label>
-                <div className="relative">
-                  <Input
-                    type={showGemini ? "text" : "password"}
-                    placeholder="AIza…"
-                    value={geminiKey}
-                    onChange={(e) => setGeminiKey(e.target.value)}
-                    className="pr-9"
-                  />
-                  <button type="button" onClick={() => setShowGemini((v) => !v)}
-                    className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground">
-                    {showGemini ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
-                </div>
-                <p className="text-xs text-muted-foreground">Necessária para todos os modelos Gemini.</p>
+          <Card className="lg:col-span-2">
+            <CardHeader>
+              <CardTitle className="text-base">Chaves de API</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-5">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                {providerOrder.map((provider) => {
+                  const info = PROVIDER_INFO[provider];
+                  const fieldName = keyFieldName(provider);
+                  const isActive = provider === activeProvider;
+                  const isVisible = show[provider];
+
+                  return (
+                    <div
+                      key={provider}
+                      className={
+                        "rounded-lg border p-4 space-y-2 transition-colors " +
+                        (isActive
+                          ? "border-accent/60 bg-accent/5"
+                          : "border-border bg-transparent")
+                      }
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <Label className="flex items-center gap-1.5">
+                          <KeyRound className="h-3.5 w-3.5 text-muted-foreground" />
+                          {info.label}
+                        </Label>
+                        {isActive && (
+                          <span className="rounded-full bg-accent/15 text-accent text-xs font-medium px-2 py-0.5">
+                            Em uso
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="relative">
+                        <Input
+                          type={isVisible ? "text" : "password"}
+                          placeholder={info.placeholder}
+                          value={keys[fieldName]}
+                          onChange={(e) => setKeys({ ...keys, [fieldName]: e.target.value })}
+                          className="pr-9 font-mono text-sm"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShow((s) => ({ ...s, [provider]: !s[provider] }))}
+                          className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground"
+                        >
+                          {isVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        </button>
+                      </div>
+
+                      <p className="text-xs text-muted-foreground">{info.description}</p>
+
+                      <a
+                        href={info.linkUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-xs text-accent hover:underline"
+                      >
+                        {info.linkLabel}
+                        <ExternalLink className="h-3 w-3" />
+                      </a>
+                    </div>
+                  );
+                })}
               </div>
-              <div className="space-y-1.5">
-                <Label>OpenAI (GPT-4o)</Label>
-                <div className="relative">
-                  <Input
-                    type={showOpenai ? "text" : "password"}
-                    placeholder="sk-…"
-                    value={openaiKey}
-                    onChange={(e) => setOpenaiKey(e.target.value)}
-                    className="pr-9"
-                  />
-                  <button type="button" onClick={() => setShowOpenai((v) => !v)}
-                    className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground">
-                    {showOpenai ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
-                </div>
-                <p className="text-xs text-muted-foreground">Necessária apenas se usar modelos GPT.</p>
-              </div>
+
               <p className="text-xs text-muted-foreground rounded-md border border-border bg-muted/40 px-3 py-2">
-                ⚠️ Chaves salvas localmente no navegador. Para produção, prefira um backend seguro.
+                ⚠️ Chaves salvas localmente no navegador. Para produção, prefira variáveis de ambiente no backend.
               </p>
             </CardContent>
           </Card>
