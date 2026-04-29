@@ -17,21 +17,35 @@ function Page() {
   const { id } = Route.useParams();
   const c = useCampaign(id);
   const nav = useNavigate();
+
   const [text, setText] = useState(c?.transcricao ?? "");
+  const [charCount, setCharCount] = useState((c?.transcricao ?? "").length);
   const [inferring, setInferring] = useState(false);
 
-  // Ref gives us the CURRENT textarea value regardless of React render timing.
-  // useSyncExternalStore can force a re-render between setState and the next
-  // event-handler execution, causing a stale-closure where `text` is still "".
+  // Three-layer text capture to beat any React / iframe / sandbox issue:
+  // 1. latestText — plain JS ref updated on every input event (native, pre-React)
+  // 2. textareaRef — DOM element ref for direct .value access
+  // 3. text       — React state (stale-closure fallback)
+  const latestText = useRef(c?.transcricao ?? "");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Only initialise from store on first load (or when campaign switches).
-  // We deliberately avoid resetting after every store.emit() to prevent
-  // overwriting text the user has already typed.
+  /** Always returns the most up-to-date textarea content. */
+  function currentText(): string {
+    return (
+      latestText.current ||
+      textareaRef.current?.value ||
+      text
+    );
+  }
+
+  // Initialise once per campaign, never reset while the user is typing.
   const initializedId = useRef("");
   useEffect(() => {
     if (initializedId.current !== id) {
-      setText(c?.transcricao ?? "");
+      const t = c?.transcricao ?? "";
+      setText(t);
+      latestText.current = t;
+      setCharCount(t.length);
       initializedId.current = id;
     }
   }, [id, c?.transcricao]);
@@ -40,23 +54,32 @@ function Page() {
 
   const hasKey = !!getActiveKey();
 
-  /** Returns the most up-to-date text: DOM first, then React state. */
-  function currentText(): string {
-    return textareaRef.current?.value ?? text;
+  function handleChange(value: string) {
+    latestText.current = value; // always update ref first
+    setText(value);
+    setCharCount(value.length);
+  }
+
+  /** Native onInput handler — fires even when React synthetic events are suppressed in sandboxed iframes. */
+  function handleNativeInput(e: React.FormEvent<HTMLTextAreaElement>) {
+    const value = (e.target as HTMLTextAreaElement).value;
+    latestText.current = value;
+    setCharCount(value.length);
   }
 
   function salvar() {
     const t = currentText();
     setText(t);
+    latestText.current = t;
     store.setTranscricao(id, t);
     toast.success("Transcrição salva");
   }
 
-  // Lightweight local inference (no API)
   function gerarBriefLocal() {
     const t = currentText();
     if (!t.trim()) return toast.error("Transcrição vazia.");
     setText(t);
+    latestText.current = t;
     store.setTranscricao(id, t);
     const brief = inferBriefFromTranscript(c?.nome ?? "Campanha", t);
     brief.campanha = c?.nome ?? brief.campanha;
@@ -65,24 +88,20 @@ function Page() {
     nav({ to: "/campanha/$id/brief", params: { id } });
   }
 
-  // AI-powered inference
   async function gerarBriefIA() {
-    // Always read from DOM ref to bypass stale-closure issues
+    // Capture text through all three layers before any async/state operation
     const t = currentText();
     if (!t.trim()) return toast.error("Transcrição vazia.");
+
     setInferring(true);
     try {
-      // Persist to store before API call (status update triggers re-render,
-      // but we already captured `t` from the DOM — safe)
-      setText(t);
-      store.setTranscricao(id, t);
-
+      store.setTranscricao(id, t); // persist (triggers re-render — safe, t is already captured)
       const raw = await inferBriefFromTranscriptAI(c?.nome ?? "Campanha", t);
+
       let brief: StructuredBrief;
       try {
         brief = JSON.parse(raw);
       } catch {
-        // Some models wrap JSON in markdown fences
         const match = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
         brief = JSON.parse(match?.[1] ?? raw);
       }
@@ -108,7 +127,9 @@ function Page() {
             </Button>
             {hasKey ? (
               <Button size="sm" onClick={gerarBriefIA} disabled={inferring}>
-                {inferring ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                {inferring
+                  ? <Loader2 className="h-4 w-4 animate-spin" />
+                  : <Sparkles className="h-4 w-4" />}
                 Gerar brief com IA
               </Button>
             ) : (
@@ -122,18 +143,20 @@ function Page() {
           <Textarea
             ref={textareaRef}
             value={text}
-            onChange={(e) => setText(e.target.value)}
+            onChange={(e) => handleChange(e.target.value)}
+            onInput={handleNativeInput}
             rows={22}
             className="font-mono text-sm leading-relaxed"
             placeholder="Cole aqui a transcrição ou resumo da reunião. A IA usará esse texto para estruturar o brief."
           />
-          {text.length > 0 && (
-            <p className="mt-1.5 text-xs text-muted-foreground text-right">
-              {text.length.toLocaleString("pt-BR")} caracteres
-            </p>
-          )}
+          <p className="mt-1.5 text-xs text-muted-foreground text-right">
+            {charCount > 0
+              ? <span className="text-foreground font-medium">{charCount.toLocaleString("pt-BR")} caracteres capturados ✔</span>
+              : "Cole a transcrição acima antes de gerar o brief"}
+          </p>
         </CardContent>
       </Card>
+
       <div className="space-y-6">
         <Card>
           <CardHeader>
@@ -156,6 +179,7 @@ function Page() {
             )}
           </CardContent>
         </Card>
+
         {c.brief && (
           <Card>
             <CardHeader>
