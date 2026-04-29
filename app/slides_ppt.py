@@ -18,12 +18,20 @@ SLIDES_TEMPLATE_LOCAL = os.getenv(
     "SLIDES_TEMPLATE_PATH", "data/template_slides.pptx"
 )
 
+PPTX_MIME = (
+    "application/vnd.openxmlformats-officedocument"
+    ".presentationml.presentation"
+)
+
 
 def _extract_file_id(url: str) -> str:
     """Extrai o ID do arquivo a partir de uma URL do Google Drive/Slides."""
     match = re.search(r"/d/([a-zA-Z0-9_-]{25,})", url)
     if match:
         return match.group(1)
+    # Tenta como ID direto (sem barra)
+    if re.fullmatch(r"[a-zA-Z0-9_-]{25,}", url):
+        return url
     raise ValueError(
         f"Não foi possível extrair o ID do arquivo da URL: {url}"
     )
@@ -34,10 +42,14 @@ def download_template_from_drive(
 ) -> str:
     """
     Baixa o template de slides do Google Drive via API.
-    Exporta Google Slides → .pptx automaticamente.
+
+    Estratégia em 3 tentativas (em ordem):
+      1. Export como PPTX  — funciona se o arquivo for Google Slides nativo
+      2. Download direto   — funciona se o arquivo já for um .pptx enviado
+      3. Raise             — lança exceção para o chamador usar template local
 
     Args:
-        service: Serviço autenticado do Google Drive API.
+        service: Serviço autenticado do Google Drive API v3.
         output_path: Caminho local onde o template será salvo.
 
     Returns:
@@ -51,17 +63,15 @@ def download_template_from_drive(
 
     from googleapiclient.http import MediaIoBaseDownload
 
-    PPTX_MIME = (
-        "application/vnd.openxmlformats-officedocument"
-        ".presentationml.presentation"
-    )
+    file_id = _extract_file_id(SLIDES_TEMPLATE_URL)
+    logger.info(f"[SlidesTemplate] Baixando template do Drive (ID: {file_id})...")
 
+    dest_dir = os.path.dirname(output_path)
+    if dest_dir:
+        os.makedirs(dest_dir, exist_ok=True)
+
+    # ── Tentativa 1: export (Google Slides nativo → PPTX) ──────────────
     try:
-        file_id = _extract_file_id(SLIDES_TEMPLATE_URL)
-        logger.info(
-            f"[SlidesTemplate] Baixando template do Drive (ID: {file_id})..."
-        )
-
         request = service.files().export_media(
             fileId=file_id, mimeType=PPTX_MIME
         )
@@ -70,23 +80,62 @@ def download_template_from_drive(
         done = False
         while not done:
             status, done = downloader.next_chunk()
-            logger.info(
-                f"[SlidesTemplate] Progresso: {int(status.progress() * 100)}%"
-            )
-
-        dest_dir = os.path.dirname(output_path)
-        if dest_dir:
-            os.makedirs(dest_dir, exist_ok=True)
-
+            if status:
+                logger.info(
+                    f"[SlidesTemplate] Export: {int(status.progress() * 100)}%"
+                )
         with open(output_path, "wb") as f:
             f.write(buffer.getvalue())
-
-        logger.info(f"[SlidesTemplate] ✅ Template salvo: {output_path}")
+        logger.info(f"[SlidesTemplate] ✅ Template salvo via export: {output_path}")
         return output_path
 
-    except Exception as e:
-        logger.error(f"[SlidesTemplate] Erro ao baixar template: {e}")
-        raise
+    except Exception as e_export:
+        logger.warning(
+            f"[SlidesTemplate] export_media falhou ({e_export}). "
+            "Tentando download direto (arquivo PPTX nativo)..."
+        )
+
+    # ── Tentativa 2: download direto (arquivo .pptx enviado no Drive) ──
+    try:
+        # Verifica o mimeType real do arquivo
+        meta = service.files().get(
+            fileId=file_id, fields="id,name,mimeType"
+        ).execute()
+        mime = meta.get("mimeType", "")
+        logger.info(f"[SlidesTemplate] mimeType do arquivo no Drive: {mime}")
+
+        if mime == PPTX_MIME or "presentation" in mime:
+            request = service.files().get_media(fileId=file_id)
+            buffer = io.BytesIO()
+            downloader = MediaIoBaseDownload(buffer, request)
+            done = False
+            while not done:
+                status, done = downloader.next_chunk()
+                if status:
+                    logger.info(
+                        f"[SlidesTemplate] Download: "
+                        f"{int(status.progress() * 100)}%"
+                    )
+            with open(output_path, "wb") as f:
+                f.write(buffer.getvalue())
+            logger.info(
+                f"[SlidesTemplate] ✅ Template salvo via get_media: {output_path}"
+            )
+            return output_path
+        else:
+            raise ValueError(
+                f"Arquivo no Drive não é um PPTX (mimeType={mime}). "
+                "Envie o template como .pptx no Drive ou use um Google Slides nativo."
+            )
+
+    except Exception as e_direct:
+        logger.error(
+            f"[SlidesTemplate] Download direto também falhou: {e_direct}"
+        )
+        raise RuntimeError(
+            f"Não foi possível baixar o template do Drive. "
+            f"Erro export: {e_export} | Erro direto: {e_direct}"
+        ) from e_direct
 
 
 def parse_slides_content(raw_text: str) -> list[dict]:
@@ -128,7 +177,7 @@ def parse_slides_content(raw_text: str) -> list[dict]:
             flush()
             current_title = match.group(1).strip()
             current_bullets = []
-        elif stripped.startswith(("- ", "* ", "• ")):
+        elif stripped.startswith(("- ", "* ", "\u2022 ")):
             current_bullets.append(stripped[2:].strip())
         elif current_title:
             current_bullets.append(stripped)
@@ -136,7 +185,7 @@ def parse_slides_content(raw_text: str) -> list[dict]:
     flush()
 
     if not slides:
-        # Fallback: divide por linhas duplas se não encontrar marcadores
+        # Fallback: divide por linhas duplas se nao encontrar marcadores
         blocks = [b.strip() for b in raw_text.split("\n\n") if b.strip()]
         for i, block in enumerate(blocks):
             lines = [ln.strip() for ln in block.split("\n") if ln.strip()]
@@ -170,16 +219,20 @@ def build_presentation_from_template(
     if not os.path.exists(template_path):
         raise FileNotFoundError(
             f"Template não encontrado: {template_path}. "
-            "Execute download_template_from_drive(service) primeiro."
+            "Execute download_template_from_drive(service) primeiro ou "
+            "coloque o arquivo em: " + template_path
         )
 
     try:
         prs = Presentation(template_path)
 
         # Usa o layout 1 (Title and Content) como padrão
-        # Se o template tiver layouts customizados, ajuste o índice
         available_layouts = prs.slide_layouts
-        content_layout = available_layouts[1] if len(available_layouts) > 1 else available_layouts[0]
+        content_layout = (
+            available_layouts[1]
+            if len(available_layouts) > 1
+            else available_layouts[0]
+        )
 
         # Remove slides de exemplo do template, mantendo apenas o de capa (índice 0)
         slide_id_list = prs.slides._sldIdLst
@@ -197,19 +250,18 @@ def build_presentation_from_template(
             # Preenche o placeholder de título
             if slide.shapes.title:
                 slide.shapes.title.text = title_text
-                if slide.shapes.title.text_frame.paragraphs:
-                    run = slide.shapes.title.text_frame.paragraphs[0].runs
-                    if run:
-                        run[0].font.size = Pt(28)
+                runs = slide.shapes.title.text_frame.paragraphs[0].runs
+                if runs:
+                    runs[0].font.size = Pt(28)
 
             # Preenche o placeholder de corpo
-            body_placeholder = (
+            body_ph = (
                 slide.placeholders[1]
                 if len(slide.placeholders) > 1
                 else None
             )
-            if body_placeholder:
-                tf = body_placeholder.text_frame
+            if body_ph:
+                tf = body_ph.text_frame
                 tf.clear()
                 tf.word_wrap = True
 

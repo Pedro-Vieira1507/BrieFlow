@@ -3,10 +3,16 @@
 Pipeline de geração de materiais de marketing para a campanha
 "Compre 3 Leve 4 — DLAB" da Forlab.
 
-LLM utilizado: Google Gemini (google-genai SDK) — sem custo de créditos OpenAI.
-TTS utilizado: Google Cloud Text-to-Speech — compartilha credenciais OAuth2 do Drive.
+LLM utilizado: Google Gemini (google-genai SDK).
+TTS utilizado: Google Cloud Text-to-Speech.
+
+RESILIÊNCIA:
+  - Retry automático com backoff exponencial para erros 429 (rate-limit)
+  - Fallback de modelo: gemini-2.0-flash → gemini-1.5-flash
+  - Intervalo mínimo entre chamadas para respeitar cota Free Tier
 """
 import os
+import time
 import logging
 from dotenv import load_dotenv
 
@@ -24,12 +30,24 @@ logger = logging.getLogger(__name__)
 # ── Configuração do LLM (Gemini) ─────────────────────────────────────
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 LLM_MODEL = os.getenv("LLM_MODEL", "gemini-2.0-flash")
+LLM_FALLBACK_MODEL = os.getenv("LLM_FALLBACK_MODEL", "gemini-1.5-flash")
+
+# Intervalo mínimo entre chamadas à API (segundos) — evita 429 no Free Tier
+# Free Tier: 15 req/min → ~4s entre chamadas é seguro
+MIN_CALL_INTERVAL = float(os.getenv("LLM_MIN_INTERVAL", "5"))
+
+# Retry: número máximo de tentativas e backoff base (segundos)
+MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "4"))
+BACKOFF_BASE = float(os.getenv("LLM_BACKOFF_BASE", "15"))
 
 if not GEMINI_API_KEY:
     logger.warning(
         "[LLM] GEMINI_API_KEY não definida no .env. "
         "Obtenha sua chave gratuita em: https://aistudio.google.com/app/apikey"
     )
+
+# Timestamp da última chamada (throttle global)
+_last_call_ts: float = 0.0
 
 
 # ─────────────────────────────────────────────
@@ -224,13 +242,30 @@ BRIEFING:
 
 
 # ─────────────────────────────────────────────
-# LLM (Gemini) + HELPERS
+# LLM (Gemini) — com retry e backoff
 # ─────────────────────────────────────────────
+
+def _parse_retry_delay(error_message: str, default: float = BACKOFF_BASE) -> float:
+    """
+    Tenta extrair o retryDelay sugerido pela API Google no corpo do erro.
+    Exemplo: 'Please retry in 10.44s'
+    """
+    import re
+    match = re.search(r"retry in ([\d.]+)s", str(error_message))
+    if match:
+        return float(match.group(1)) + 2  # +2s de margem
+    return default
+
 
 def call_llm_api(prompt: str, temperature: float = 0.7) -> str:
     """
-    Envia um prompt para o Google Gemini e retorna o texto gerado.
-    Usa o SDK google-genai (já presente no requirements.txt).
+    Envia um prompt para o Google Gemini com retry automático.
+
+    Comportamento em caso de erro 429 (RESOURCE_EXHAUSTED):
+      1. Extrai o retryDelay sugerido pela API
+      2. Aguarda o tempo indicado + margem
+      3. Tenta até MAX_RETRIES vezes com backoff exponencial
+      4. Se ainda falhar, tenta o modelo de fallback (LLM_FALLBACK_MODEL)
 
     Args:
         prompt: Texto completo do prompt.
@@ -239,32 +274,75 @@ def call_llm_api(prompt: str, temperature: float = 0.7) -> str:
     Returns:
         Texto gerado pelo modelo.
     """
-    try:
-        from google import genai
-        from google.genai import types
+    global _last_call_ts
 
-        client = genai.Client(api_key=GEMINI_API_KEY)
+    from google import genai
+    from google.genai import types
 
-        logger.info(
-            f"[LLM] Chamando {LLM_MODEL} via Gemini (temperature={temperature})..."
-        )
+    client = genai.Client(api_key=GEMINI_API_KEY)
 
-        response = client.models.generate_content(
-            model=LLM_MODEL,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                temperature=temperature,
-                max_output_tokens=8192,
-            ),
-        )
+    models_to_try = [LLM_MODEL]
+    if LLM_FALLBACK_MODEL and LLM_FALLBACK_MODEL != LLM_MODEL:
+        models_to_try.append(LLM_FALLBACK_MODEL)
 
-        content = response.text or ""
-        logger.info(f"[LLM] ✅ Resposta recebida ({len(content)} caracteres)")
-        return content
+    last_exception = None
 
-    except Exception as e:
-        logger.error(f"[LLM] Erro na chamada Gemini API: {e}")
-        raise
+    for model in models_to_try:
+        for attempt in range(1, MAX_RETRIES + 1):
+            # Throttle global: garante intervalo mínimo entre chamadas
+            elapsed = time.time() - _last_call_ts
+            if elapsed < MIN_CALL_INTERVAL:
+                wait = MIN_CALL_INTERVAL - elapsed
+                logger.debug(f"[LLM] Throttle: aguardando {wait:.1f}s antes da chamada...")
+                time.sleep(wait)
+
+            logger.info(
+                f"[LLM] Chamando {model} "
+                f"(temperature={temperature}, tentativa {attempt}/{MAX_RETRIES})..."
+            )
+
+            try:
+                _last_call_ts = time.time()
+                response = client.models.generate_content(
+                    model=model,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        temperature=temperature,
+                        max_output_tokens=8192,
+                    ),
+                )
+                content = response.text or ""
+                logger.info(
+                    f"[LLM] ✅ Resposta de {model} ({len(content)} caracteres)"
+                )
+                return content
+
+            except Exception as e:
+                last_exception = e
+                err_str = str(e)
+
+                if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                    if attempt < MAX_RETRIES:
+                        wait = _parse_retry_delay(err_str, BACKOFF_BASE * attempt)
+                        logger.warning(
+                            f"[LLM] 429 em {model} (tentativa {attempt}). "
+                            f"Aguardando {wait:.0f}s..."
+                        )
+                        time.sleep(wait)
+                        continue
+                    else:
+                        logger.warning(
+                            f"[LLM] Esgotadas tentativas em {model}. "
+                            "Tentando próximo modelo (se disponível)..."
+                        )
+                        break  # tenta próximo modelo
+                else:
+                    # Erro não relacionado a rate-limit: falha imediata
+                    logger.error(f"[LLM] Erro não recuperável em {model}: {e}")
+                    raise
+
+    logger.error(f"[LLM] Todos os modelos falharam. Último erro: {last_exception}")
+    raise last_exception
 
 
 def load_example_text(asset_key: str) -> str:
@@ -307,7 +385,7 @@ def generate_assets_for_brief(
 
     Fluxo por asset:
       1. Monta o prompt específico com o briefing
-      2. Chama o Gemini para gerar o conteúdo textual
+      2. Chama o Gemini com retry automático (backoff em caso de 429)
       3. Salva no formato correto (.pdf, .pptx, .mp3, .txt)
 
     Args:
@@ -385,9 +463,9 @@ def generate_assets_for_brief(
             logger.error(f"[Pipeline] ❌ Erro ao gerar '{key}': {e}")
             results[key] = f"ERRO: {e}"
 
+    sucesso = sum(1 for v in results.values() if not v.startswith("ERRO"))
     logger.info(
-        f"[Pipeline] Pipeline concluído. "
-        f"{sum(1 for v in results.values() if not v.startswith('ERRO'))} de "
-        f"{len(results)} asset(s) gerado(s) com sucesso."
+        f"[Pipeline] Pipeline concluído: "
+        f"{sucesso}/{len(results)} asset(s) gerado(s) com sucesso."
     )
     return results
