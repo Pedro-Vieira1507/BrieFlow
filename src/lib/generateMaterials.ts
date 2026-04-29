@@ -2,21 +2,31 @@
 import { type StructuredBrief, type MaterialKey } from "./store";
 import { loadAIConfig, isOpenAIModel, geminiApiId, type AIModel } from "./aiConfig";
 
-// ─── Retry helper ─────────────────────────────────────────────────────────────
-async function withRetry<T>(fn: () => Promise<T>, retries = 3, baseDelayMs = 8000): Promise<T> {
+// ─── Retry helper (respeita Retry-After do Gemini) ────────────────────────────
+async function withRetry<T>(
+  fn: () => Promise<T & { _retryAfterMs?: number }>,
+  retries = 3,
+): Promise<T> {
+  let lastError: Error = new Error("Max retries exceeded");
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      return await fn();
+      return await fn() as T;
     } catch (err) {
-      const msg = (err as Error).message ?? "";
+      lastError = err as Error;
+      const msg = lastError.message ?? "";
       const isRetryable = msg.includes("429") || msg.includes("503") || msg.includes("RESOURCE_EXHAUSTED");
-      if (!isRetryable || attempt === retries) throw err;
-      const delay = baseDelayMs * Math.pow(2, attempt);
-      console.warn(`[BriefFlow] Retry ${attempt + 1}/${retries} in ${delay}ms — ${msg}`);
-      await new Promise((r) => setTimeout(r, delay));
+      if (!isRetryable || attempt === retries) throw lastError;
+
+      // Extrai o tempo sugerido pelo Gemini ("Please retry in 47.9s")
+      const retryMatch = msg.match(/retry in (\d+(?:\.\d+)?)s/);
+      const suggestedMs = retryMatch ? Math.ceil(parseFloat(retryMatch[1])) * 1000 : 0;
+      const backoffMs = Math.max(suggestedMs, 12000 * Math.pow(2, attempt)); // mínimo 12s, 24s, 48s
+
+      console.warn(`[BriefFlow] Retry ${attempt + 1}/${retries} in ${(backoffMs / 1000).toFixed(0)}s`);
+      await new Promise((r) => setTimeout(r, backoffMs));
     }
   }
-  throw new Error("Max retries exceeded");
+  throw lastError;
 }
 
 // ─── Prompt builders ──────────────────────────────────────────────────────────
@@ -51,120 +61,90 @@ const PROMPTS: Record<MaterialKey, (brief: StructuredBrief, customPrompt?: strin
     `${briefContext(b)}
 
 Crie um ROTEIRO DE PODCAST DE 5 MINUTOS para revendedores de laboratório.
-Estrutura obrigatória:
 [INTRO 0:00–0:20] Abertura impactante mencionando a oferta
-[BLOCO 1 — Contexto 0:20–1:30] Por que a linha ${b.marca} é relevante agora
-[BLOCO 2 — Subcategorias 1:30–3:00] Destaque rápido de cada subcategoria: ${b.subcategorias.join(", ")}
-[BLOCO 3 — Argumentos comerciais 3:00–4:20] Benefícios para o revendedor, diferenciais técnicos
-[CTA 4:20–5:00] Chamada à ação clara com urgência, mencionando: ${b.oferta_promocional}
-Tom: ${b.tom_comunicacao}. Pegada comercial. Use linguagem de especialista B2B.`,
+[BLOCO 1 0:20–1:30] Por que a linha ${b.marca} é relevante agora
+[BLOCO 2 1:30–3:00] Subcategorias: ${b.subcategorias.join(", ")}
+[BLOCO 3 3:00–4:20] Benefícios para revendedor, diferenciais técnicos
+[CTA 4:20–5:00] Chamada à ação com urgência: ${b.oferta_promocional}
+Tom: ${b.tom_comunicacao}.`,
 
   apresentacao_slides: (b, custom) =>
     custom ||
     `${briefContext(b)}
 
-Crie uma APRESENTAÇÃO DE 10 SLIDES para capacitação técnica de revendedores.
-Para cada slide, forneça: número, título e 3-5 bullets objetivos.
-Estrutura sugerida:
-1. Capa (campanha + marca)
-2. Quem é a ${b.marca} (posicionamento global)
-3. Por que pipetadores de qualidade importam
-4-8. Linha completa: ${b.subcategorias.join(", ")} — distribua conforme relevância
-9. Oferta: ${b.oferta_promocional}
-10. Próximos passos e contato
-Foco: Capacitação Técnica. Tom: ${b.tom_comunicacao}.`,
+Crie uma APRESENTAÇÃO DE 10 SLIDES para capacitação de revendedores.
+Cada slide: número, título, 3-5 bullets.
+Slide 1: Capa. Slide 2: Quem é ${b.marca}. Slide 3: Por que qualidade importa.
+Slides 4-8: Subcategorias (${b.subcategorias.join(", ")}).
+Slide 9: Oferta (${b.oferta_promocional}). Slide 10: Próximos passos.`,
 
   folheto_a4: (b, custom) =>
     custom ||
     `${briefContext(b)}
 
-Crie o TEXTO COMPLETO DE UM FOLHETO PROMOCIONAL A4 para cliente final de laboratório.
-Incluir obrigatoriamente:
-- Título chamativo com a oferta: ${b.oferta_promocional}
-- Subtítulo de posicionamento
-- Apresentação da linha com os produtos: ${b.subcategorias.join(", ")}
-- Box de destaques técnicos: ${b.diferenciais_tecnicos.join("; ")}
-- Bloco de benefícios para o usuário final
-- Rodapé com CTA e informações da distribuidora
-Foco: Promocional. Linguagem acessível para técnicos e compradores de laboratório.`,
+Crie texto de FOLHETO A4 PROMOCIONAL para cliente final.
+Incluir: título com oferta (${b.oferta_promocional}), subtítulo, produtos (${b.subcategorias.join(", ")}), destaques técnicos, benefícios, CTA.`,
 
   ficha_tecnica: (b, custom) =>
     custom ||
     `${briefContext(b)}
 
-Crie uma FICHA TÉCNICA INTERNA para vendedores da Forlab.
-Formato estruturado com:
-- Cabeçalho: marca, linha, distribuidora, vigência da campanha
-- Lista por subcategoria com 2-3 diferenciais chave de cada: ${b.subcategorias.join(", ")}
-- Mecânica comercial: ${b.oferta_promocional}
-- Argumentário rápido: ${b.beneficios_revendedor.join("; ")}
-- Quebra de objeções: ${b.objecoes_argumentos.map((o) => `"${o.objecao}" → ${o.argumento}`).join(" | ")}
-- Alerta de vigência e urgência
-Tom: direto, técnico, uso interno.`,
+Crie FICHA TÉCNICA INTERNA para vendedores.
+Cabeçalho + subcategorias com diferenciais + mecânica (${b.oferta_promocional}) + argumentário + quebra de objeções. Tom direto, uso interno.`,
 
   emails_revendedores: (b, custom) =>
     custom ||
     `${briefContext(b)}
 
-Crie uma SEQUÊNCIA DE 2 EMAILS DE MARKETING para revendedores.
-
-E-MAIL 1 — Apresentação das Subcategorias:
-Assunto: impactante, mencionando a linha ${b.marca}
-Corpo: apresentar cada subcategoria (${b.subcategorias.join(", ")}) com 1-2 linhas sobre aplicação e diferencial. Finalizar com gancho para próximo email.
-
-E-MAIL 2 — Oferta:
-Assunto: urgência + oferta
-Corpo: reforçar diferenciais técnicos, apresentar mecânica (${b.oferta_promocional}), benefícios de margem para o revendedor, CTA claro.
-
-Separe os emails com === E-MAIL 1 === e === E-MAIL 2 ===`,
+2 E-MAILS para revendedores.
+E-MAIL 1: apresentação das subcategorias (${b.subcategorias.join(", ")}) com aplicação e diferencial.
+E-MAIL 2: oferta (${b.oferta_promocional}), margem para revendedor, CTA urgente.
+Separe com === E-MAIL 1 === e === E-MAIL 2 ===`,
 
   emails_cliente_final: (b, custom) =>
     custom ||
     `${briefContext(b)}
 
-Crie uma SEQUÊNCIA DE 3 EMAILS DE MARKETING para cliente final (laboratórios).
-
-E-MAIL 1 — TOPO DE FUNIL: posicionamento ${b.marca}, tipos de pipetadores (${b.subcategorias.join(", ")}), ecossistema Forlab.
-E-MAIL 2 — MEIO DE FUNIL: diferenciais técnicos vs. concorrentes, importância do ecossistema completo.
-E-MAIL 3 — FUNDO DE FUNIL: ${b.oferta_promocional}, CTA direto.
-
+3 E-MAILS para laboratórios.
+E-MAIL 1 — Topo: ${b.marca}, tipos de pipetadores, ecossistema Forlab.
+E-MAIL 2 — Meio: diferenciais vs. concorrentes.
+E-MAIL 3 — Fundo: ${b.oferta_promocional}, CTA direto.
 Separe com === E-MAIL 1 ===, === E-MAIL 2 ===, === E-MAIL 3 ===`,
 
   posts_linkedin: (b, custom) =>
     custom ||
     `${briefContext(b)}
 
-Crie 2 POSTS PARA LINKEDIN (público B2B — gestores, compradores técnicos, revendedores).
-Post 1: autoridade técnica, diferenciais de qualidade. Tom profissional. Máx 150 palavras + 3-5 hashtags.
-Post 2: oferta ${b.oferta_promocional}, benefícios para o laboratório, CTA. Máx 150 palavras + hashtags.
+2 POSTS LINKEDIN (B2B).
+Post 1: autoridade técnica, máx 150 palavras + hashtags.
+Post 2: oferta ${b.oferta_promocional}, CTA, máx 150 palavras + hashtags.
 Separe com [POST 1] e [POST 2].`,
 
   posts_facebook: (b, custom) =>
     custom ||
     `${briefContext(b)}
 
-Crie 2 POSTS PARA FACEBOOK para público misto (técnicos e compradores).
-Post 1: apresentação da linha ${b.marca} de forma acessível. Tom amigável. Máx 120 palavras.
-Post 2: oferta ${b.oferta_promocional} com urgência. Inclua emojis relevantes, CTA claro. Máx 100 palavras.
+2 POSTS FACEBOOK.
+Post 1: apresentação ${b.marca}, amigável, máx 120 palavras.
+Post 2: oferta ${b.oferta_promocional} + urgência + emojis, máx 100 palavras.
 Separe com [POST 1] e [POST 2].`,
 
   posts_instagram: (b, custom) =>
     custom ||
     `${briefContext(b)}
 
-Crie 2 CONCEITOS DE POSTS PARA INSTAGRAM.
-Post 1 — Carrossel educativo: capa, 4-5 slides com conteúdo e visual sugerido, slide de CTA. Legenda + hashtags.
-Post 2 — Reels/Stories 15-30s: roteiro cena a cena com visual, texto overlay e música sugerida. Legenda curta + hashtags.
+2 POSTS INSTAGRAM.
+Post 1 — Carrossel: capa + 4-5 slides + CTA. Legenda + hashtags.
+Post 2 — Reels 15-30s: roteiro cena a cena + música + legenda.
 Separe com [POST 1 — Carrossel] e [POST 2 — Reels].`,
 
   roteiro_video_curto: (b, custom) =>
     custom ||
     `${briefContext(b)}
 
-Crie um ROTEIRO DE VÍDEO CURTO DE 15-30 SEGUNDOS para Reels e YouTube Shorts.
-Formato cena a cena: [0–Xs] Visual | Texto na tela | Locução | Música sugerida
-Requisitos: abertura impactante nos primeiros 3s, produto em uso real, oferta ${b.oferta_promocional} visualmente, CTA final.
-Tom: ${b.tom_comunicacao}. Adequado para 9:16 e 16:9.`,
+ROTEIRO VÍDEO 15-30s para Reels e Shorts.
+Cena a cena: [Xs–Ys] Visual | Texto na tela | Locução | Música.
+Abertura impactante em 3s, produto em uso, oferta (${b.oferta_promocional}), CTA final. Tom: ${b.tom_comunicacao}.`,
 };
 
 // ─── API callers ──────────────────────────────────────────────────────────────
@@ -200,7 +180,7 @@ async function callGemini(prompt: string, model: AIModel, apiKey: string): Promi
     body: JSON.stringify({
       system_instruction: { parts: [{ text: SYSTEM_ROLE }] },
       contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.7, maxOutputTokens: 2000 },
+      generationConfig: { temperature: 0.7, maxOutputTokens: 2048 },
     }),
   });
   if (!res.ok) {
@@ -232,16 +212,14 @@ export async function inferBriefFromTranscriptAI(nome: string, transcricao: stri
 
   const prompt =
     customPrompt ||
-    `A partir da transcrição/briefing abaixo, extraia um JSON estruturado com os campos:
+    `Extraia um JSON estruturado da transcrição abaixo com os campos:
 marca, campanha, publico_alvo, proposta_comercial, oferta_promocional,
 subcategorias (array), diferenciais_tecnicos (array), beneficios_revendedor (array),
 beneficio_cliente_final (array), objecoes_argumentos (array de {objecao, argumento}),
-tom_comunicacao, observacoes, inferencias_ia (array — campos onde você inferiu sem dado explícito).
+tom_comunicacao, observacoes, inferencias_ia (array).
+Use SOMENTE o que está na transcrição. Responda APENAS com JSON válido, sem markdown.
 
-Não invente categorias fixas. Use SOMENTE o que está na transcrição. Responda APENAS com JSON válido, sem markdown.
-
-Nome da campanha: ${nome}
-
+Nome: ${nome}
 === TRANSCRIÇÃO ===
 ${transcricao}
 ===================`;
@@ -292,9 +270,9 @@ export async function generateAllMaterials(
       results[key] = `[ERRO ao gerar este material]\n${(err as Error).message}`;
     }
 
-    // Pausa entre materiais para respeitar o rate limit do free tier
+    // Pausa entre materiais: 4s para free tier 15 RPM, garante < 15 req/min
     if (i < keys.length - 1) {
-      await new Promise((r) => setTimeout(r, 6500));
+      await new Promise((r) => setTimeout(r, 4500));
     }
   }
 

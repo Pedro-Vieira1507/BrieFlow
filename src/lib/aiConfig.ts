@@ -6,27 +6,28 @@
 
 export type AIProvider = "gemini" | "openai";
 
+// IDs estáveis verificados em abril/2026:
+//   gemini-2.0-flash           — estável, 15 RPM free tier
+//   gemini-2.5-flash           — alias estável (sem sufixo -preview)
+//   gemini-2.5-pro             — alias estável
 export type AIModel =
-  // ── Gemini (Google AI Studio) ──
-  | "gemini-2.0-flash"          // gemini-2.0-flash  — 100 RPM free
-  | "gemini-2.5-flash"          // gemini-2.5-flash-preview-04-17
-  | "gemini-2.5-pro"            // gemini-2.5-pro-preview-05-06
-  // ── OpenAI ──
+  | "gemini-2.0-flash"
+  | "gemini-2.5-flash"
+  | "gemini-2.5-pro"
   | "gpt-4o-mini"
   | "gpt-4o";
 
 export type ModelMeta = {
   label: string;
   provider: AIProvider;
-  apiId: string;          // ID real usado na chamada à API
-  freeRpm: number;        // req/min no free tier (0 = sem free tier)
-  freeTpm: number;        // tokens/min no free tier
+  apiId: string;          // ID exato enviado à API
+  freeRpm: number;
+  freeTpm: number;
   badge: "free" | "paid" | "limited";
   note: string;
 };
 
 export const MODEL_CATALOG: Record<AIModel, ModelMeta> = {
-  // —— Gemini free tier ——
   "gemini-2.0-flash": {
     label: "Gemini 2.0 Flash",
     provider: "gemini",
@@ -34,27 +35,26 @@ export const MODEL_CATALOG: Record<AIModel, ModelMeta> = {
     freeRpm: 15,
     freeTpm: 1_000_000,
     badge: "free",
-    note: "15 req/min gratuitos. Mais rápido e estável para uso contínuo. Recomendado.",
+    note: "15 req/min gratuitos · 1M tokens/min. Mais estável para geração em série. Recomendado.",
   },
   "gemini-2.5-flash": {
     label: "Gemini 2.5 Flash",
     provider: "gemini",
-    apiId: "gemini-2.5-flash-preview-04-17",
+    apiId: "gemini-2.5-flash",
     freeRpm: 10,
     freeTpm: 250_000,
     badge: "free",
-    note: "Melhor qualidade de raciocínio no free tier. 10 req/min.",
+    note: "Raciocínio superior ao 2.0. 10 req/min gratuitos.",
   },
   "gemini-2.5-pro": {
     label: "Gemini 2.5 Pro",
     provider: "gemini",
-    apiId: "gemini-2.5-pro-preview-05-06",
+    apiId: "gemini-2.5-pro",
     freeRpm: 5,
     freeTpm: 250_000,
     badge: "limited",
-    note: "Máxima qualidade. Limite de 5 req/min — use para briefings complexos.",
+    note: "Máxima qualidade. 5 req/min — use para briefings complexos.",
   },
-  // —— OpenAI (pago) ——
   "gpt-4o-mini": {
     label: "GPT-4o Mini",
     provider: "openai",
@@ -83,7 +83,6 @@ export function isOpenAIModel(model: AIModel): boolean {
   return getModelProvider(model) === "openai";
 }
 
-/** Retorna o ID exato que a API do Gemini espera receber. */
 export function geminiApiId(model: AIModel): string {
   return MODEL_CATALOG[model]?.apiId ?? "gemini-2.0-flash";
 }
@@ -105,7 +104,7 @@ const STORAGE_KEY = "briefflow_ai_config";
 const DEFAULT_CONFIG: AIConfig = {
   openaiKey: "",
   geminiKey: "",
-  model: "gemini-2.0-flash",   // padrão: mais estável no free tier
+  model: "gemini-2.0-flash",
   driveEnabled: false,
   drivePath: "/Forlab/Campanhas",
   driveOutDir: "/Forlab/Materiais",
@@ -147,7 +146,6 @@ export function loadAIConfig(): AIConfig {
     const raw = readRaw();
     if (!raw) return { ...DEFAULT_CONFIG };
     const saved = JSON.parse(raw) as Partial<AIConfig>;
-    // Garante que modelos removidos do catalog sejam resetados para o default
     const model = saved.model && MODEL_CATALOG[saved.model]
       ? saved.model
       : DEFAULT_CONFIG.model;
