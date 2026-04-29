@@ -3,18 +3,14 @@
 //   - tanstackStart, viteReact, tailwindcss, tsConfigPaths, cloudflare (build-only),
 //     componentTagger (dev-only), VITE_* env injection, @ path alias, React/TanStack dedupe,
 //     error logger plugins, and sandbox detection (port/host/strictPort).
-// You can pass additional config via defineConfig({ vite: { ... } }) if needed.
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 
 export default defineConfig({
   vite: {
     optimizeDeps: {
-      // Include Transformers.js so Vite pre-bundles it and resolves it inside Web Workers
-      include: ["@xenova/transformers"],
-      // Exclude native WASM binaries from pre-bundling (they must be loaded at runtime)
-      exclude: [
-        "onnxruntime-web",
-      ],
+      // @huggingface/transformers v3 uses dynamic WASM — must be excluded from pre-bundling.
+      // The Web Worker imports it directly at runtime.
+      exclude: ["@huggingface/transformers", "onnxruntime-web"],
     },
     worker: {
       format: "es",
