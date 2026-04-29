@@ -17,7 +17,7 @@ import {
   getModelProvider,
 } from "@/lib/aiConfig";
 import { useState, useEffect } from "react";
-import { Save, Eye, EyeOff, CheckCircle2, ExternalLink, KeyRound } from "lucide-react";
+import { Save, Eye, EyeOff, CheckCircle2, ExternalLink, KeyRound, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/configuracoes")({
@@ -56,7 +56,6 @@ const BADGE_LABELS: Record<string, string> = {
   paid: "Pago",
 };
 
-// Provider metadata for the key fields section
 const PROVIDER_INFO: Record<AIProvider, {
   label: string;
   placeholder: string;
@@ -70,6 +69,13 @@ const PROVIDER_INFO: Record<AIProvider, {
     description: "Necessária para modelos Gemini 2.0 Flash, 2.5 Flash e 2.5 Pro.",
     linkLabel: "Obter chave gratuita no Google AI Studio",
     linkUrl: "https://aistudio.google.com/app/apikey",
+  },
+  groq: {
+    label: "Groq (Llama / Gemma)",
+    placeholder: "gsk_…",
+    description: "Gratuito: 30 req/min. Modelos Llama 3 e Gemma 2 ultra-rápidos.",
+    linkLabel: "Obter chave gratuita em console.groq.com",
+    linkUrl: "https://console.groq.com/keys",
   },
   openai: {
     label: "OpenAI (GPT-4o)",
@@ -107,6 +113,7 @@ type KeyState = {
   grokKey: string;
   anthropicKey: string;
   mistralKey: string;
+  groqKey: string;
 };
 
 type ShowState = Record<AIProvider, boolean>;
@@ -118,6 +125,7 @@ function Configuracoes() {
     grokKey: "",
     anthropicKey: "",
     mistralKey: "",
+    groqKey: "",
   });
   const [show, setShow] = useState<ShowState>({
     gemini: false,
@@ -125,14 +133,16 @@ function Configuracoes() {
     grok: false,
     anthropic: false,
     mistral: false,
+    groq: false,
   });
   const [drive, setDrive] = useState(false);
   const [drivePath, setDrivePath] = useState("/Forlab/Campanhas");
   const [outDir, setOutDir] = useState("/Forlab/Materiais");
-  const [model, setModel] = useState<AIModel>("gemini-2.5-flash");
+  const [model, setModel] = useState<AIModel>("gemini-2.0-flash");
   const [prompts, setPrompts] = useState<Record<string, string>>({ ...DEFAULT_PROMPTS });
   const [wasSaved, setWasSaved] = useState(false);
   const [hydrated, setHydrated] = useState(false);
+  const [onlyFree, setOnlyFree] = useState(true);
 
   useEffect(() => {
     const saved = loadAIConfig();
@@ -142,6 +152,7 @@ function Configuracoes() {
       grokKey: saved.grokKey ?? "",
       anthropicKey: saved.anthropicKey ?? "",
       mistralKey: saved.mistralKey ?? "",
+      groqKey: saved.groqKey ?? "",
     });
     setDrive(saved.driveEnabled);
     setDrivePath(saved.drivePath);
@@ -154,6 +165,11 @@ function Configuracoes() {
   const activeProvider = getModelProvider(model);
   const selectedMeta = MODEL_CATALOG[model];
 
+  // Models filtered by free/all toggle
+  const visibleModels = (Object.entries(MODEL_CATALOG) as [AIModel, typeof MODEL_CATALOG[AIModel]][]).filter(
+    ([, meta]) => !onlyFree || meta.badge !== "paid"
+  );
+
   function salvar() {
     const config: AIConfig = {
       openaiKey: keys.openaiKey,
@@ -161,6 +177,7 @@ function Configuracoes() {
       grokKey: keys.grokKey,
       anthropicKey: keys.anthropicKey,
       mistralKey: keys.mistralKey,
+      groqKey: keys.groqKey,
       model,
       driveEnabled: drive,
       drivePath,
@@ -180,11 +197,14 @@ function Configuracoes() {
       grok: "grokKey",
       anthropic: "anthropicKey",
       mistral: "mistralKey",
+      groq: "groqKey",
     };
     return map[provider];
   }
 
-  const providerOrder: AIProvider[] = ["gemini", "openai", "grok", "mistral", "anthropic"];
+  // Show key card for active provider + free providers; hide paid providers when not in use
+  const providerOrder: AIProvider[] = ["gemini", "groq", "openai", "grok", "mistral", "anthropic"];
+  const freeProviders: AIProvider[] = ["gemini", "groq"];
 
   return (
     <AppShell>
@@ -205,52 +225,61 @@ function Configuracoes() {
           {/* Modelo de IA */}
           <Card className="lg:col-span-2">
             <CardHeader>
-              <CardTitle className="text-base">Modelo de IA</CardTitle>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base">Modelo de IA</CardTitle>
+                <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+                  <Switch checked={onlyFree} onCheckedChange={setOnlyFree} />
+                  <span className="flex items-center gap-1 text-muted-foreground">
+                    <Sparkles className="h-3.5 w-3.5 text-green-500" />
+                    Apenas gratuitos
+                  </span>
+                </label>
+              </div>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2">
-                {(Object.entries(MODEL_CATALOG) as [AIModel, typeof MODEL_CATALOG[AIModel]][]).map(
-                  ([id, meta]) => {
-                    const isActive = model === id;
-                    return (
-                      <button
-                        key={id}
-                        type="button"
-                        onClick={() => setModel(id)}
-                        className={
-                          "flex flex-col gap-1 rounded-lg border p-3 text-left text-sm transition-colors " +
-                          (isActive
-                            ? "border-accent bg-accent/10"
-                            : "border-border hover:border-accent/40 text-muted-foreground")
-                        }
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <span className={"font-medium " + (isActive ? "text-accent" : "text-foreground")}>
-                            {meta.label}
-                          </span>
-                          <span className={"rounded-full px-2 py-0.5 text-xs font-medium " + BADGE_STYLES[meta.badge]}>
-                            {BADGE_LABELS[meta.badge]}
-                          </span>
-                        </div>
-                        <span className="text-xs text-muted-foreground line-clamp-2">{meta.note}</span>
-                        {meta.freeRpm > 0 && (
-                          <span className="text-xs text-muted-foreground">
-                            {meta.freeRpm} req/min · {(meta.freeTpm / 1000).toFixed(0)}K tokens/min
-                          </span>
-                        )}
-                      </button>
-                    );
-                  }
-                )}
+                {visibleModels.map(([id, meta]) => {
+                  const isActive = model === id;
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => setModel(id)}
+                      className={
+                        "flex flex-col gap-1 rounded-lg border p-3 text-left text-sm transition-colors " +
+                        (isActive
+                          ? "border-accent bg-accent/10"
+                          : "border-border hover:border-accent/40 text-muted-foreground")
+                      }
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className={"font-medium " + (isActive ? "text-accent" : "text-foreground")}>
+                          {meta.label}
+                        </span>
+                        <span className={"rounded-full px-2 py-0.5 text-xs font-medium " + BADGE_STYLES[meta.badge]}>
+                          {BADGE_LABELS[meta.badge]}
+                        </span>
+                      </div>
+                      <span className="text-xs text-muted-foreground line-clamp-2">{meta.note}</span>
+                      {meta.freeRpm > 0 && (
+                        <span className="text-xs text-muted-foreground">
+                          {meta.freeRpm} req/min · {meta.freeTpm >= 1_000_000
+                            ? (meta.freeTpm / 1_000_000).toFixed(0) + "M"
+                            : (meta.freeTpm / 1_000).toFixed(0) + "K"} tokens/min
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
 
               {hydrated && (
                 <div className="rounded-md bg-muted/50 border border-border px-4 py-3 text-xs text-muted-foreground space-y-1">
                   <p>
                     <strong>Modelo selecionado:</strong> {selectedMeta.label} —{" "}
-                    {selectedMeta.badge === "free" || selectedMeta.badge === "limited"
-                      ? `Free tier: ${selectedMeta.freeRpm} req/min · ${(selectedMeta.freeTpm / 1000).toFixed(0)}K tokens/min.`
-                      : `Requer chave ${PROVIDER_INFO[activeProvider].label} com créditos.`}
+                    {selectedMeta.badge === "paid"
+                      ? `Requer chave ${PROVIDER_INFO[activeProvider].label} com créditos.`
+                      : `Free tier: ${selectedMeta.freeRpm} req/min · ${selectedMeta.freeTpm >= 1_000_000 ? (selectedMeta.freeTpm / 1_000_000).toFixed(0) + "M" : (selectedMeta.freeTpm / 1_000).toFixed(0) + "K"} tokens/min.`}
                   </p>
                   <p>🤖 <strong>Brief e materiais</strong> usam o modelo selecionado acima.</p>
                   <p>🎤 <strong>Transcrição</strong> usa Whisper local (gratuito, sem chave).</p>
@@ -270,7 +299,11 @@ function Configuracoes() {
                   const info = PROVIDER_INFO[provider];
                   const fieldName = keyFieldName(provider);
                   const isActive = provider === activeProvider;
+                  const isFree = freeProviders.includes(provider);
                   const isVisible = show[provider];
+
+                  // Hide paid providers that are not currently selected
+                  if (!isFree && !isActive) return null;
 
                   return (
                     <div
@@ -286,6 +319,11 @@ function Configuracoes() {
                         <Label className="flex items-center gap-1.5">
                           <KeyRound className="h-3.5 w-3.5 text-muted-foreground" />
                           {info.label}
+                          {isFree && (
+                            <span className="rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 text-xs font-medium px-1.5 py-0.5">
+                              Grátis
+                            </span>
+                          )}
                         </Label>
                         {isActive && (
                           <span className="rounded-full bg-accent/15 text-accent text-xs font-medium px-2 py-0.5">
