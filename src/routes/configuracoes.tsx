@@ -6,7 +6,6 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
-import { Badge } from "@/components/ui/badge";
 import { MATERIAL_META, type MaterialKey } from "@/lib/store";
 import {
   loadAIConfig,
@@ -15,7 +14,7 @@ import {
   type AIModel,
   MODEL_CATALOG,
 } from "@/lib/aiConfig";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Save, Eye, EyeOff, CheckCircle2, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
 
@@ -56,20 +55,32 @@ const BADGE_LABELS: Record<string, string> = {
 };
 
 function Configuracoes() {
-  const saved = loadAIConfig();
-  const [openaiKey, setOpenaiKey] = useState(saved.openaiKey);
-  const [geminiKey, setGeminiKey] = useState(saved.geminiKey);
+  // Inicializa tudo com valores fixos para evitar hydration mismatch.
+  // loadAIConfig() é chamado apenas no useEffect (client-side).
+  const [openaiKey, setOpenaiKey] = useState("");
+  const [geminiKey, setGeminiKey] = useState("");
   const [showOpenai, setShowOpenai] = useState(false);
   const [showGemini, setShowGemini] = useState(false);
-  const [drive, setDrive] = useState(saved.driveEnabled);
-  const [drivePath, setDrivePath] = useState(saved.drivePath);
-  const [outDir, setOutDir] = useState(saved.driveOutDir);
-  const [model, setModel] = useState<AIModel>(saved.model);
-  const [prompts, setPrompts] = useState<Record<string, string>>({
-    ...DEFAULT_PROMPTS,
-    ...saved.prompts,
-  });
+  const [drive, setDrive] = useState(false);
+  const [drivePath, setDrivePath] = useState("/Forlab/Campanhas");
+  const [outDir, setOutDir] = useState("/Forlab/Materiais");
+  const [model, setModel] = useState<AIModel>("gemini-2.5-flash");
+  const [prompts, setPrompts] = useState<Record<string, string>>({ ...DEFAULT_PROMPTS });
   const [wasSaved, setWasSaved] = useState(false);
+  const [hydrated, setHydrated] = useState(false);
+
+  // Carrega config salva somente no cliente, após hydration
+  useEffect(() => {
+    const saved = loadAIConfig();
+    setOpenaiKey(saved.openaiKey);
+    setGeminiKey(saved.geminiKey);
+    setDrive(saved.driveEnabled);
+    setDrivePath(saved.drivePath);
+    setOutDir(saved.driveOutDir);
+    setModel(saved.model);
+    setPrompts({ ...DEFAULT_PROMPTS, ...saved.prompts });
+    setHydrated(true);
+  }, []);
 
   const selectedMeta = MODEL_CATALOG[model];
 
@@ -105,7 +116,7 @@ function Configuracoes() {
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
-          {/* ── Modelo de IA ── */}
+          {/* Modelo de IA */}
           <Card className="lg:col-span-2">
             <CardHeader>
               <CardTitle className="text-base">Modelo de IA</CardTitle>
@@ -131,12 +142,7 @@ function Configuracoes() {
                           <span className={"font-medium " + (isActive ? "text-accent" : "text-foreground")}>
                             {meta.label}
                           </span>
-                          <span
-                            className={
-                              "rounded-full px-2 py-0.5 text-xs font-medium " +
-                              BADGE_STYLES[meta.badge]
-                            }
-                          >
+                          <span className={"rounded-full px-2 py-0.5 text-xs font-medium " + BADGE_STYLES[meta.badge]}>
                             {BADGE_LABELS[meta.badge]}
                           </span>
                         </div>
@@ -152,36 +158,33 @@ function Configuracoes() {
                 )}
               </div>
 
-              {/* Info do modelo selecionado */}
-              <div className="rounded-md bg-muted/50 border border-border px-4 py-3 text-xs text-muted-foreground space-y-1">
-                <p>
-                  <strong>Modelo selecionado:</strong> {selectedMeta.label} —{" "}
-                  {selectedMeta.badge === "paid"
-                    ? "Requer chave OpenAI com créditos."
-                    : `Free tier: ${selectedMeta.freeRpm} req/min · ${(selectedMeta.freeTpm / 1000).toFixed(0)}K tokens/min.`}
-                </p>
-                <p>
-                  🤖 <strong>Brief e materiais</strong> usam o modelo selecionado acima.
-                </p>
-                <p>
-                  🎤 <strong>Transcrição</strong> usa Whisper local (gratuito, sem chave).
-                </p>
-                {selectedMeta.provider === "gemini" && (
-                  <a
-                    href="https://aistudio.google.com/app/apikey"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 text-accent hover:underline"
-                  >
-                    Obter chave Gemini gratuita no Google AI Studio
-                    <ExternalLink className="h-3 w-3" />
-                  </a>
-                )}
-              </div>
+              {hydrated && (
+                <div className="rounded-md bg-muted/50 border border-border px-4 py-3 text-xs text-muted-foreground space-y-1">
+                  <p>
+                    <strong>Modelo selecionado:</strong> {selectedMeta.label} —{" "}
+                    {selectedMeta.badge === "paid"
+                      ? "Requer chave OpenAI com créditos."
+                      : `Free tier: ${selectedMeta.freeRpm} req/min · ${(selectedMeta.freeTpm / 1000).toFixed(0)}K tokens/min.`}
+                  </p>
+                  <p>🤖 <strong>Brief e materiais</strong> usam o modelo selecionado acima.</p>
+                  <p>🎤 <strong>Transcrição</strong> usa Whisper local (gratuito, sem chave).</p>
+                  {selectedMeta.provider === "gemini" && (
+                    <a
+                      href="https://aistudio.google.com/app/apikey"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-accent hover:underline"
+                    >
+                      Obter chave Gemini gratuita no Google AI Studio
+                      <ExternalLink className="h-3 w-3" />
+                    </a>
+                  )}
+                </div>
+              )}
             </CardContent>
           </Card>
 
-          {/* ── Chaves de API ── */}
+          {/* Chaves de API */}
           <Card>
             <CardHeader><CardTitle className="text-base">Chaves de API</CardTitle></CardHeader>
             <CardContent className="space-y-4">
@@ -195,11 +198,8 @@ function Configuracoes() {
                     onChange={(e) => setGeminiKey(e.target.value)}
                     className="pr-9"
                   />
-                  <button
-                    type="button"
-                    onClick={() => setShowGemini((v) => !v)}
-                    className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground"
-                  >
+                  <button type="button" onClick={() => setShowGemini((v) => !v)}
+                    className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground">
                     {showGemini ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
                 </div>
@@ -215,11 +215,8 @@ function Configuracoes() {
                     onChange={(e) => setOpenaiKey(e.target.value)}
                     className="pr-9"
                   />
-                  <button
-                    type="button"
-                    onClick={() => setShowOpenai((v) => !v)}
-                    className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground"
-                  >
+                  <button type="button" onClick={() => setShowOpenai((v) => !v)}
+                    className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground">
                     {showOpenai ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
                 </div>
@@ -231,7 +228,7 @@ function Configuracoes() {
             </CardContent>
           </Card>
 
-          {/* ── Google Drive ── */}
+          {/* Google Drive */}
           <Card>
             <CardHeader><CardTitle className="text-base">Google Drive</CardTitle></CardHeader>
             <CardContent className="space-y-3">
@@ -253,7 +250,7 @@ function Configuracoes() {
             </CardContent>
           </Card>
 
-          {/* ── Prompt templates ── */}
+          {/* Prompt templates */}
           <Card className="lg:col-span-2">
             <CardHeader><CardTitle className="text-base">Templates de prompt</CardTitle></CardHeader>
             <CardContent className="space-y-4">
