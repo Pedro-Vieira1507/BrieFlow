@@ -1,4 +1,6 @@
-// Persistent AI configuration stored in localStorage
+// AI configuration — safe storage with localStorage fallback.
+// localStorage is blocked in sandboxed iframes (e.g. Lovable preview);
+// we fall back to a module-level in-memory store so the app never crashes.
 
 export type AIModel =
   | "gemini-2.5-flash"
@@ -28,9 +30,46 @@ const DEFAULT_CONFIG: AIConfig = {
   prompts: {},
 };
 
+// ─── Safe storage helpers ───────────────────────────────────────────────────
+
+function storageAvailable(): boolean {
+  try {
+    const k = "__briefflow_test__";
+    localStorage.setItem(k, "1");
+    localStorage.removeItem(k);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// In-memory fallback for sandboxed environments
+let _memConfig: AIConfig | null = null;
+
+function readRaw(): string | null {
+  if (storageAvailable()) {
+    return localStorage.getItem(STORAGE_KEY);
+  }
+  return _memConfig ? JSON.stringify(_memConfig) : null;
+}
+
+function writeRaw(value: string): void {
+  if (storageAvailable()) {
+    localStorage.setItem(STORAGE_KEY, value);
+  } else {
+    try {
+      _memConfig = JSON.parse(value);
+    } catch {
+      // ignore
+    }
+  }
+}
+
+// ─── Public API ──────────────────────────────────────────────────────────────
+
 export function loadAIConfig(): AIConfig {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readRaw();
     if (!raw) return { ...DEFAULT_CONFIG };
     return { ...DEFAULT_CONFIG, ...JSON.parse(raw) };
   } catch {
@@ -39,7 +78,7 @@ export function loadAIConfig(): AIConfig {
 }
 
 export function saveAIConfig(config: AIConfig): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+  writeRaw(JSON.stringify(config));
 }
 
 export function getOpenAIKey(): string {
