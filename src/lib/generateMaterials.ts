@@ -227,20 +227,19 @@ async function callAI(prompt: string): Promise<string> {
   return withRetry(() => callGemini(prompt, model, config.geminiKey));
 }
 
-// ─── Groq TTS — Orpheus ───────────────────────────────────────────────────────
+// ─── Groq TTS — PlayAI ───────────────────────────────────────────────────────
 
 /**
- * Modelo Orpheus da Groq para texto-para-fala.
- * Para conteúdo em PT-BR, use "playai-tts" com voice "Celeste-PlayAI" (multilingual).
- * O Orpheus-English funciona com texto PT-BR mas sotaque é neutro.
+ * Groq TTS usa o modelo "playai-tts" (multilingual).
+ * Vozes disponíveis (amostra): Celeste-PlayAI, Fritz-PlayAI, Valentina-PlayAI,
+ * Nia-PlayAI, Mason-PlayAI, Eleanor-PlayAI, Judy-PlayAI.
  *
- * Vozes Orpheus disponíveis: tara (female), leo (male), luna (female),
- * aurora (female), troy (male), river (neutral), dan (male), will (male), ada (female)
+ * NOTA: o modelo "canopylabs/orpheus-3b-0.1-ft" foi removido da Groq —
+ * use apenas "playai-tts".
  */
-const TTS_MODEL = "playai-tts";         // multilingual — melhor para PT-BR
-const TTS_VOICE = "Celeste-PlayAI";    // voz feminina, som natural em PT
-const TTS_MODEL_EN = "canopylabs/orpheus-3b-0.1-ft"; // alternativa Orpheus English
-const TTS_VOICE_EN = "tara";           // fallback Orpheus
+const TTS_MODEL = "playai-tts";           // único modelo TTS disponível na Groq
+const TTS_VOICE_PRIMARY = "Celeste-PlayAI";  // voz feminina, som natural em PT-BR
+const TTS_VOICE_FALLBACK = "Fritz-PlayAI";   // fallback dentro do mesmo modelo
 
 /**
  * Converte ArrayBuffer para base64 sem estourar a stack (chunked).
@@ -261,7 +260,7 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
  * - remove cabeçalhos markdown (# Podcast ...)
  * - remove marcadores de tempo ([INTRO 0:00–0:20])
  * - colapsa linhas em branco excessivas
- * - trunca em ~3 000 caracteres (≈ 4–5 min de áudio no Orpheus)
+ * - trunca em ~3 000 caracteres (≈ 4–5 min de áudio)
  */
 function cleanScriptForTTS(script: string): string {
   return script
@@ -274,13 +273,50 @@ function cleanScriptForTTS(script: string): string {
 }
 
 /**
- * Gera áudio WAV do roteiro de podcast via Groq TTS.
+ * Tenta gerar TTS com uma voz específica do modelo playai-tts.
+ */
+async function tryTTS(
+  apiKey: string,
+  inputText: string,
+  voice: string,
+): Promise<ArrayBuffer | null> {
+  const res = await fetch("https://api.groq.com/openai/v1/audio/speech", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: TTS_MODEL,
+      voice,
+      input: inputText,
+      response_format: "wav",
+    }),
+  });
+
+  if (res.ok) return res.arrayBuffer();
+
+  const errBody = await res.json().catch(() => ({}));
+  const errMsg = (errBody as { error?: { message?: string } }).error?.message ?? res.statusText;
+
+  // Apenas retorna null se for erro de voz/modelo (404/400) — permite fallback de voz
+  if (res.status === 404 || res.status === 400) {
+    console.warn(`[BriefFlow] TTS voz "${voice}" falhou (${res.status}): ${errMsg}`);
+    return null;
+  }
+
+  // Erros 401, 429, 5xx — lança diretamente
+  throw new Error(`Groq TTS error ${res.status}: ${errMsg}`);
+}
+
+/**
+ * Gera áudio WAV do roteiro de podcast via Groq TTS (playai-tts).
  * Requer que a chave Groq esteja configurada em Configurações.
- * Retorna uma data URL `data:audio/wav;base64,...` pronta para <audio src="...">
+ * Retorna uma data URL `data:audio/wav;base64,...` pronta para <audio src="...">.
  *
  * Lança erro se:
  * - chave Groq não configurada
- * - API retornar erro (modelo indisponível, cota excedida etc.)
+ * - API retornar erro de autenticação, cota etc.
  */
 export async function generatePodcastAudio(script: string): Promise<string> {
   const config = loadAIConfig();
@@ -295,58 +331,22 @@ export async function generatePodcastAudio(script: string): Promise<string> {
     throw new Error("Roteiro vazio após limpeza. Gere o podcast antes de converter para áudio.");
   }
 
-  const res = await fetch("https://api.groq.com/openai/v1/audio/speech", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${config.groqKey}`,
-    },
-    body: JSON.stringify({
-      model: TTS_MODEL,
-      voice: TTS_VOICE,
-      input: inputText,
-      response_format: "wav",
-    }),
-  });
+  // Tenta voz primária (Celeste-PlayAI)
+  let buffer = await tryTTS(config.groqKey, inputText, TTS_VOICE_PRIMARY);
 
-  // Se playai-tts falhar, tenta Orpheus English como fallback
-  if (!res.ok) {
-    const errBody = await res.json().catch(() => ({}));
-    const errMsg = (errBody as { error?: { message?: string } }).error?.message ?? res.statusText;
-
-    if (res.status === 404 || res.status === 400) {
-      // fallback: Orpheus English
-      console.warn(`[BriefFlow] TTS fallback para Orpheus English: ${errMsg}`);
-      const res2 = await fetch("https://api.groq.com/openai/v1/audio/speech", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${config.groqKey}`,
-        },
-        body: JSON.stringify({
-          model: TTS_MODEL_EN,
-          voice: TTS_VOICE_EN,
-          input: inputText,
-          response_format: "wav",
-        }),
-      });
-      if (!res2.ok) {
-        const err2 = await res2.json().catch(() => ({}));
-        throw new Error(
-          `Groq TTS error ${res2.status}: ${
-            (err2 as { error?: { message?: string } }).error?.message ?? res2.statusText
-          }`,
-        );
-      }
-      const buf2 = await res2.arrayBuffer();
-      return `data:audio/wav;base64,${arrayBufferToBase64(buf2)}`;
-    }
-
-    throw new Error(`Groq TTS error ${res.status}: ${errMsg}`);
+  // Se a voz primária não estiver disponível, tenta a voz de fallback (Fritz-PlayAI)
+  if (!buffer) {
+    console.warn(`[BriefFlow] TTS usando voz de fallback: ${TTS_VOICE_FALLBACK}`);
+    buffer = await tryTTS(config.groqKey, inputText, TTS_VOICE_FALLBACK);
   }
 
-  const arrayBuffer = await res.arrayBuffer();
-  return `data:audio/wav;base64,${arrayBufferToBase64(arrayBuffer)}`;
+  if (!buffer) {
+    throw new Error(
+      `Groq TTS: nenhuma voz disponível no momento. Tente novamente em alguns instantes.`,
+    );
+  }
+
+  return `data:audio/wav;base64,${arrayBufferToBase64(buffer)}`;
 }
 
 // ─── Brief inference ──────────────────────────────────────────────────────────
