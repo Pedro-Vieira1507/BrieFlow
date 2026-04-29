@@ -6,17 +6,24 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
+import { Badge } from "@/components/ui/badge";
 import { MATERIAL_META, type MaterialKey } from "@/lib/store";
-import { loadAIConfig, saveAIConfig, type AIConfig, type AIModel } from "@/lib/aiConfig";
+import {
+  loadAIConfig,
+  saveAIConfig,
+  type AIConfig,
+  type AIModel,
+  MODEL_CATALOG,
+} from "@/lib/aiConfig";
 import { useState } from "react";
-import { Save, Eye, EyeOff, CheckCircle2 } from "lucide-react";
+import { Save, Eye, EyeOff, CheckCircle2, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/configuracoes")({
   head: () => ({
     meta: [
       { title: "Configurações — Agente de Conteúdo Forlab" },
-      { name: "description", content: "Chaves de API, integração Google Drive, modelo de IA e templates de prompt." },
+      { name: "description", content: "Chaves de API, modelo de IA e templates de prompt." },
     ],
   }),
   component: Configuracoes,
@@ -36,6 +43,18 @@ const DEFAULT_PROMPTS: Record<"brief" | MaterialKey, string> = {
   roteiro_video_curto: "Crie um roteiro de vídeo curto (15–30s) com tempo, ação na tela e locução.",
 };
 
+const BADGE_STYLES: Record<string, string> = {
+  free: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
+  limited: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400",
+  paid: "bg-muted text-muted-foreground",
+};
+
+const BADGE_LABELS: Record<string, string> = {
+  free: "Grátis",
+  limited: "Grátis / limitado",
+  paid: "Pago",
+};
+
 function Configuracoes() {
   const saved = loadAIConfig();
   const [openaiKey, setOpenaiKey] = useState(saved.openaiKey);
@@ -50,7 +69,9 @@ function Configuracoes() {
     ...DEFAULT_PROMPTS,
     ...saved.prompts,
   });
-  const [saved2, setSaved2] = useState(false);
+  const [wasSaved, setWasSaved] = useState(false);
+
+  const selectedMeta = MODEL_CATALOG[model];
 
   function salvar() {
     const config: AIConfig = {
@@ -63,8 +84,8 @@ function Configuracoes() {
       prompts,
     };
     saveAIConfig(config);
-    setSaved2(true);
-    setTimeout(() => setSaved2(false), 2500);
+    setWasSaved(true);
+    setTimeout(() => setWasSaved(false), 2500);
     toast.success("Configurações salvas com sucesso.");
   }
 
@@ -76,37 +97,94 @@ function Configuracoes() {
           description="Conecte APIs, escolha o modelo de IA e edite os templates de prompt usados pelo agente."
           actions={
             <Button onClick={salvar}>
-              {saved2 ? <CheckCircle2 className="h-4 w-4 text-green-500" /> : <Save className="h-4 w-4" />}
+              {wasSaved ? <CheckCircle2 className="h-4 w-4 text-green-500" /> : <Save className="h-4 w-4" />}
               Salvar
             </Button>
           }
         />
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* API Keys */}
+
+          {/* ── Modelo de IA ── */}
+          <Card className="lg:col-span-2">
+            <CardHeader>
+              <CardTitle className="text-base">Modelo de IA</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2">
+                {(Object.entries(MODEL_CATALOG) as [AIModel, typeof MODEL_CATALOG[AIModel]][]).map(
+                  ([id, meta]) => {
+                    const isActive = model === id;
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => setModel(id)}
+                        className={
+                          "flex flex-col gap-1 rounded-lg border p-3 text-left text-sm transition-colors " +
+                          (isActive
+                            ? "border-accent bg-accent/10"
+                            : "border-border hover:border-accent/40 text-muted-foreground")
+                        }
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className={"font-medium " + (isActive ? "text-accent" : "text-foreground")}>
+                            {meta.label}
+                          </span>
+                          <span
+                            className={
+                              "rounded-full px-2 py-0.5 text-xs font-medium " +
+                              BADGE_STYLES[meta.badge]
+                            }
+                          >
+                            {BADGE_LABELS[meta.badge]}
+                          </span>
+                        </div>
+                        <span className="text-xs text-muted-foreground line-clamp-2">{meta.note}</span>
+                        {meta.freeRpm > 0 && (
+                          <span className="text-xs text-muted-foreground">
+                            {meta.freeRpm} req/min · {(meta.freeTpm / 1000).toFixed(0)}K tokens/min
+                          </span>
+                        )}
+                      </button>
+                    );
+                  }
+                )}
+              </div>
+
+              {/* Info do modelo selecionado */}
+              <div className="rounded-md bg-muted/50 border border-border px-4 py-3 text-xs text-muted-foreground space-y-1">
+                <p>
+                  <strong>Modelo selecionado:</strong> {selectedMeta.label} —{" "}
+                  {selectedMeta.badge === "paid"
+                    ? "Requer chave OpenAI com créditos."
+                    : `Free tier: ${selectedMeta.freeRpm} req/min · ${(selectedMeta.freeTpm / 1000).toFixed(0)}K tokens/min.`}
+                </p>
+                <p>
+                  🤖 <strong>Brief e materiais</strong> usam o modelo selecionado acima.
+                </p>
+                <p>
+                  🎤 <strong>Transcrição</strong> usa Whisper local (gratuito, sem chave).
+                </p>
+                {selectedMeta.provider === "gemini" && (
+                  <a
+                    href="https://aistudio.google.com/app/apikey"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-accent hover:underline"
+                  >
+                    Obter chave Gemini gratuita no Google AI Studio
+                    <ExternalLink className="h-3 w-3" />
+                  </a>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* ── Chaves de API ── */}
           <Card>
             <CardHeader><CardTitle className="text-base">Chaves de API</CardTitle></CardHeader>
             <CardContent className="space-y-4">
-              <div className="space-y-1.5">
-                <Label>OpenAI (Whisper + GPT)</Label>
-                <div className="relative">
-                  <Input
-                    type={showOpenai ? "text" : "password"}
-                    placeholder="sk-…"
-                    value={openaiKey}
-                    onChange={(e) => setOpenaiKey(e.target.value)}
-                    className="pr-9"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowOpenai((v) => !v)}
-                    className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground"
-                  >
-                    {showOpenai ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
-                </div>
-                <p className="text-xs text-muted-foreground">Usada para transcrição Whisper e modelos GPT.</p>
-              </div>
               <div className="space-y-1.5">
                 <Label>Google Gemini</Label>
                 <div className="relative">
@@ -125,40 +203,35 @@ function Configuracoes() {
                     {showGemini ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
                 </div>
-                <p className="text-xs text-muted-foreground">Usada para modelos Gemini 2.5.</p>
+                <p className="text-xs text-muted-foreground">Necessária para todos os modelos Gemini.</p>
+              </div>
+              <div className="space-y-1.5">
+                <Label>OpenAI (GPT-4o)</Label>
+                <div className="relative">
+                  <Input
+                    type={showOpenai ? "text" : "password"}
+                    placeholder="sk-…"
+                    value={openaiKey}
+                    onChange={(e) => setOpenaiKey(e.target.value)}
+                    className="pr-9"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowOpenai((v) => !v)}
+                    className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground"
+                  >
+                    {showOpenai ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+                <p className="text-xs text-muted-foreground">Necessária apenas se usar modelos GPT.</p>
               </div>
               <p className="text-xs text-muted-foreground rounded-md border border-border bg-muted/40 px-3 py-2">
-                ⚠️ Chaves salvas no <strong>localStorage</strong> do navegador. Para produção, prefira um backend seguro.
+                ⚠️ Chaves salvas localmente no navegador. Para produção, prefira um backend seguro.
               </p>
             </CardContent>
           </Card>
 
-          {/* Model selector */}
-          <Card>
-            <CardHeader><CardTitle className="text-base">Modelo de IA</CardTitle></CardHeader>
-            <CardContent className="space-y-3">
-              <div className="space-y-1.5">
-                <Label>Modelo padrão</Label>
-                <select
-                  value={model}
-                  onChange={(e) => setModel(e.target.value as AIModel)}
-                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs"
-                >
-                  <option value="gemini-2.5-flash">Gemini 2.5 Flash — rápido, econômico</option>
-                  <option value="gemini-2.5-pro">Gemini 2.5 Pro — máxima qualidade</option>
-                  <option value="gpt-4o-mini">GPT-4o Mini — rápido + Whisper</option>
-                  <option value="gpt-4o">GPT-4o — qualidade + Whisper</option>
-                </select>
-              </div>
-              <div className="rounded-md bg-muted/60 p-3 text-xs text-muted-foreground space-y-1">
-                <p>🎤 <strong>Whisper</strong> usa sempre a chave OpenAI (obrigatório para transcrição).</p>
-                <p>🤖 <strong>Brief e materiais</strong> usam o modelo selecionado acima.</p>
-                <p>💰 Gemini 2.5 Flash é o mais economíco para produzir os 10 materiais.</p>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Google Drive */}
+          {/* ── Google Drive ── */}
           <Card>
             <CardHeader><CardTitle className="text-base">Google Drive</CardTitle></CardHeader>
             <CardContent className="space-y-3">
@@ -180,7 +253,7 @@ function Configuracoes() {
             </CardContent>
           </Card>
 
-          {/* Prompt templates */}
+          {/* ── Prompt templates ── */}
           <Card className="lg:col-span-2">
             <CardHeader><CardTitle className="text-base">Templates de prompt</CardTitle></CardHeader>
             <CardContent className="space-y-4">
@@ -192,7 +265,7 @@ function Configuracoes() {
                   onChange={(e) => setPrompts({ ...prompts, brief: e.target.value })}
                   className="text-sm"
                 />
-                <p className="text-xs text-muted-foreground">Deixe em branco para usar o prompt padrão completo do sistema.</p>
+                <p className="text-xs text-muted-foreground">Deixe em branco para usar o prompt padrão do sistema.</p>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {(Object.keys(MATERIAL_META) as MaterialKey[]).map((k) => (
@@ -210,6 +283,7 @@ function Configuracoes() {
               </div>
             </CardContent>
           </Card>
+
         </div>
       </PageContainer>
     </AppShell>
