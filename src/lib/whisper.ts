@@ -1,97 +1,104 @@
-// Whisper transcription via OpenAI API
-import { getOpenAIKey } from "./aiConfig";
+// Whisper transcription via Transformers.js — 100% free, runs in browser.
+// Uses a dedicated Web Worker so the UI never freezes.
+
+export type WhisperProgress = {
+  stage: string;
+  value: number; // 0-100
+};
 
 export type WhisperResult = {
   text: string;
-  language?: string;
   duration?: number;
 };
 
-export type WhisperProgress =
-  | { stage: "compressing" }
-  | { stage: "uploading"; percent: number }
-  | { stage: "transcribing" }
-  | { stage: "done" };
+/** File types that can be transcribed */
+export function isTranscribable(file: File): boolean {
+  const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+  return ["mp3", "mp4", "wav", "m4a", "webm", "mov", "ogg"].includes(ext);
+}
 
-const MAX_WHISPER_BYTES = 25 * 1024 * 1024; // 25 MB OpenAI limit
+/** Decode a File to a mono Float32Array at 16 kHz (required by Whisper) */
+async function decodeAudioFile(file: File): Promise<{ samples: Float32Array; duration: number }> {
+  const arrayBuffer = await file.arrayBuffer();
+  const audioCtx = new AudioContext({ sampleRate: 16000 });
+  const decoded = await audioCtx.decodeAudioData(arrayBuffer);
+  await audioCtx.close();
+
+  // Mix down to mono
+  const ch0 = decoded.getChannelData(0);
+  if (decoded.numberOfChannels === 1) {
+    return { samples: ch0, duration: decoded.duration };
+  }
+  const ch1 = decoded.getChannelData(1);
+  const mono = new Float32Array(ch0.length);
+  for (let i = 0; i < ch0.length; i++) mono[i] = (ch0[i] + ch1[i]) / 2;
+  return { samples: mono, duration: decoded.duration };
+}
+
+let _worker: Worker | null = null;
+
+function getWorker(): Worker {
+  if (!_worker) {
+    _worker = new Worker(new URL("./whisper.worker.ts", import.meta.url), { type: "module" });
+  }
+  return _worker;
+}
 
 /**
- * Transcribes an audio/video File using OpenAI Whisper API.
- * Calls onProgress with status updates.
+ * Transcribe a file using the free Transformers.js Whisper model.
+ * No API key required.
  */
 export async function transcribeFile(
   file: File,
   onProgress?: (p: WhisperProgress) => void,
+  language = "portuguese",
 ): Promise<WhisperResult> {
-  const key = getOpenAIKey();
-  if (!key) {
-    throw new Error(
-      "Chave OpenAI não configurada. Acesse Configurações e insira sua sk-…",
+  return new Promise(async (resolve, reject) => {
+    onProgress?.({ stage: "Decodificando áudio…", value: 2 });
+
+    let samples: Float32Array;
+    let duration: number | undefined;
+
+    try {
+      const decoded = await decodeAudioFile(file);
+      samples = decoded.samples;
+      duration = decoded.duration;
+    } catch (err) {
+      return reject(
+        new Error(
+          `Não foi possível decodificar o áudio: ${(err as Error).message}. ` +
+            "Tente converter o arquivo para MP3 ou WAV.",
+        ),
+      );
+    }
+
+    onProgress?.({ stage: "Iniciando modelo Whisper…", value: 5 });
+
+    const worker = getWorker();
+
+    const handler = (event: MessageEvent) => {
+      const msg = event.data;
+
+      if (msg.type === "progress") {
+        onProgress?.({
+          stage: msg.stage,
+          value: msg.value ?? 50,
+        });
+      } else if (msg.type === "result") {
+        worker.removeEventListener("message", handler);
+        resolve({ text: msg.text, duration });
+      } else if (msg.type === "error") {
+        worker.removeEventListener("message", handler);
+        reject(new Error(msg.message));
+      }
+    };
+
+    worker.addEventListener("message", handler);
+
+    // Transfer the Float32Array buffer to the worker (zero-copy)
+    worker.postMessage(
+      { type: "transcribe", audio: samples, language },
+      [samples.buffer],
     );
-  }
-
-  // Warn if file exceeds Whisper limit
-  if (file.size > MAX_WHISPER_BYTES) {
-    throw new Error(
-      `Arquivo muito grande (${(file.size / 1024 / 1024).toFixed(1)} MB). ` +
-        `O limite do Whisper é 25 MB. Comprima o vídeo ou extraia apenas o áudio antes de enviar.`,
-    );
-  }
-
-  onProgress?.({ stage: "uploading", percent: 0 });
-
-  const form = new FormData();
-  form.append("file", file, file.name);
-  form.append("model", "whisper-1");
-  form.append("language", "pt"); // hint: Portuguese
-  form.append("response_format", "verbose_json");
-
-  onProgress?.({ stage: "transcribing" });
-
-  const res = await fetch("https://api.openai.com/v1/audio/transcriptions", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${key}` },
-    body: form,
   });
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(
-      `Whisper API error ${res.status}: ${
-        (err as { error?: { message?: string } }).error?.message ?? res.statusText
-      }`,
-    );
-  }
-
-  const data = (await res.json()) as {
-    text: string;
-    language?: string;
-    duration?: number;
-  };
-
-  onProgress?.({ stage: "done" });
-
-  return {
-    text: data.text,
-    language: data.language,
-    duration: data.duration,
-  };
-}
-
-/** Returns true if the file type is accepted by Whisper */
-export function isTranscribable(file: File): boolean {
-  const transcribable = [
-    "audio/mpeg",
-    "audio/mp4",
-    "audio/wav",
-    "audio/x-wav",
-    "audio/webm",
-    "video/mp4",
-    "video/quicktime",
-    "video/webm",
-    "audio/ogg",
-  ];
-  if (transcribable.includes(file.type)) return true;
-  const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
-  return ["mp3", "mp4", "wav", "m4a", "webm", "mov", "ogg"].includes(ext);
 }
