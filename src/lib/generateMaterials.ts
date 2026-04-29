@@ -1,29 +1,9 @@
 // Real AI material generation using OpenAI or Gemini
 import { type StructuredBrief, type MaterialKey } from "./store";
-import { loadAIConfig, isOpenAIModel, type AIModel } from "./aiConfig";
-
-// ─── Gemini model ID mapping ──────────────────────────────────────────────────
-// Maps our internal model keys to the actual Gemini API model IDs.
-const GEMINI_API_IDS: Record<string, string> = {
-  "gemini-2.5-flash":      "gemini-2.5-flash-preview-04-17",
-  "gemini-2.5-flash-lite": "gemini-2.5-flash-lite-preview-06-17",
-  "gemini-2.5-pro":        "gemini-2.5-pro-preview-05-06",
-  "gemini-3-flash":        "gemini-2.0-flash",
-  "gemini-3.1-flash":      "gemini-2.5-flash-preview-04-17",
-  "gemini-3.1-pro":        "gemini-2.5-pro-preview-05-06",
-};
-
-function geminiModelId(model: AIModel): string {
-  return GEMINI_API_IDS[model] ?? "gemini-2.5-flash-preview-04-17";
-}
+import { loadAIConfig, isOpenAIModel, geminiApiId, type AIModel } from "./aiConfig";
 
 // ─── Retry helper ─────────────────────────────────────────────────────────────
-// Retries on 429 (rate limit) and 503 (overload) with exponential backoff.
-async function withRetry<T>(
-  fn: () => Promise<T>,
-  retries = 3,
-  baseDelayMs = 8000,
-): Promise<T> {
+async function withRetry<T>(fn: () => Promise<T>, retries = 3, baseDelayMs = 8000): Promise<T> {
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       return await fn();
@@ -31,7 +11,7 @@ async function withRetry<T>(
       const msg = (err as Error).message ?? "";
       const isRetryable = msg.includes("429") || msg.includes("503") || msg.includes("RESOURCE_EXHAUSTED");
       if (!isRetryable || attempt === retries) throw err;
-      const delay = baseDelayMs * Math.pow(2, attempt); // 8s, 16s, 32s
+      const delay = baseDelayMs * Math.pow(2, attempt);
       console.warn(`[BriefFlow] Retry ${attempt + 1}/${retries} in ${delay}ms — ${msg}`);
       await new Promise((r) => setTimeout(r, delay));
     }
@@ -212,7 +192,7 @@ async function callOpenAI(prompt: string, model: AIModel, apiKey: string): Promi
 }
 
 async function callGemini(prompt: string, model: AIModel, apiKey: string): Promise<string> {
-  const apiModel = geminiModelId(model);
+  const apiModel = geminiApiId(model);
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${apiModel}:generateContent?key=${apiKey}`;
   const res = await fetch(url, {
     method: "POST",
@@ -312,7 +292,7 @@ export async function generateAllMaterials(
       results[key] = `[ERRO ao gerar este material]\n${(err as Error).message}`;
     }
 
-    // Pausa entre materiais para respeitar o rate limit do free tier (ex: 10 req/min)
+    // Pausa entre materiais para respeitar o rate limit do free tier
     if (i < keys.length - 1) {
       await new Promise((r) => setTimeout(r, 6500));
     }
