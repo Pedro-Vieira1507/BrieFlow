@@ -9,9 +9,12 @@ import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 export default defineConfig({
   vite: {
     optimizeDeps: {
-      // Exclude Transformers.js from pre-bundling — it uses dynamic WASM imports
-      // that must be handled at runtime by the Web Worker.
-      exclude: ["@xenova/transformers"],
+      // Include Transformers.js so Vite pre-bundles it and resolves it inside Web Workers
+      include: ["@xenova/transformers"],
+      // Exclude native WASM binaries from pre-bundling (they must be loaded at runtime)
+      exclude: [
+        "onnxruntime-web",
+      ],
     },
     worker: {
       format: "es",
