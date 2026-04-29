@@ -1,8 +1,9 @@
-// Real AI material generation — supports OpenAI, Gemini, Grok, Mistral, Anthropic
+// Real AI material generation — supports Gemini, Groq, OpenAI, Grok, Mistral, Anthropic
 import { type StructuredBrief, type MaterialKey } from "./store";
 import {
   loadAIConfig,
   isOpenAIModel,
+  isGroqModel,
   isGrokModel,
   isMistralModel,
   isAnthropicModel,
@@ -10,7 +11,7 @@ import {
   type AIModel,
 } from "./aiConfig";
 
-// ─── Retry helper ─────────────────────────────────────────────────────────────
+// ─── Retry helper ────────────────────────────────────────────────────────────────
 async function withRetry<T>(
   fn: () => Promise<T>,
   retries = 3,
@@ -36,7 +37,7 @@ async function withRetry<T>(
   throw lastError;
 }
 
-// ─── Prompt builders ──────────────────────────────────────────────────────────
+// ─── Prompt builders ──────────────────────────────────────────────────────────────
 
 function briefContext(brief: StructuredBrief): string {
   return `
@@ -106,19 +107,18 @@ const PROMPTS: Record<MaterialKey, (brief: StructuredBrief, customPrompt?: strin
 
 // ─── API callers ──────────────────────────────────────────────────────────────
 
-/** Shared for OpenAI, Grok (api.x.ai) and Mistral (api.mistral.ai) — all OpenAI-compatible */
+/** Shared for OpenAI, Groq, Grok (xAI) and Mistral — all OpenAI-compatible */
 async function callOpenAICompat(
   prompt: string,
   model: AIModel,
   apiKey: string,
   baseUrl: string,
 ): Promise<string> {
-  const apiId = model; // these providers use the model string directly
   const res = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({
-      model: apiId,
+      model: model,
       messages: [
         { role: "system", content: SYSTEM_ROLE },
         { role: "user", content: prompt },
@@ -184,6 +184,11 @@ async function callAI(prompt: string): Promise<string> {
   const config = loadAIConfig();
   const { model } = config;
 
+  if (isGroqModel(model)) {
+    if (!config.groqKey) throw new Error("Chave Groq não configurada em Configurações.");
+    return withRetry(() => callOpenAICompat(prompt, model, config.groqKey, "https://api.groq.com/openai/v1"));
+  }
+
   if (isOpenAIModel(model)) {
     if (!config.openaiKey) throw new Error("Chave OpenAI não configurada em Configurações.");
     return withRetry(() => callOpenAICompat(prompt, model, config.openaiKey, "https://api.openai.com/v1"));
@@ -209,7 +214,7 @@ async function callAI(prompt: string): Promise<string> {
   return withRetry(() => callGemini(prompt, model, config.geminiKey));
 }
 
-// ─── Brief inference ──────────────────────────────────────────────────────────
+// ─── Brief inference ─────────────────────────────────────────────────────────────────
 
 export async function inferBriefFromTranscriptAI(nome: string, transcricao: string): Promise<string> {
   const config = loadAIConfig();
@@ -222,7 +227,7 @@ export async function inferBriefFromTranscriptAI(nome: string, transcricao: stri
   return callAI(prompt);
 }
 
-// ─── Generate all materials ───────────────────────────────────────────────────
+// ─── Generate all materials ───────────────────────────────────────────────────────────
 
 export type GenerationProgress = {
   current: number;
@@ -265,9 +270,11 @@ export async function generateAllMaterials(
       results[key] = `[ERRO ao gerar este material]\n${(err as Error).message}`;
     }
 
-    // Pausa entre materiais para respeitar rate limits (4.5s = < 15 RPM no Gemini free)
+    // Pausa entre materiais para respeitar rate limits
+    // Groq: 30 RPM = pode ser mais rápido (2s); Gemini free: 15 RPM (4.5s)
     if (i < keys.length - 1) {
-      await new Promise((r) => setTimeout(r, 4500));
+      const isGroq = isGroqModel(config.model);
+      await new Promise((r) => setTimeout(r, isGroq ? 2000 : 4500));
     }
   }
 
