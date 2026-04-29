@@ -37,6 +37,19 @@ async function withRetry<T>(
   throw lastError;
 }
 
+// ─── JSON sanitizer ───────────────────────────────────────────────────────────
+/**
+ * Strips markdown code fences that some LLMs add around JSON responses.
+ * Handles ```json\n...\n```, ```\n...\n``` and leading/trailing whitespace.
+ * Returns the cleaned string ready for JSON.parse().
+ */
+function sanitizeJsonResponse(raw: string): string {
+  let s = raw.trim();
+  // Remove ```json ... ``` or ``` ... ``` wrappers
+  s = s.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "");
+  return s.trim();
+}
+
 // ─── Prompt builders ──────────────────────────────────────────────────────────
 
 function briefContext(brief: StructuredBrief): string {
@@ -267,7 +280,10 @@ export async function inferBriefFromTranscriptAI(nome: string, transcricao: stri
   const customPrompt = config.prompts["brief"];
   const prompt = buildBriefPrompt(nome, transcricao, customPrompt);
 
-  return callAI(prompt);
+  const raw = await callAI(prompt);
+
+  // Strip markdown code fences that some models (e.g. Groq/Llama) add around JSON
+  return sanitizeJsonResponse(raw);
 }
 
 // ─── Generate all materials ───────────────────────────────────────────────────
