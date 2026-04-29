@@ -50,6 +50,123 @@ function sanitizeJsonResponse(raw: string): string {
   return s.trim();
 }
 
+// ─── Brief field normalizer ───────────────────────────────────────────────────
+/**
+ * Maps every known Portuguese / spaced / accented key variant that Llama/Groq
+ * returns to the canonical snake_case key used by StructuredBrief.
+ * Keys not in the map are kept as-is (preserves any already-correct field).
+ */
+const BRIEF_FIELD_MAP: Record<string, string> = {
+  // publico_alvo
+  "público-alvo": "publico_alvo",
+  "publico-alvo": "publico_alvo",
+  "público alvo": "publico_alvo",
+  "publico alvo": "publico_alvo",
+  "público_alvo": "publico_alvo",
+  // proposta_comercial
+  "proposta comercial": "proposta_comercial",
+  "proposta_comercia": "proposta_comercial",
+  // oferta_promocional
+  "oferta promocional": "oferta_promocional",
+  "oferta_promo": "oferta_promocional",
+  // subcategorias
+  "subcategorias citadas": "subcategorias",
+  "sub-categorias": "subcategorias",
+  "subcategorias mencionadas": "subcategorias",
+  // diferenciais_tecnicos
+  "diferenciais técnicos": "diferenciais_tecnicos",
+  "diferenciais tecnicos": "diferenciais_tecnicos",
+  "diferenciais-técnicos": "diferenciais_tecnicos",
+  "diferenciais-tecnicos": "diferenciais_tecnicos",
+  // beneficios_revendedor
+  "benefícios para revendedor": "beneficios_revendedor",
+  "beneficios para revendedor": "beneficios_revendedor",
+  "benefícios revendedor": "beneficios_revendedor",
+  "beneficios revendedor": "beneficios_revendedor",
+  "benefícios para o revendedor": "beneficios_revendedor",
+  "beneficios para o revendedor": "beneficios_revendedor",
+  // beneficios_cliente_final
+  "benefícios para cliente final": "beneficios_cliente_final",
+  "beneficios para cliente final": "beneficios_cliente_final",
+  "benefícios cliente final": "beneficios_cliente_final",
+  "beneficios cliente final": "beneficios_cliente_final",
+  "benefícios para o cliente final": "beneficios_cliente_final",
+  "beneficios para o cliente final": "beneficios_cliente_final",
+  // objecoes_argumentos
+  "objeções e argumentos": "objecoes_argumentos",
+  "objecoes e argumentos": "objecoes_argumentos",
+  "objeções": "objecoes_argumentos",
+  "objecoes": "objecoes_argumentos",
+  "objections": "objecoes_argumentos",
+  // tom_comunicacao
+  "tom de comunicação": "tom_comunicacao",
+  "tom de comunicacao": "tom_comunicacao",
+  "tom comunicacao": "tom_comunicacao",
+  "tom comunicação": "tom_comunicacao",
+  // inferencias_ia
+  "inferências ia": "inferencias_ia",
+  "inferencias ia": "inferencias_ia",
+  "inferências_ia": "inferencias_ia",
+  "inferencias": "inferencias_ia",
+  "observações": "observacoes",
+  "observações adicionais": "observacoes",
+};
+
+/** Empty defaults for every required StructuredBrief field. */
+const BRIEF_DEFAULTS: Record<string, unknown> = {
+  marca: "",
+  campanha: "",
+  publico_alvo: "",
+  proposta_comercial: "",
+  oferta_promocional: "",
+  subcategorias: [],
+  diferenciais_tecnicos: [],
+  beneficios_revendedor: [],
+  beneficios_cliente_final: [],
+  objecoes_argumentos: [],
+  tom_comunicacao: "",
+  observacoes: "",
+  inferencias_ia: [],
+};
+
+/**
+ * Normalizes the raw object returned by the LLM:
+ * 1. Remaps Portuguese / variant key names → snake_case
+ * 2. Fills missing required keys with empty defaults
+ * 3. Replaces null values with the appropriate empty default
+ * 4. Normalizes objecoes_argumentos inner objects (handles Portuguese sub-keys)
+ */
+function normalizeBriefFields(raw: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+
+  for (const [key, value] of Object.entries(raw)) {
+    const mapped = BRIEF_FIELD_MAP[key.toLowerCase().trim()] ?? key;
+
+    if (mapped === "objecoes_argumentos" && Array.isArray(value)) {
+      out[mapped] = (value as Record<string, unknown>[]).map((item) => ({
+        objecao:
+          item["objecao"] ??
+          item["objeção"] ??
+          item["objecão"] ??
+          item["objection"] ??
+          "",
+        argumento: item["argumento"] ?? item["argument"] ?? "",
+      }));
+    } else {
+      out[mapped] = value;
+    }
+  }
+
+  // Fill missing fields and replace nulls with typed defaults
+  for (const [k, def] of Object.entries(BRIEF_DEFAULTS)) {
+    if (!(k in out) || out[k] === null || out[k] === undefined) {
+      out[k] = def;
+    }
+  }
+
+  return out;
+}
+
 // ─── Prompt builders ──────────────────────────────────────────────────────────
 
 function briefContext(brief: StructuredBrief): string {
@@ -353,7 +470,10 @@ export async function generatePodcastAudio(script: string): Promise<string> {
 
 /**
  * Builds the brief extraction prompt.
- * Field names match StructuredBrief exactly (plural forms).
+ *
+ * Key design decision: the prompt includes a strict JSON template with the
+ * EXACT snake_case keys the model must use. This prevents Llama/Groq from
+ * returning Portuguese-named keys like "público-alvo" or "proposta comercial".
  * The transcription block is always injected — even when customPrompt is used.
  */
 function buildBriefPrompt(
@@ -367,15 +487,28 @@ function buildBriefPrompt(
 
   if (!customPrompt) {
     return (
-      `Extraia um JSON estruturado da transcrição abaixo com EXATAMENTE estes campos:\n` +
-      `marca (string), campanha (string), publico_alvo (string), proposta_comercial (string),\n` +
-      `oferta_promocional (string), subcategorias (array de strings),\n` +
-      `diferenciais_tecnicos (array de strings), beneficios_revendedor (array de strings),\n` +
-      `beneficios_cliente_final (array de strings),\n` +
-      `objecoes_argumentos (array de objetos {objecao: string, argumento: string}),\n` +
-      `tom_comunicacao (string), observacoes (string), inferencias_ia (array de strings).\n` +
-      `Use SOMENTE informações presentes na transcrição. Se um campo não estiver claro, retorne array vazio [] ou string vazia "".\n` +
-      `Responda APENAS com JSON válido, sem markdown, sem blocos de código.` +
+      `Extraia informações da transcrição e retorne EXATAMENTE o seguinte objeto JSON.\n` +
+      `NÃO renomeie nenhuma chave. Use EXATAMENTE os nomes de campo abaixo (snake_case):\n\n` +
+      `{\n` +
+      `  "marca": "",\n` +
+      `  "campanha": "",\n` +
+      `  "publico_alvo": "",\n` +
+      `  "proposta_comercial": "",\n` +
+      `  "oferta_promocional": "",\n` +
+      `  "subcategorias": [],\n` +
+      `  "diferenciais_tecnicos": [],\n` +
+      `  "beneficios_revendedor": [],\n` +
+      `  "beneficios_cliente_final": [],\n` +
+      `  "objecoes_argumentos": [{"objecao": "", "argumento": ""}],\n` +
+      `  "tom_comunicacao": "",\n` +
+      `  "observacoes": "",\n` +
+      `  "inferencias_ia": []\n` +
+      `}\n\n` +
+      `REGRAS OBRIGATÓRIAS:\n` +
+      `- Use SOMENTE informações presentes na transcrição.\n` +
+      `- Se um campo não estiver claro, retorne [] para arrays ou "" para strings. NUNCA retorne null.\n` +
+      `- NÃO traduza nem renomeie as chaves. "publico_alvo" deve aparecer exatamente como "publico_alvo".\n` +
+      `- Responda APENAS com o JSON válido, SEM markdown, SEM blocos de código, SEM texto antes ou depois.\n` +
       transcriptionBlock
     );
   }
@@ -404,8 +537,18 @@ export async function inferBriefFromTranscriptAI(nome: string, transcricao: stri
 
   const raw = await callAI(prompt);
 
-  // Strip markdown code fences that some models (e.g. Groq/Llama) add around JSON
-  return sanitizeJsonResponse(raw);
+  // 1. Strip markdown code fences (e.g. ```json ... ```) added by some models
+  const cleaned = sanitizeJsonResponse(raw);
+
+  // 2. Parse, normalize field names, fill nulls, then re-serialize
+  try {
+    const parsed = JSON.parse(cleaned) as Record<string, unknown>;
+    const normalized = normalizeBriefFields(parsed);
+    return JSON.stringify(normalized);
+  } catch {
+    // If parsing fails, return the cleaned string — the caller surfaces the error
+    return cleaned;
+  }
 }
 
 // ─── Generate all materials ───────────────────────────────────────────────────
