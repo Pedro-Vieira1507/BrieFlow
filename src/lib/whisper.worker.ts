@@ -1,10 +1,11 @@
 // Web Worker — Whisper transcription via @huggingface/transformers v3
-// This file runs in a separate thread so the UI never freezes.
+// Runs in a separate thread so the UI never freezes.
 import { pipeline, env } from "@huggingface/transformers";
 
-// Use browser cache; never load from local filesystem
+// Disable browser cache — blocked in sandboxed iframes (Lovable preview, etc.)
+// In a real production deploy the cache works normally and speeds up repeat runs.
+env.useBrowserCache = false;
 env.allowLocalModels = false;
-env.useBrowserCache = true;
 
 type ProgressEvent = {
   status: string;
@@ -27,7 +28,7 @@ function post(msg: WorkerOutMessage) {
   self.postMessage(msg);
 }
 
-// Cache pipeline per model id
+// In-memory pipeline cache per model id (persists for the tab session)
 const _pipes = new Map<string, Awaited<ReturnType<typeof pipeline>>>();
 
 async function getPipeline(modelId: string) {
