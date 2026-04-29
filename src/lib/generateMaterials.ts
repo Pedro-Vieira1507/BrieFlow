@@ -1,26 +1,33 @@
-// Real AI material generation using OpenAI or Gemini
+// Real AI material generation — supports OpenAI, Gemini, Grok, Mistral, Anthropic
 import { type StructuredBrief, type MaterialKey } from "./store";
-import { loadAIConfig, isOpenAIModel, geminiApiId, type AIModel } from "./aiConfig";
+import {
+  loadAIConfig,
+  isOpenAIModel,
+  isGrokModel,
+  isMistralModel,
+  isAnthropicModel,
+  geminiApiId,
+  type AIModel,
+} from "./aiConfig";
 
-// ─── Retry helper (respeita Retry-After do Gemini) ────────────────────────────
+// ─── Retry helper ─────────────────────────────────────────────────────────────
 async function withRetry<T>(
-  fn: () => Promise<T & { _retryAfterMs?: number }>,
+  fn: () => Promise<T>,
   retries = 3,
 ): Promise<T> {
   let lastError: Error = new Error("Max retries exceeded");
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      return await fn() as T;
+      return await fn();
     } catch (err) {
       lastError = err as Error;
       const msg = lastError.message ?? "";
-      const isRetryable = msg.includes("429") || msg.includes("503") || msg.includes("RESOURCE_EXHAUSTED");
+      const isRetryable = msg.includes("429") || msg.includes("503") || msg.includes("RESOURCE_EXHAUSTED") || msg.includes("overloaded");
       if (!isRetryable || attempt === retries) throw lastError;
 
-      // Extrai o tempo sugerido pelo Gemini ("Please retry in 47.9s")
       const retryMatch = msg.match(/retry in (\d+(?:\.\d+)?)s/);
       const suggestedMs = retryMatch ? Math.ceil(parseFloat(retryMatch[1])) * 1000 : 0;
-      const backoffMs = Math.max(suggestedMs, 12000 * Math.pow(2, attempt)); // mínimo 12s, 24s, 48s
+      const backoffMs = Math.max(suggestedMs, 8000 * Math.pow(2, attempt));
 
       console.warn(`[BriefFlow] Retry ${attempt + 1}/${retries} in ${(backoffMs / 1000).toFixed(0)}s`);
       await new Promise((r) => setTimeout(r, backoffMs));
@@ -58,103 +65,60 @@ const SYSTEM_ROLE =
 const PROMPTS: Record<MaterialKey, (brief: StructuredBrief, customPrompt?: string) => string> = {
   podcast_revendedores: (b, custom) =>
     custom ||
-    `${briefContext(b)}
-
-Crie um ROTEIRO DE PODCAST DE 5 MINUTOS para revendedores de laboratório.
-[INTRO 0:00–0:20] Abertura impactante mencionando a oferta
-[BLOCO 1 0:20–1:30] Por que a linha ${b.marca} é relevante agora
-[BLOCO 2 1:30–3:00] Subcategorias: ${b.subcategorias.join(", ")}
-[BLOCO 3 3:00–4:20] Benefícios para revendedor, diferenciais técnicos
-[CTA 4:20–5:00] Chamada à ação com urgência: ${b.oferta_promocional}
-Tom: ${b.tom_comunicacao}.`,
+    `${briefContext(b)}\n\nCrie um ROTEIRO DE PODCAST DE 5 MINUTOS para revendedores de laboratório.\n[INTRO 0:00–0:20] Abertura impactante mencionando a oferta\n[BLOCO 1 0:20–1:30] Por que a linha ${b.marca} é relevante agora\n[BLOCO 2 1:30–3:00] Subcategorias: ${b.subcategorias.join(", ")}\n[BLOCO 3 3:00–4:20] Benefícios para revendedor, diferenciais técnicos\n[CTA 4:20–5:00] Chamada à ação com urgência: ${b.oferta_promocional}\nTom: ${b.tom_comunicacao}.`,
 
   apresentacao_slides: (b, custom) =>
     custom ||
-    `${briefContext(b)}
-
-Crie uma APRESENTAÇÃO DE 10 SLIDES para capacitação de revendedores.
-Cada slide: número, título, 3-5 bullets.
-Slide 1: Capa. Slide 2: Quem é ${b.marca}. Slide 3: Por que qualidade importa.
-Slides 4-8: Subcategorias (${b.subcategorias.join(", ")}).
-Slide 9: Oferta (${b.oferta_promocional}). Slide 10: Próximos passos.`,
+    `${briefContext(b)}\n\nCrie uma APRESENTAÇÃO DE 10 SLIDES para capacitação de revendedores.\nCada slide: número, título, 3-5 bullets.\nSlide 1: Capa. Slide 2: Quem é ${b.marca}. Slide 3: Por que qualidade importa.\nSlides 4-8: Subcategorias (${b.subcategorias.join(", ")}).\nSlide 9: Oferta (${b.oferta_promocional}). Slide 10: Próximos passos.`,
 
   folheto_a4: (b, custom) =>
     custom ||
-    `${briefContext(b)}
-
-Crie texto de FOLHETO A4 PROMOCIONAL para cliente final.
-Incluir: título com oferta (${b.oferta_promocional}), subtítulo, produtos (${b.subcategorias.join(", ")}), destaques técnicos, benefícios, CTA.`,
+    `${briefContext(b)}\n\nCrie texto de FOLHETO A4 PROMOCIONAL para cliente final.\nIncluir: título com oferta (${b.oferta_promocional}), subtítulo, produtos (${b.subcategorias.join(", ")}), destaques técnicos, benefícios, CTA.`,
 
   ficha_tecnica: (b, custom) =>
     custom ||
-    `${briefContext(b)}
-
-Crie FICHA TÉCNICA INTERNA para vendedores.
-Cabeçalho + subcategorias com diferenciais + mecânica (${b.oferta_promocional}) + argumentário + quebra de objeções. Tom direto, uso interno.`,
+    `${briefContext(b)}\n\nCrie FICHA TÉCNICA INTERNA para vendedores.\nCabeçalho + subcategorias com diferenciais + mecânica (${b.oferta_promocional}) + argumentário + quebra de objeções. Tom direto, uso interno.`,
 
   emails_revendedores: (b, custom) =>
     custom ||
-    `${briefContext(b)}
-
-2 E-MAILS para revendedores.
-E-MAIL 1: apresentação das subcategorias (${b.subcategorias.join(", ")}) com aplicação e diferencial.
-E-MAIL 2: oferta (${b.oferta_promocional}), margem para revendedor, CTA urgente.
-Separe com === E-MAIL 1 === e === E-MAIL 2 ===`,
+    `${briefContext(b)}\n\n2 E-MAILS para revendedores.\nE-MAIL 1: apresentação das subcategorias (${b.subcategorias.join(", ")}) com aplicação e diferencial.\nE-MAIL 2: oferta (${b.oferta_promocional}), margem para revendedor, CTA urgente.\nSepare com === E-MAIL 1 === e === E-MAIL 2 ===`,
 
   emails_cliente_final: (b, custom) =>
     custom ||
-    `${briefContext(b)}
-
-3 E-MAILS para laboratórios.
-E-MAIL 1 — Topo: ${b.marca}, tipos de pipetadores, ecossistema Forlab.
-E-MAIL 2 — Meio: diferenciais vs. concorrentes.
-E-MAIL 3 — Fundo: ${b.oferta_promocional}, CTA direto.
-Separe com === E-MAIL 1 ===, === E-MAIL 2 ===, === E-MAIL 3 ===`,
+    `${briefContext(b)}\n\n3 E-MAILS para laboratórios.\nE-MAIL 1 — Topo: ${b.marca}, tipos de pipetadores, ecossistema Forlab.\nE-MAIL 2 — Meio: diferenciais vs. concorrentes.\nE-MAIL 3 — Fundo: ${b.oferta_promocional}, CTA direto.\nSepare com === E-MAIL 1 ===, === E-MAIL 2 ===, === E-MAIL 3 ===`,
 
   posts_linkedin: (b, custom) =>
     custom ||
-    `${briefContext(b)}
-
-2 POSTS LINKEDIN (B2B).
-Post 1: autoridade técnica, máx 150 palavras + hashtags.
-Post 2: oferta ${b.oferta_promocional}, CTA, máx 150 palavras + hashtags.
-Separe com [POST 1] e [POST 2].`,
+    `${briefContext(b)}\n\n2 POSTS LINKEDIN (B2B).\nPost 1: autoridade técnica, máx 150 palavras + hashtags.\nPost 2: oferta ${b.oferta_promocional}, CTA, máx 150 palavras + hashtags.\nSepare com [POST 1] e [POST 2].`,
 
   posts_facebook: (b, custom) =>
     custom ||
-    `${briefContext(b)}
-
-2 POSTS FACEBOOK.
-Post 1: apresentação ${b.marca}, amigável, máx 120 palavras.
-Post 2: oferta ${b.oferta_promocional} + urgência + emojis, máx 100 palavras.
-Separe com [POST 1] e [POST 2].`,
+    `${briefContext(b)}\n\n2 POSTS FACEBOOK.\nPost 1: apresentação ${b.marca}, amigável, máx 120 palavras.\nPost 2: oferta ${b.oferta_promocional} + urgência + emojis, máx 100 palavras.\nSepare com [POST 1] e [POST 2].`,
 
   posts_instagram: (b, custom) =>
     custom ||
-    `${briefContext(b)}
-
-2 POSTS INSTAGRAM.
-Post 1 — Carrossel: capa + 4-5 slides + CTA. Legenda + hashtags.
-Post 2 — Reels 15-30s: roteiro cena a cena + música + legenda.
-Separe com [POST 1 — Carrossel] e [POST 2 — Reels].`,
+    `${briefContext(b)}\n\n2 POSTS INSTAGRAM.\nPost 1 — Carrossel: capa + 4-5 slides + CTA. Legenda + hashtags.\nPost 2 — Reels 15-30s: roteiro cena a cena + música + legenda.\nSepare com [POST 1 — Carrossel] e [POST 2 — Reels].`,
 
   roteiro_video_curto: (b, custom) =>
     custom ||
-    `${briefContext(b)}
-
-ROTEIRO VÍDEO 15-30s para Reels e Shorts.
-Cena a cena: [Xs–Ys] Visual | Texto na tela | Locução | Música.
-Abertura impactante em 3s, produto em uso, oferta (${b.oferta_promocional}), CTA final. Tom: ${b.tom_comunicacao}.`,
+    `${briefContext(b)}\n\nROTEIRO VÍDEO 15-30s para Reels e Shorts.\nCena a cena: [Xs–Ys] Visual | Texto na tela | Locução | Música.\nAbertura impactante em 3s, produto em uso, oferta (${b.oferta_promocional}), CTA final. Tom: ${b.tom_comunicacao}.`,
 };
 
 // ─── API callers ──────────────────────────────────────────────────────────────
 
-async function callOpenAI(prompt: string, model: AIModel, apiKey: string): Promise<string> {
-  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+/** Shared for OpenAI, Grok (api.x.ai) and Mistral (api.mistral.ai) — all OpenAI-compatible */
+async function callOpenAICompat(
+  prompt: string,
+  model: AIModel,
+  apiKey: string,
+  baseUrl: string,
+): Promise<string> {
+  const apiId = model; // these providers use the model string directly
+  const res = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({
-      model,
+      model: apiId,
       messages: [
         { role: "system", content: SYSTEM_ROLE },
         { role: "user", content: prompt },
@@ -165,7 +129,7 @@ async function callOpenAI(prompt: string, model: AIModel, apiKey: string): Promi
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(`OpenAI error ${res.status}: ${(err as { error?: { message?: string } }).error?.message ?? res.statusText}`);
+    throw new Error(`${baseUrl} error ${res.status}: ${(err as { error?: { message?: string } }).error?.message ?? res.statusText}`);
   }
   const data = await res.json();
   return (data.choices?.[0]?.message?.content ?? "").trim();
@@ -192,16 +156,57 @@ async function callGemini(prompt: string, model: AIModel, apiKey: string): Promi
   return (data.candidates?.[0]?.content?.parts?.[0]?.text ?? "").trim();
 }
 
+async function callAnthropic(prompt: string, model: AIModel, apiKey: string): Promise<string> {
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: model,
+      max_tokens: 2048,
+      system: SYSTEM_ROLE,
+      messages: [{ role: "user", content: prompt }],
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    const errAny = err as { error?: { message?: string }; message?: string };
+    throw new Error(`Anthropic error ${res.status}: ${errAny.error?.message ?? errAny.message ?? res.statusText}`);
+  }
+  const data = await res.json();
+  return ((data.content?.[0]?.text) ?? "").trim();
+}
+
 async function callAI(prompt: string): Promise<string> {
   const config = loadAIConfig();
   const { model } = config;
+
   if (isOpenAIModel(model)) {
     if (!config.openaiKey) throw new Error("Chave OpenAI não configurada em Configurações.");
-    return withRetry(() => callOpenAI(prompt, model, config.openaiKey));
-  } else {
-    if (!config.geminiKey) throw new Error("Chave Gemini não configurada em Configurações.");
-    return withRetry(() => callGemini(prompt, model, config.geminiKey));
+    return withRetry(() => callOpenAICompat(prompt, model, config.openaiKey, "https://api.openai.com/v1"));
   }
+
+  if (isGrokModel(model)) {
+    if (!config.grokKey) throw new Error("Chave Grok (xAI) não configurada em Configurações.");
+    return withRetry(() => callOpenAICompat(prompt, model, config.grokKey, "https://api.x.ai/v1"));
+  }
+
+  if (isMistralModel(model)) {
+    if (!config.mistralKey) throw new Error("Chave Mistral não configurada em Configurações.");
+    return withRetry(() => callOpenAICompat(prompt, model, config.mistralKey, "https://api.mistral.ai/v1"));
+  }
+
+  if (isAnthropicModel(model)) {
+    if (!config.anthropicKey) throw new Error("Chave Anthropic não configurada em Configurações.");
+    return withRetry(() => callAnthropic(prompt, model, config.anthropicKey));
+  }
+
+  // Default: Gemini
+  if (!config.geminiKey) throw new Error("Chave Gemini não configurada em Configurações.");
+  return withRetry(() => callGemini(prompt, model, config.geminiKey));
 }
 
 // ─── Brief inference ──────────────────────────────────────────────────────────
@@ -212,17 +217,7 @@ export async function inferBriefFromTranscriptAI(nome: string, transcricao: stri
 
   const prompt =
     customPrompt ||
-    `Extraia um JSON estruturado da transcrição abaixo com os campos:
-marca, campanha, publico_alvo, proposta_comercial, oferta_promocional,
-subcategorias (array), diferenciais_tecnicos (array), beneficios_revendedor (array),
-beneficio_cliente_final (array), objecoes_argumentos (array de {objecao, argumento}),
-tom_comunicacao, observacoes, inferencias_ia (array).
-Use SOMENTE o que está na transcrição. Responda APENAS com JSON válido, sem markdown.
-
-Nome: ${nome}
-=== TRANSCRIÇÃO ===
-${transcricao}
-===================`;
+    `Extraia um JSON estruturado da transcrição abaixo com os campos:\nmarca, campanha, publico_alvo, proposta_comercial, oferta_promocional,\nsubcategorias (array), diferenciais_tecnicos (array), beneficios_revendedor (array),\nbeneficio_cliente_final (array), objecoes_argumentos (array de {objecao, argumento}),\ntom_comunicacao, observacoes, inferencias_ia (array).\nUse SOMENTE o que está na transcrição. Responda APENAS com JSON válido, sem markdown.\n\nNome: ${nome}\n=== TRANSCRIÇÃO ===\n${transcricao}\n===================`;
 
   return callAI(prompt);
 }
@@ -270,7 +265,7 @@ export async function generateAllMaterials(
       results[key] = `[ERRO ao gerar este material]\n${(err as Error).message}`;
     }
 
-    // Pausa entre materiais: 4s para free tier 15 RPM, garante < 15 req/min
+    // Pausa entre materiais para respeitar rate limits (4.5s = < 15 RPM no Gemini free)
     if (i < keys.length - 1) {
       await new Promise((r) => setTimeout(r, 4500));
     }

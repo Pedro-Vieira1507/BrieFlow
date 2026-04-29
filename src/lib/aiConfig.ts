@@ -4,23 +4,30 @@
 
 // ─── Model definitions ─────────────────────────────────────────────────────
 
-export type AIProvider = "gemini" | "openai";
+export type AIProvider = "gemini" | "openai" | "grok" | "anthropic" | "mistral";
 
-// IDs estáveis verificados em abril/2026:
-//   gemini-2.0-flash           — estável, 15 RPM free tier
-//   gemini-2.5-flash           — alias estável (sem sufixo -preview)
-//   gemini-2.5-pro             — alias estável
 export type AIModel =
+  // Gemini
   | "gemini-2.0-flash"
   | "gemini-2.5-flash"
   | "gemini-2.5-pro"
+  // OpenAI
   | "gpt-4o-mini"
-  | "gpt-4o";
+  | "gpt-4o"
+  // Grok (xAI) — OpenAI-compatible
+  | "grok-3"
+  | "grok-3-mini"
+  // Mistral — OpenAI-compatible
+  | "mistral-large-latest"
+  | "mistral-small-latest"
+  // Anthropic
+  | "claude-3-5-sonnet-20241022"
+  | "claude-3-haiku-20240307";
 
 export type ModelMeta = {
   label: string;
   provider: AIProvider;
-  apiId: string;          // ID exato enviado à API
+  apiId: string;
   freeRpm: number;
   freeTpm: number;
   badge: "free" | "paid" | "limited";
@@ -28,6 +35,7 @@ export type ModelMeta = {
 };
 
 export const MODEL_CATALOG: Record<AIModel, ModelMeta> = {
+  // ── Gemini ──────────────────────────────────────────────────────────────────
   "gemini-2.0-flash": {
     label: "Gemini 2.0 Flash",
     provider: "gemini",
@@ -40,7 +48,7 @@ export const MODEL_CATALOG: Record<AIModel, ModelMeta> = {
   "gemini-2.5-flash": {
     label: "Gemini 2.5 Flash",
     provider: "gemini",
-    apiId: "gemini-2.5-flash",
+    apiId: "gemini-2.5-flash-preview-04-17",
     freeRpm: 10,
     freeTpm: 250_000,
     badge: "free",
@@ -49,12 +57,13 @@ export const MODEL_CATALOG: Record<AIModel, ModelMeta> = {
   "gemini-2.5-pro": {
     label: "Gemini 2.5 Pro",
     provider: "gemini",
-    apiId: "gemini-2.5-pro",
+    apiId: "gemini-2.5-pro-preview-05-06",
     freeRpm: 5,
     freeTpm: 250_000,
     badge: "limited",
-    note: "Máxima qualidade. 5 req/min — use para briefings complexos.",
+    note: "Máxima qualidade Gemini. 5 req/min — use para briefings complexos.",
   },
+  // ── OpenAI ──────────────────────────────────────────────────────────────────
   "gpt-4o-mini": {
     label: "GPT-4o Mini",
     provider: "openai",
@@ -73,6 +82,63 @@ export const MODEL_CATALOG: Record<AIModel, ModelMeta> = {
     badge: "paid",
     note: "Melhor qualidade OpenAI. Requer chave OpenAI com créditos.",
   },
+  // ── Grok (xAI) ──────────────────────────────────────────────────────────────
+  "grok-3": {
+    label: "Grok 3",
+    provider: "grok",
+    apiId: "grok-3",
+    freeRpm: 0,
+    freeTpm: 0,
+    badge: "paid",
+    note: "Modelo flagship da xAI. API compatível com OpenAI. Requer chave xAI.",
+  },
+  "grok-3-mini": {
+    label: "Grok 3 Mini",
+    provider: "grok",
+    apiId: "grok-3-mini",
+    freeRpm: 0,
+    freeTpm: 0,
+    badge: "paid",
+    note: "Versão leve e econômica do Grok 3. Requer chave xAI.",
+  },
+  // ── Mistral ─────────────────────────────────────────────────────────────────
+  "mistral-large-latest": {
+    label: "Mistral Large",
+    provider: "mistral",
+    apiId: "mistral-large-latest",
+    freeRpm: 0,
+    freeTpm: 0,
+    badge: "paid",
+    note: "Melhor modelo Mistral. Excelente em português. Requer chave Mistral.",
+  },
+  "mistral-small-latest": {
+    label: "Mistral Small",
+    provider: "mistral",
+    apiId: "mistral-small-latest",
+    freeRpm: 0,
+    freeTpm: 0,
+    badge: "paid",
+    note: "Versão econômica Mistral. Bom custo-benefício. Requer chave Mistral.",
+  },
+  // ── Anthropic ───────────────────────────────────────────────────────────────
+  "claude-3-5-sonnet-20241022": {
+    label: "Claude 3.5 Sonnet",
+    provider: "anthropic",
+    apiId: "claude-3-5-sonnet-20241022",
+    freeRpm: 0,
+    freeTpm: 0,
+    badge: "paid",
+    note: "Melhor modelo Anthropic para copywriting. Requer chave Anthropic.",
+  },
+  "claude-3-haiku-20240307": {
+    label: "Claude 3 Haiku",
+    provider: "anthropic",
+    apiId: "claude-3-haiku-20240307",
+    freeRpm: 0,
+    freeTpm: 0,
+    badge: "paid",
+    note: "Modelo leve e rápido da Anthropic. Requer chave Anthropic.",
+  },
 };
 
 export function getModelProvider(model: AIModel): AIProvider {
@@ -81,6 +147,18 @@ export function getModelProvider(model: AIModel): AIProvider {
 
 export function isOpenAIModel(model: AIModel): boolean {
   return getModelProvider(model) === "openai";
+}
+
+export function isGrokModel(model: AIModel): boolean {
+  return getModelProvider(model) === "grok";
+}
+
+export function isMistralModel(model: AIModel): boolean {
+  return getModelProvider(model) === "mistral";
+}
+
+export function isAnthropicModel(model: AIModel): boolean {
+  return getModelProvider(model) === "anthropic";
 }
 
 export function geminiApiId(model: AIModel): string {
@@ -92,6 +170,9 @@ export function geminiApiId(model: AIModel): string {
 export type AIConfig = {
   openaiKey: string;
   geminiKey: string;
+  grokKey: string;
+  anthropicKey: string;
+  mistralKey: string;
   model: AIModel;
   driveEnabled: boolean;
   drivePath: string;
@@ -104,6 +185,9 @@ const STORAGE_KEY = "briefflow_ai_config";
 const DEFAULT_CONFIG: AIConfig = {
   openaiKey: "",
   geminiKey: "",
+  grokKey: "",
+  anthropicKey: "",
+  mistralKey: "",
   model: "gemini-2.0-flash",
   driveEnabled: false,
   drivePath: "/Forlab/Campanhas",
@@ -146,8 +230,8 @@ export function loadAIConfig(): AIConfig {
     const raw = readRaw();
     if (!raw) return { ...DEFAULT_CONFIG };
     const saved = JSON.parse(raw) as Partial<AIConfig>;
-    const model = saved.model && MODEL_CATALOG[saved.model]
-      ? saved.model
+    const model = saved.model && MODEL_CATALOG[saved.model as AIModel]
+      ? (saved.model as AIModel)
       : DEFAULT_CONFIG.model;
     return { ...DEFAULT_CONFIG, ...saved, model };
   } catch {
@@ -159,11 +243,19 @@ export function saveAIConfig(config: AIConfig): void {
   writeRaw(JSON.stringify(config));
 }
 
-export function getOpenAIKey(): string   { return loadAIConfig().openaiKey; }
-export function getGeminiKey(): string   { return loadAIConfig().geminiKey; }
+export function getOpenAIKey(): string    { return loadAIConfig().openaiKey; }
+export function getGeminiKey(): string    { return loadAIConfig().geminiKey; }
+export function getGrokKey(): string      { return loadAIConfig().grokKey; }
+export function getAnthropicKey(): string { return loadAIConfig().anthropicKey; }
+export function getMistralKey(): string   { return loadAIConfig().mistralKey; }
 export function getActiveModel(): AIModel { return loadAIConfig().model; }
 
 export function getActiveKey(): string {
   const config = loadAIConfig();
-  return isOpenAIModel(config.model) ? config.openaiKey : config.geminiKey;
+  const p = getModelProvider(config.model);
+  if (p === "openai")    return config.openaiKey;
+  if (p === "grok")      return config.grokKey;
+  if (p === "anthropic") return config.anthropicKey;
+  if (p === "mistral")   return config.mistralKey;
+  return config.geminiKey;
 }
