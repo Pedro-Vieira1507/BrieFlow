@@ -3,9 +3,8 @@ import { useCampaign, store, inferBriefFromTranscript, type StructuredBrief } fr
 import { inferBriefFromTranscriptAI } from "@/lib/generateMaterials";
 import { getActiveKey } from "@/lib/aiConfig";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { Sparkles, Save, Loader2, Zap } from "lucide-react";
 import { toast } from "sonner";
 
@@ -15,60 +14,34 @@ export const Route = createFileRoute("/campanha/$id/transcricao")({
 
 function Page() {
   const { id } = Route.useParams();
-  const c = useCampaign(id);
   const nav = useNavigate();
-
-  const [charCount, setCharCount] = useState((c?.transcricao ?? "").length);
-  const [inferring, setInferring] = useState(false);
-
-  /**
-   * Uncontrolled textarea: React only seeds the initial value via `defaultValue`.
-   * After mount, the DOM is the owner — React never overwrites user input on re-render.
-   * We read the current content exclusively from the DOM ref.
-   */
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-  if (!c) return null;
-
+  const c = useCampaign(id);
   const hasKey = !!getActiveKey();
 
-  /** Ground-truth text: always reads from the live DOM node. */
-  function getText(): string {
-    return textareaRef.current?.value ?? "";
-  }
+  const [text, setText] = useState<string>(c?.transcricao ?? "");
+  const [inferring, setInferring] = useState(false);
+
+  if (!c) return <p className="p-8 text-muted-foreground">Campanha não encontrada.</p>;
 
   function salvar() {
-    const t = getText();
-    store.setTranscricao(id, t);
+    store.setTranscricao(id, text);
     toast.success("Transcrição salva");
   }
 
-  function gerarBriefLocal() {
-    const t = getText();
-    if (!t.trim()) return toast.error("Transcrição vazia.");
-    store.setTranscricao(id, t);
-    const brief = inferBriefFromTranscript(c.nome, t);
-    brief.campanha = c.nome;
-    store.setBrief(id, brief);
-    toast.success("Brief gerado localmente (heurística).");
-    nav({ to: "/campanha/$id/brief", params: { id } });
-  }
-
   async function gerarBriefIA() {
-    const t = getText();
-    if (!t.trim()) return toast.error("Transcrição vazia.");
+    if (!text.trim()) return toast.error("Transcrição vazia. Cole o conteúdo antes de gerar.");
     setInferring(true);
     try {
-      store.setTranscricao(id, t);
-      const raw = await inferBriefFromTranscriptAI(c.nome, t);
+      store.setTranscricao(id, text);
+      const raw = await inferBriefFromTranscriptAI(c!.nome, text);
       let brief: StructuredBrief;
       try {
         brief = JSON.parse(raw);
       } catch {
-        const match = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
-        brief = JSON.parse(match?.[1] ?? raw);
+        const match = raw.match(/\{[\s\S]*\}/);
+        if (!match) throw new Error(raw.slice(0, 200));
+        brief = JSON.parse(match[0]);
       }
-      brief.campanha = c.nome;
       store.setBrief(id, brief);
       toast.success("Brief gerado pela IA com sucesso!");
       nav({ to: "/campanha/$id/brief", params: { id } });
@@ -79,87 +52,84 @@ function Page() {
     }
   }
 
+  function gerarBriefLocal() {
+    if (!text.trim()) return toast.error("Transcrição vazia.");
+    store.setTranscricao(id, text);
+    const brief = inferBriefFromTranscript(c!.nome, text);
+    store.setBrief(id, brief);
+    toast.success("Brief gerado localmente!");
+    nav({ to: "/campanha/$id/brief", params: { id } });
+  }
+
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      <Card className="lg:col-span-2">
-        <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle className="text-base">Revisão da transcrição</CardTitle>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={salvar}>
-              <Save className="h-4 w-4" /> Salvar
-            </Button>
-            {hasKey ? (
-              <Button size="sm" onClick={gerarBriefIA} disabled={inferring}>
-                {inferring
-                  ? <Loader2 className="h-4 w-4 animate-spin" />
-                  : <Sparkles className="h-4 w-4" />}
-                Gerar brief com IA
-              </Button>
-            ) : (
-              <Button size="sm" variant="outline" onClick={gerarBriefLocal}>
-                <Zap className="h-4 w-4" /> Gerar brief (local)
-              </Button>
-            )}
-          </div>
+    <div className="p-6 md:p-8 max-w-4xl mx-auto space-y-6">
+      <div>
+        <Link to="/campanha/$id/transcricao" params={{ id }} className="text-sm text-muted-foreground hover:underline">
+          ← {c.nome}
+        </Link>
+        <h1 className="text-2xl font-bold mt-1">Transcrição</h1>
+        <p className="text-muted-foreground text-sm">
+          Cole ou edite a transcrição da reunião/vídeo. A IA vai extrair o brief automaticamente.
+        </p>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Conteúdo da transcrição</CardTitle>
         </CardHeader>
-        <CardContent>
-          {/*
-            defaultValue (not value) — uncontrolled.
-            React seeds the initial content once and never touches it again.
-            The user can type/paste freely; React re-renders do NOT erase their input.
-          */}
-          <Textarea
-            ref={textareaRef}
-            defaultValue={c.transcricao}
-            key={id}  // remount when campaign changes so defaultValue re-seeds
-            onInput={(e) => setCharCount((e.target as HTMLTextAreaElement).value.length)}
-            rows={22}
-            className="font-mono text-sm leading-relaxed"
-            placeholder="Cole aqui a transcrição ou resumo da reunião. A IA usará esse texto para estruturar o brief."
+        <CardContent className="space-y-3">
+          <textarea
+            value={text}
+            onChange={e => setText(e.target.value)}
+            rows={16}
+            placeholder="Cole aqui a transcrição da reunião, script do vídeo ou briefing em texto livre..."
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 resize-y font-mono"
           />
-          <p className="mt-1.5 text-xs text-right">
-            {charCount > 0
-              ? <span className="text-foreground font-medium">{charCount.toLocaleString("pt-BR")} caracteres ✔️</span>
-              : <span className="text-muted-foreground">Cole a transcrição acima antes de gerar o brief</span>}
+          <p className="text-xs text-muted-foreground">
+            {text.length > 0
+              ? `${text.length} caracteres capturados ✔`
+              : "Nenhum conteúdo ainda."}
           </p>
         </CardContent>
       </Card>
 
-      <div className="space-y-6">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Sobre a transcrição</CardTitle>
-          </CardHeader>
-          <CardContent className="text-sm text-muted-foreground space-y-2">
-            <p>A IA usa <strong>esse texto</strong> como fonte primária do brief. Quanto mais limpo e completo, melhores os materiais.</p>
-            <ul className="list-disc pl-5 space-y-1">
-              <li>Remova ruídos, falas duplicadas e digressões.</li>
-              <li>Mantenha nomes de produtos e SKUs corretos.</li>
-              <li>Confirme números, prazos e mecânicas promocionais.</li>
-            </ul>
-            {!hasKey && (
-              <div className="rounded-md border border-warning/40 bg-warning/5 p-3 text-xs">
-                Sem chave de API: o brief será gerado por heurística local.
-                <a href="/configuracoes" className="underline ml-1">Configurar IA</a>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+      <div className="flex flex-wrap gap-3">
+        <Button variant="outline" onClick={salvar}>
+          <Save className="w-4 h-4 mr-2" />
+          Salvar
+        </Button>
 
-        {c.brief && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Brief já gerado</CardTitle>
-            </CardHeader>
-            <CardContent className="text-sm space-y-2">
-              <p className="text-muted-foreground">Esta campanha já tem um brief estruturado.</p>
-              <Button asChild variant="outline" size="sm">
-                <Link to="/campanha/$id/brief" params={{ id }}>Abrir brief</Link>
-              </Button>
-            </CardContent>
-          </Card>
+        {hasKey ? (
+          <Button onClick={gerarBriefIA} disabled={inferring}>
+            {inferring ? (
+              <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Gerando brief...</>
+            ) : (
+              <><Sparkles className="w-4 h-4 mr-2" />Gerar brief com IA</>
+            )}
+          </Button>
+        ) : (
+          <Button variant="secondary" onClick={gerarBriefLocal}>
+            <Zap className="w-4 h-4 mr-2" />
+            Gerar brief (local)
+          </Button>
+        )}
+
+        {hasKey && (
+          <Button variant="ghost" size="sm" onClick={gerarBriefLocal} className="text-muted-foreground">
+            Gerar sem IA (local)
+          </Button>
         )}
       </div>
+
+      {!hasKey && (
+        <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+          Configure uma chave de API em{" "}
+          <Link to="/configuracoes" className="underline font-medium">
+            Configurações
+          </Link>{" "}
+          para usar geração por IA.
+        </p>
+      )}
     </div>
   );
 }
