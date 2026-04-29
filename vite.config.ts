@@ -6,4 +6,15 @@
 // You can pass additional config via defineConfig({ vite: { ... } }) if needed.
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 
-export default defineConfig();
+export default defineConfig({
+  vite: {
+    optimizeDeps: {
+      // Exclude Transformers.js from pre-bundling — it uses dynamic WASM imports
+      // that must be handled at runtime by the Web Worker.
+      exclude: ["@xenova/transformers"],
+    },
+    worker: {
+      format: "es",
+    },
+  },
+});
