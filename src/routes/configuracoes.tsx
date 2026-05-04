@@ -17,7 +17,7 @@ import {
   getModelProvider,
 } from "@/lib/aiConfig";
 import { useState, useEffect } from "react";
-import { Save, Eye, EyeOff, CheckCircle2, ExternalLink, KeyRound, Sparkles } from "lucide-react";
+import { Save, Eye, EyeOff, CheckCircle2, ExternalLink, KeyRound, Sparkles, Mic } from "lucide-react";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/configuracoes")({
@@ -29,6 +29,22 @@ export const Route = createFileRoute("/configuracoes")({
   }),
   component: Configuracoes,
 });
+
+// ─── Módulos disponíveis para configuração per-módulo ─────────────────────────
+const MODULE_ENTRIES: { key: string; label: string; icon: string; audioOnly?: boolean }[] = [
+  { key: "brief",                label: "Briefing",           icon: "📋" },
+  { key: "audio",                label: "Áudio / TTS",        icon: "🎙️", audioOnly: true },
+  { key: "podcast_revendedores", label: "Podcast 5 min",      icon: "🎧" },
+  { key: "apresentacao_slides",  label: "Slides",             icon: "📊" },
+  { key: "folheto_a4",           label: "Folheto A4",         icon: "📄" },
+  { key: "ficha_tecnica",        label: "Ficha Técnica",      icon: "🔧" },
+  { key: "emails_revendedores",  label: "E-mails Revendedor", icon: "📧" },
+  { key: "emails_cliente_final", label: "E-mails Cliente",    icon: "📧" },
+  { key: "posts_linkedin",       label: "LinkedIn",           icon: "💼" },
+  { key: "posts_facebook",       label: "Facebook",           icon: "👍" },
+  { key: "posts_instagram",      label: "Instagram",          icon: "📸" },
+  { key: "roteiro_video_curto",  label: "Vídeo Curto",        icon: "🎬" },
+];
 
 const DEFAULT_PROMPTS: Record<"brief" | MaterialKey, string> = {
   brief: "A partir da transcrição/briefing fornecida, extraia um JSON estruturado com marca, campanha, público-alvo, proposta comercial, oferta promocional, subcategorias citadas, diferenciais técnicos, benefícios para revendedor e cliente final, objeções e argumentos, tom de comunicação e observações. Não invente categorias fixas — use estritamente o que está no conteúdo. Marque inferências.",
@@ -45,15 +61,17 @@ const DEFAULT_PROMPTS: Record<"brief" | MaterialKey, string> = {
 };
 
 const BADGE_STYLES: Record<string, string> = {
-  free: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
+  free:    "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
   limited: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400",
-  paid: "bg-muted text-muted-foreground",
+  paid:    "bg-muted text-muted-foreground",
+  audio:   "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
 };
 
 const BADGE_LABELS: Record<string, string> = {
   free: "Grátis",
   limited: "Grátis / limitado",
   paid: "Pago",
+  audio: "Áudio nativo",
 };
 
 const PROVIDER_INFO: Record<AIProvider, {
@@ -66,14 +84,14 @@ const PROVIDER_INFO: Record<AIProvider, {
   gemini: {
     label: "Google Gemini",
     placeholder: "AIzaSy…",
-    description: "Necessária para modelos Gemini 2.0 Flash, 2.5 Flash e 2.5 Pro.",
+    description: "Necessária para modelos Gemini, Gemma e Native Audio Dialog.",
     linkLabel: "Obter chave gratuita no Google AI Studio",
     linkUrl: "https://aistudio.google.com/app/apikey",
   },
   groq: {
     label: "Groq (Llama / Gemma)",
     placeholder: "gsk_…",
-    description: "Gratuito: 30 req/min. Modelos Llama 3 e Gemma 2 ultra-rápidos.",
+    description: "Gratuito: 30 req/min. Modelos Llama 3 e Gemma ultra-rápidos.",
     linkLabel: "Obter chave gratuita em console.groq.com",
     linkUrl: "https://console.groq.com/keys",
   },
@@ -118,27 +136,38 @@ type KeyState = {
 
 type ShowState = Record<AIProvider, boolean>;
 
+// Modelos que suportam geração de TEXTO (excluir o Native Audio do seletor de texto)
+const TEXT_MODEL_IDS = (Object.keys(MODEL_CATALOG) as AIModel[]).filter(
+  (id) => MODEL_CATALOG[id].badge !== "audio"
+);
+
+// Modelos que suportam ÁUDIO (Native Audio + Groq + OpenAI + Gemini TTS)
+const AUDIO_MODEL_IDS = (Object.keys(MODEL_CATALOG) as AIModel[]).filter((id) => {
+  const provider = getModelProvider(id);
+  return (
+    id === "gemini-2.5-flash-live" ||
+    provider === "groq" ||
+    provider === "openai" ||
+    (provider === "gemini" && id !== "gemma-3-27b-it" && id !== "gemma-4-27b")
+  );
+});
+
 function Configuracoes() {
   const [keys, setKeys] = useState<KeyState>({
-    geminiKey: "",
-    openaiKey: "",
-    grokKey: "",
-    anthropicKey: "",
-    mistralKey: "",
-    groqKey: "",
+    geminiKey: "", openaiKey: "", grokKey: "",
+    anthropicKey: "", mistralKey: "", groqKey: "",
   });
   const [show, setShow] = useState<ShowState>({
-    gemini: false,
-    openai: false,
-    grok: false,
-    anthropic: false,
-    mistral: false,
-    groq: false,
+    gemini: false, openai: false, grok: false,
+    anthropic: false, mistral: false, groq: false,
   });
   const [drive, setDrive] = useState(false);
   const [drivePath, setDrivePath] = useState("/Forlab/Campanhas");
   const [outDir, setOutDir] = useState("/Forlab/Materiais");
-  const [model, setModel] = useState<AIModel>("gemini-2.0-flash");
+  const [model, setModel] = useState<AIModel>("gemini-3.1-flash-lite");
+  const [modelPerModule, setModelPerModule] = useState<Partial<Record<string, AIModel>>>({
+    audio: "gemini-2.5-flash-live",
+  });
   const [prompts, setPrompts] = useState<Record<string, string>>({ ...DEFAULT_PROMPTS });
   const [wasSaved, setWasSaved] = useState(false);
   const [hydrated, setHydrated] = useState(false);
@@ -158,6 +187,10 @@ function Configuracoes() {
     setDrivePath(saved.drivePath);
     setOutDir(saved.driveOutDir);
     setModel(saved.model);
+    setModelPerModule({
+      audio: "gemini-2.5-flash-live",
+      ...(saved.modelPerModule ?? {}),
+    });
     setPrompts({ ...DEFAULT_PROMPTS, ...saved.prompts });
     setHydrated(true);
   }, []);
@@ -165,9 +198,8 @@ function Configuracoes() {
   const activeProvider = getModelProvider(model);
   const selectedMeta = MODEL_CATALOG[model];
 
-  // Models filtered by free/all toggle
   const visibleModels = (Object.entries(MODEL_CATALOG) as [AIModel, typeof MODEL_CATALOG[AIModel]][]).filter(
-    ([, meta]) => !onlyFree || meta.badge !== "paid"
+    ([, meta]) => (!onlyFree || meta.badge !== "paid") && meta.badge !== "audio"
   );
 
   function salvar() {
@@ -179,6 +211,7 @@ function Configuracoes() {
       mistralKey: keys.mistralKey,
       groqKey: keys.groqKey,
       model,
+      modelPerModule,
       driveEnabled: drive,
       drivePath,
       driveOutDir: outDir,
@@ -192,19 +225,32 @@ function Configuracoes() {
 
   function keyFieldName(provider: AIProvider): keyof KeyState {
     const map: Record<AIProvider, keyof KeyState> = {
-      gemini: "geminiKey",
-      openai: "openaiKey",
-      grok: "grokKey",
-      anthropic: "anthropicKey",
-      mistral: "mistralKey",
-      groq: "groqKey",
+      gemini: "geminiKey", openai: "openaiKey", grok: "grokKey",
+      anthropic: "anthropicKey", mistral: "mistralKey", groq: "groqKey",
     };
     return map[provider];
   }
 
-  // Show key card for active provider + free providers; hide paid providers when not in use
+  function setModuleModel(key: string, val: string) {
+    setModelPerModule((prev) => {
+      if (!val) {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      }
+      return { ...prev, [key]: val as AIModel };
+    });
+  }
+
   const providerOrder: AIProvider[] = ["gemini", "groq", "openai", "grok", "mistral", "anthropic"];
   const freeProviders: AIProvider[] = ["gemini", "groq"];
+
+  // providers that appear in the per-module selections (to always show their key cards)
+  const usedProviders = new Set<AIProvider>(
+    Object.values(modelPerModule)
+      .filter(Boolean)
+      .map((m) => getModelProvider(m as AIModel))
+  );
 
   return (
     <AppShell>
@@ -222,11 +268,11 @@ function Configuracoes() {
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
-          {/* Modelo de IA */}
+          {/* ── Modelo de IA Global ── */}
           <Card className="lg:col-span-2">
             <CardHeader>
               <div className="flex items-center justify-between">
-                <CardTitle className="text-base">Modelo de IA</CardTitle>
+                <CardTitle className="text-base">Modelo de IA — Global</CardTitle>
                 <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
                   <Switch checked={onlyFree} onCheckedChange={setOnlyFree} />
                   <span className="flex items-center gap-1 text-muted-foreground">
@@ -261,11 +307,16 @@ function Configuracoes() {
                         </span>
                       </div>
                       <span className="text-xs text-muted-foreground line-clamp-2">{meta.note}</span>
-                      {meta.freeRpm > 0 && (
+                      {meta.freeRpm > 0 && meta.freeRpm < 999_999 && (
                         <span className="text-xs text-muted-foreground">
-                          {meta.freeRpm} req/min · {meta.freeTpm >= 1_000_000
+                          {meta.freeRpm} req/min
+                          {" · "}
+                          {meta.freeTpm >= 1_000_000
                             ? (meta.freeTpm / 1_000_000).toFixed(0) + "M"
-                            : (meta.freeTpm / 1_000).toFixed(0) + "K"} tokens/min
+                            : (meta.freeTpm / 1_000).toFixed(0) + "K"} tok/min
+                          {meta.freeRpd > 0 && meta.freeRpd < 99_999
+                            ? ` · ${meta.freeRpd.toLocaleString("pt-BR")} req/dia`
+                            : ""}
                         </span>
                       )}
                     </button>
@@ -276,19 +327,106 @@ function Configuracoes() {
               {hydrated && (
                 <div className="rounded-md bg-muted/50 border border-border px-4 py-3 text-xs text-muted-foreground space-y-1">
                   <p>
-                    <strong>Modelo selecionado:</strong> {selectedMeta.label} —{" "}
+                    <strong>Modelo global:</strong> {selectedMeta.label} —{" "}
                     {selectedMeta.badge === "paid"
                       ? `Requer chave ${PROVIDER_INFO[activeProvider].label} com créditos.`
-                      : `Free tier: ${selectedMeta.freeRpm} req/min · ${selectedMeta.freeTpm >= 1_000_000 ? (selectedMeta.freeTpm / 1_000_000).toFixed(0) + "M" : (selectedMeta.freeTpm / 1_000).toFixed(0) + "K"} tokens/min.`}
+                      : `Free tier: ${selectedMeta.freeRpm < 999_999 ? selectedMeta.freeRpm + " req/min" : "RPM ilimitado"} · ${selectedMeta.freeTpm >= 1_000_000 ? (selectedMeta.freeTpm / 1_000_000).toFixed(0) + "M" : (selectedMeta.freeTpm / 1_000).toFixed(0) + "K"} tok/min.`}
                   </p>
-                  <p>🤖 <strong>Brief e materiais</strong> usam o modelo selecionado acima.</p>
+                  <p>🤖 <strong>Brief e materiais</strong> usam o modelo global (ou o específico por módulo).</p>
                   <p>🎤 <strong>Transcrição</strong> usa Whisper local (gratuito, sem chave).</p>
                 </div>
               )}
             </CardContent>
           </Card>
 
-          {/* Chaves de API */}
+          {/* ── Modelo por Módulo ── */}
+          <Card className="lg:col-span-2">
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <Mic className="h-4 w-4 text-blue-500" />
+                <CardTitle className="text-base">Modelo por módulo</CardTitle>
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Defina um modelo específico por tipo de material. Deixe em{" "}
+                <strong>— Global —</strong> para usar o modelo acima.
+                O módulo <strong>🎙️ Áudio / TTS</strong> usa por padrão o{" "}
+                <strong>Gemini 2.5 Flash Native Audio</strong> (RPM ilimitado · 1M tok/min).
+              </p>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+                {MODULE_ENTRIES.map(({ key, label, icon, audioOnly }) => {
+                  const optionIds = audioOnly ? AUDIO_MODEL_IDS : TEXT_MODEL_IDS;
+                  const currentVal = modelPerModule[key] ?? "";
+                  const isAudio = key === "audio";
+
+                  return (
+                    <div
+                      key={key}
+                      className={
+                        "rounded-lg border p-3 space-y-2 " +
+                        (isAudio
+                          ? "border-blue-400/60 bg-blue-50/40 dark:bg-blue-950/20"
+                          : "border-border")
+                      }
+                    >
+                      <Label className="text-sm font-medium flex items-center gap-1.5">
+                        <span>{icon}</span>
+                        <span>{label}</span>
+                        {isAudio && (
+                          <span className="ml-auto rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 text-xs font-medium px-1.5 py-0.5">
+                            TTS
+                          </span>
+                        )}
+                      </Label>
+
+                      <select
+                        className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-accent"
+                        value={currentVal}
+                        onChange={(e) => setModuleModel(key, e.target.value)}
+                      >
+                        <option value="">
+                          — Global ({MODEL_CATALOG[model]?.label ?? "padrão"}) —
+                        </option>
+                        {optionIds.map((id) => {
+                          const meta = MODEL_CATALOG[id];
+                          return (
+                            <option key={id} value={id}>
+                              {meta.label}
+                              {meta.badge === "free" || meta.badge === "audio"
+                                ? ` (${meta.freeRpm < 999_999 ? meta.freeRpm + " RPM" : "∞ RPM"} grátis)`
+                                : meta.badge === "limited"
+                                ? ` (${meta.freeRpm} RPM limitado)`
+                                : " (pago)"}
+                            </option>
+                          );
+                        })}
+                      </select>
+
+                      {isAudio && currentVal === "gemini-2.5-flash-live" && (
+                        <p className="text-xs text-blue-600 dark:text-blue-400 flex items-center gap-1">
+                          ✅ RPM ilimitado · 1M tok/min · Voz: Aoede
+                        </p>
+                      )}
+
+                      {isAudio && !currentVal && (
+                        <p className="text-xs text-muted-foreground">
+                          Sem modelo específico — usará o modelo global (pode não ter TTS).
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              <p className="mt-4 text-xs text-muted-foreground rounded-md border border-border bg-muted/40 px-3 py-2">
+                💡 <strong>Dica:</strong> Use <strong>Gemini 3.1 Flash Lite</strong> como global (500 req/dia) e{" "}
+                <strong>Gemma 3 27B</strong> para módulos de volume (14.400 req/dia).
+              </p>
+            </CardContent>
+          </Card>
+
+          {/* ── Chaves de API ── */}
           <Card className="lg:col-span-2">
             <CardHeader>
               <CardTitle className="text-base">Chaves de API</CardTitle>
@@ -300,10 +438,11 @@ function Configuracoes() {
                   const fieldName = keyFieldName(provider);
                   const isActive = provider === activeProvider;
                   const isFree = freeProviders.includes(provider);
+                  const isUsedByModule = usedProviders.has(provider);
                   const isVisible = show[provider];
 
-                  // Hide paid providers that are not currently selected
-                  if (!isFree && !isActive) return null;
+                  // Mostra sempre os gratuitos + o provider do modelo ativo + providers usados por módulos
+                  if (!isFree && !isActive && !isUsedByModule) return null;
 
                   return (
                     <div
@@ -312,6 +451,8 @@ function Configuracoes() {
                         "rounded-lg border p-4 space-y-2 transition-colors " +
                         (isActive
                           ? "border-accent/60 bg-accent/5"
+                          : isUsedByModule
+                          ? "border-blue-400/40 bg-blue-50/20 dark:bg-blue-950/10"
                           : "border-border bg-transparent")
                       }
                     >
@@ -325,11 +466,18 @@ function Configuracoes() {
                             </span>
                           )}
                         </Label>
-                        {isActive && (
-                          <span className="rounded-full bg-accent/15 text-accent text-xs font-medium px-2 py-0.5">
-                            Em uso
-                          </span>
-                        )}
+                        <div className="flex gap-1">
+                          {isActive && (
+                            <span className="rounded-full bg-accent/15 text-accent text-xs font-medium px-2 py-0.5">
+                              Em uso
+                            </span>
+                          )}
+                          {isUsedByModule && !isActive && (
+                            <span className="rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 text-xs font-medium px-2 py-0.5">
+                              Módulo
+                            </span>
+                          )}
+                        </div>
                       </div>
 
                       <div className="relative">
@@ -371,7 +519,7 @@ function Configuracoes() {
             </CardContent>
           </Card>
 
-          {/* Google Drive */}
+          {/* ── Google Drive ── */}
           <Card>
             <CardHeader><CardTitle className="text-base">Google Drive</CardTitle></CardHeader>
             <CardContent className="space-y-3">
@@ -393,7 +541,7 @@ function Configuracoes() {
             </CardContent>
           </Card>
 
-          {/* Prompt templates */}
+          {/* ── Prompt templates ── */}
           <Card className="lg:col-span-2">
             <CardHeader><CardTitle className="text-base">Templates de prompt</CardTitle></CardHeader>
             <CardContent className="space-y-4">

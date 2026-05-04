@@ -68,7 +68,7 @@ function Page() {
   }
 
   function gerarMock() {
-    store.generateMaterials(id);
+    store.generateMockMaterials(id);
     toast.success("Materiais de exemplo gerados (mock).");
     setActive("");
     setAudioSrc(null);
@@ -178,7 +178,7 @@ function Page() {
         {hasKey ? (
           <Button size="sm" onClick={gerarComIA} disabled={generating}>
             {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-            Regerar com IA
+            Gerar com IA
           </Button>
         ) : (
           <Button size="sm" variant="outline" onClick={gerarMock}>
@@ -269,7 +269,7 @@ function Page() {
                   <div className="rounded-xl border border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-950/30 p-4">
                     <div className="flex items-center gap-3 text-sm text-violet-600 dark:text-violet-400">
                       <Loader2 className="h-4 w-4 animate-spin" />
-                      Convertendo roteiro em áudio via Groq TTS… Pode levar até 30 segundos.
+                      Convertendo roteiro em áudio, Por favor aguarde.
                     </div>
                   </div>
                 )}

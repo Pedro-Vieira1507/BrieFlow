@@ -8,164 +8,101 @@ import {
   isMistralModel,
   isAnthropicModel,
   geminiApiId,
+  getModelProvider,
+  getModuleModel,
   type AIModel,
 } from "./aiConfig";
 
-// ─── Retry helper ────────────────────────────────────────────────────────────
-async function withRetry<T>(
-  fn: () => Promise<T>,
-  retries = 3,
-): Promise<T> {
+
+// ─── Retry ────────────────────────────────────────────────────────────────────
+
+async function withRetry<T>(fn: () => Promise<T>, retries = 2): Promise<T> {
   let lastError: Error = new Error("Max retries exceeded");
   for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      return await fn();
-    } catch (err) {
+    try { return await fn(); } catch (err) {
       lastError = err as Error;
       const msg = lastError.message ?? "";
-      const isRetryable = msg.includes("429") || msg.includes("503") || msg.includes("RESOURCE_EXHAUSTED") || msg.includes("overloaded");
-      if (!isRetryable || attempt === retries) throw lastError;
 
-      const retryMatch = msg.match(/retry in (\d+(?:\.\d+)?)s/);
-      const suggestedMs = retryMatch ? Math.ceil(parseFloat(retryMatch[1])) * 1000 : 0;
-      const backoffMs = Math.max(suggestedMs, 8000 * Math.pow(2, attempt));
+      // ✅ 429 — falha imediata, sem retry
+      if (msg.includes("429")) {
+        throw new Error(
+          `Rate limit atingido (429). Aguarde alguns segundos e tente novamente, ou troque o modelo em Configurações.`,
+        );
+      }
 
-      console.warn(`[BriefFlow] Retry ${attempt + 1}/${retries} in ${(backoffMs / 1000).toFixed(0)}s`);
-      await new Promise((r) => setTimeout(r, backoffMs));
+      const retryable = msg.includes("503") || msg.includes("RESOURCE_EXHAUSTED") || msg.includes("overloaded");
+      if (!retryable || attempt === retries) throw lastError;
+
+      const m = msg.match(/retry in (\d+(?:\.\d+)?)s/);
+      const suggested = m ? Math.ceil(parseFloat(m[1])) * 1000 : 0;
+      const backoff = Math.max(suggested, 4000 * Math.pow(2, attempt));
+      console.warn(`[BriefFlow] Retry ${attempt + 1}/${retries} in ${(backoff / 1000).toFixed(0)}s`);
+      await new Promise((r) => setTimeout(r, backoff));
     }
   }
   throw lastError;
 }
 
+
 // ─── JSON sanitizer ───────────────────────────────────────────────────────────
-/**
- * Strips markdown code fences that some LLMs add around JSON responses.
- * Handles ```json\n...\n```, ```\n...\n``` and leading/trailing whitespace.
- * Returns the cleaned string ready for JSON.parse().
- */
+
 function sanitizeJsonResponse(raw: string): string {
   let s = raw.trim();
-  // Remove ```json ... ``` or ``` ... ``` wrappers
   s = s.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "");
   return s.trim();
 }
 
-// ─── Brief field normalizer ───────────────────────────────────────────────────
-/**
- * Maps every known Portuguese / spaced / accented key variant that Llama/Groq
- * returns to the canonical snake_case key used by StructuredBrief.
- * Keys not in the map are kept as-is (preserves any already-correct field).
- */
+
+// ─── Brief normalizer ─────────────────────────────────────────────────────────
+
 const BRIEF_FIELD_MAP: Record<string, string> = {
-  // publico_alvo
-  "público-alvo": "publico_alvo",
-  "publico-alvo": "publico_alvo",
-  "público alvo": "publico_alvo",
-  "publico alvo": "publico_alvo",
-  "público_alvo": "publico_alvo",
-  // proposta_comercial
-  "proposta comercial": "proposta_comercial",
-  "proposta_comercia": "proposta_comercial",
-  // oferta_promocional
-  "oferta promocional": "oferta_promocional",
-  "oferta_promo": "oferta_promocional",
-  // subcategorias
-  "subcategorias citadas": "subcategorias",
-  "sub-categorias": "subcategorias",
+  "público-alvo": "publico_alvo", "publico-alvo": "publico_alvo",
+  "público alvo": "publico_alvo", "publico alvo": "publico_alvo", "público_alvo": "publico_alvo",
+  "proposta comercial": "proposta_comercial", "proposta_comercia": "proposta_comercial",
+  "oferta promocional": "oferta_promocional", "oferta_promo": "oferta_promocional",
+  "subcategorias citadas": "subcategorias", "sub-categorias": "subcategorias",
   "subcategorias mencionadas": "subcategorias",
-  // diferenciais_tecnicos
-  "diferenciais técnicos": "diferenciais_tecnicos",
-  "diferenciais tecnicos": "diferenciais_tecnicos",
-  "diferenciais-técnicos": "diferenciais_tecnicos",
-  "diferenciais-tecnicos": "diferenciais_tecnicos",
-  // beneficios_revendedor
-  "benefícios para revendedor": "beneficios_revendedor",
-  "beneficios para revendedor": "beneficios_revendedor",
-  "benefícios revendedor": "beneficios_revendedor",
-  "beneficios revendedor": "beneficios_revendedor",
-  "benefícios para o revendedor": "beneficios_revendedor",
-  "beneficios para o revendedor": "beneficios_revendedor",
-  // beneficios_cliente_final
-  "benefícios para cliente final": "beneficios_cliente_final",
-  "beneficios para cliente final": "beneficios_cliente_final",
-  "benefícios cliente final": "beneficios_cliente_final",
-  "beneficios cliente final": "beneficios_cliente_final",
-  "benefícios para o cliente final": "beneficios_cliente_final",
-  "beneficios para o cliente final": "beneficios_cliente_final",
-  // objecoes_argumentos
-  "objeções e argumentos": "objecoes_argumentos",
-  "objecoes e argumentos": "objecoes_argumentos",
-  "objeções": "objecoes_argumentos",
-  "objecoes": "objecoes_argumentos",
-  "objections": "objecoes_argumentos",
-  // tom_comunicacao
-  "tom de comunicação": "tom_comunicacao",
-  "tom de comunicacao": "tom_comunicacao",
-  "tom comunicacao": "tom_comunicacao",
-  "tom comunicação": "tom_comunicacao",
-  // inferencias_ia
-  "inferências ia": "inferencias_ia",
-  "inferencias ia": "inferencias_ia",
-  "inferências_ia": "inferencias_ia",
-  "inferencias": "inferencias_ia",
-  "observações": "observacoes",
-  "observações adicionais": "observacoes",
+  "diferenciais técnicos": "diferenciais_tecnicos", "diferenciais tecnicos": "diferenciais_tecnicos",
+  "diferenciais-técnicos": "diferenciais_tecnicos", "diferenciais-tecnicos": "diferenciais_tecnicos",
+  "benefícios para revendedor": "beneficios_revendedor", "beneficios para revendedor": "beneficios_revendedor",
+  "benefícios revendedor": "beneficios_revendedor", "beneficios revendedor": "beneficios_revendedor",
+  "benefícios para o revendedor": "beneficios_revendedor", "beneficios para o revendedor": "beneficios_revendedor",
+  "benefícios para cliente final": "beneficios_cliente_final", "beneficios para cliente final": "beneficios_cliente_final",
+  "benefícios cliente final": "beneficios_cliente_final", "beneficios cliente final": "beneficios_cliente_final",
+  "benefícios para o cliente final": "beneficios_cliente_final", "beneficios para o cliente final": "beneficios_cliente_final",
+  "objeções e argumentos": "objecoes_argumentos", "objecoes e argumentos": "objecoes_argumentos",
+  "objeções": "objecoes_argumentos", "objecoes": "objecoes_argumentos", "objections": "objecoes_argumentos",
+  "tom de comunicação": "tom_comunicacao", "tom de comunicacao": "tom_comunicacao",
+  "tom comunicacao": "tom_comunicacao", "tom comunicação": "tom_comunicacao",
+  "inferências ia": "inferencias_ia", "inferencias ia": "inferencias_ia",
+  "inferências_ia": "inferencias_ia", "inferencias": "inferencias_ia",
+  "observações": "observacoes", "observações adicionais": "observacoes",
 };
 
-/** Empty defaults for every required StructuredBrief field. */
 const BRIEF_DEFAULTS: Record<string, unknown> = {
-  marca: "",
-  campanha: "",
-  publico_alvo: "",
-  proposta_comercial: "",
-  oferta_promocional: "",
-  subcategorias: [],
-  diferenciais_tecnicos: [],
-  beneficios_revendedor: [],
-  beneficios_cliente_final: [],
-  objecoes_argumentos: [],
-  tom_comunicacao: "",
-  observacoes: "",
-  inferencias_ia: [],
+  marca: "", campanha: "", publico_alvo: "", proposta_comercial: "",
+  oferta_promocional: "", subcategorias: [], diferenciais_tecnicos: [],
+  beneficios_revendedor: [], beneficios_cliente_final: [], objecoes_argumentos: [],
+  tom_comunicacao: "", observacoes: "", inferencias_ia: [],
 };
 
-/**
- * Normalizes the raw object returned by the LLM:
- * 1. Remaps Portuguese / variant key names → snake_case
- * 2. Fills missing required keys with empty defaults
- * 3. Replaces null values with the appropriate empty default
- * 4. Normalizes objecoes_argumentos inner objects (handles Portuguese sub-keys)
- */
 function normalizeBriefFields(raw: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-
   for (const [key, value] of Object.entries(raw)) {
     const mapped = BRIEF_FIELD_MAP[key.toLowerCase().trim()] ?? key;
-
     if (mapped === "objecoes_argumentos" && Array.isArray(value)) {
       out[mapped] = (value as Record<string, unknown>[]).map((item) => ({
-        objecao:
-          item["objecao"] ??
-          item["objeção"] ??
-          item["objecão"] ??
-          item["objection"] ??
-          "",
+        objecao: item["objecao"] ?? item["objeção"] ?? item["objecão"] ?? item["objection"] ?? "",
         argumento: item["argumento"] ?? item["argument"] ?? "",
       }));
-    } else {
-      out[mapped] = value;
-    }
+    } else { out[mapped] = value; }
   }
-
-  // Fill missing fields and replace nulls with typed defaults
   for (const [k, def] of Object.entries(BRIEF_DEFAULTS)) {
-    if (!(k in out) || out[k] === null || out[k] === undefined) {
-      out[k] = def;
-    }
+    if (!(k in out) || out[k] === null || out[k] === undefined) out[k] = def;
   }
-
   return out;
 }
+
 
 // ─── Prompt builders ──────────────────────────────────────────────────────────
 
@@ -184,8 +121,7 @@ Benefícios para cliente final: ${brief.beneficios_cliente_final.join("; ")}
 Objeções/argumentos: ${brief.objecoes_argumentos.map((o) => `[${o.objecao}] → ${o.argumento}`).join(" | ")}
 Tom de comunicação: ${brief.tom_comunicacao}
 Observações: ${brief.observacoes}
-=========================
-`.trim();
+=========================`.trim();
 }
 
 const SYSTEM_ROLE =
@@ -194,67 +130,47 @@ const SYSTEM_ROLE =
   "Responda SOMENTE com o conteúdo solicitado, sem explicações adicionais.";
 
 const PROMPTS: Record<MaterialKey, (brief: StructuredBrief, customPrompt?: string) => string> = {
-  podcast_revendedores: (b, custom) =>
-    custom ||
-    `${briefContext(b)}\n\nCrie um ROTEIRO DE PODCAST DE 5 MINUTOS para revendedores de laboratório.\n[INTRO 0:00–0:20] Abertura impactante mencionando a oferta\n[BLOCO 1 0:20–1:30] Por que a linha ${b.marca} é relevante agora\n[BLOCO 2 1:30–3:00] Subcategorias: ${b.subcategorias.join(", ")}\n[BLOCO 3 3:00–4:20] Benefícios para revendedor, diferenciais técnicos\n[CTA 4:20–5:00] Chamada à ação com urgência: ${b.oferta_promocional}\nTom: ${b.tom_comunicacao}.`,
+  podcast_revendedores: (b, c) => c ||
+    `${briefContext(b)}\n\nCrie um ROTEIRO DE PODCAST DE 5 MINUTOS para revendedores de laboratório.\n\nREGRAS OBRIGATÓRIAS:\n- Escreva APENAS o texto que será falado pelo apresentador. Nada mais.\n- NÃO inclua marcadores de tempo, labels como "Apresentador:", "Host:", "Narrador:", blocos de instrução em colchetes, direções de produção, divisores (---), hashtags ou qualquer marcação Markdown.\n- Escreva em parágrafos corridos, como um script de voz.\n- NÃO use asteriscos, colchetes, parênteses de instrução ou qualquer símbolo que não seja pontuação normal.\n\nESTRUTURA DO ROTEIRO:\n1. Abertura impactante mencionando a oferta (${b.oferta_promocional})\n2. Por que a linha ${b.marca} é relevante agora\n3. Subcategorias: ${b.subcategorias.join(", ")}\n4. Benefícios para revendedor e diferenciais técnicos\n5. Chamada à ação com urgência\n\nTom: ${b.tom_comunicacao}.`,
 
-  apresentacao_slides: (b, custom) =>
-    custom ||
+  apresentacao_slides: (b, c) => c ||
     `${briefContext(b)}\n\nCrie uma APRESENTAÇÃO DE 10 SLIDES para capacitação de revendedores.\nCada slide: número, título, 3-5 bullets.\nSlide 1: Capa. Slide 2: Quem é ${b.marca}. Slide 3: Por que qualidade importa.\nSlides 4-8: Subcategorias (${b.subcategorias.join(", ")}).\nSlide 9: Oferta (${b.oferta_promocional}). Slide 10: Próximos passos.`,
 
-  folheto_a4: (b, custom) =>
-    custom ||
+  folheto_a4: (b, c) => c ||
     `${briefContext(b)}\n\nCrie texto de FOLHETO A4 PROMOCIONAL para cliente final.\nIncluir: título com oferta (${b.oferta_promocional}), subtítulo, produtos (${b.subcategorias.join(", ")}), destaques técnicos, benefícios, CTA.`,
 
-  ficha_tecnica: (b, custom) =>
-    custom ||
+  ficha_tecnica: (b, c) => c ||
     `${briefContext(b)}\n\nCrie FICHA TÉCNICA INTERNA para vendedores.\nCabeçalho + subcategorias com diferenciais + mecânica (${b.oferta_promocional}) + argumentário + quebra de objeções. Tom direto, uso interno.`,
 
-  emails_revendedores: (b, custom) =>
-    custom ||
+  emails_revendedores: (b, c) => c ||
     `${briefContext(b)}\n\n2 E-MAILS para revendedores.\nE-MAIL 1: apresentação das subcategorias (${b.subcategorias.join(", ")}) com aplicação e diferencial.\nE-MAIL 2: oferta (${b.oferta_promocional}), margem para revendedor, CTA urgente.\nSepare com === E-MAIL 1 === e === E-MAIL 2 ===`,
 
-  emails_cliente_final: (b, custom) =>
-    custom ||
+  emails_cliente_final: (b, c) => c ||
     `${briefContext(b)}\n\n3 E-MAILS para laboratórios.\nE-MAIL 1 — Topo: ${b.marca}, tipos de pipetadores, ecossistema Forlab.\nE-MAIL 2 — Meio: diferenciais vs. concorrentes.\nE-MAIL 3 — Fundo: ${b.oferta_promocional}, CTA direto.\nSepare com === E-MAIL 1 ===, === E-MAIL 2 ===, === E-MAIL 3 ===`,
 
-  posts_linkedin: (b, custom) =>
-    custom ||
+  posts_linkedin: (b, c) => c ||
     `${briefContext(b)}\n\n2 POSTS LINKEDIN (B2B).\nPost 1: autoridade técnica, máx 150 palavras + hashtags.\nPost 2: oferta ${b.oferta_promocional}, CTA, máx 150 palavras + hashtags.\nSepare com [POST 1] e [POST 2].`,
 
-  posts_facebook: (b, custom) =>
-    custom ||
+  posts_facebook: (b, c) => c ||
     `${briefContext(b)}\n\n2 POSTS FACEBOOK.\nPost 1: apresentação ${b.marca}, amigável, máx 120 palavras.\nPost 2: oferta ${b.oferta_promocional} + urgência + emojis, máx 100 palavras.\nSepare com [POST 1] e [POST 2].`,
 
-  posts_instagram: (b, custom) =>
-    custom ||
+  posts_instagram: (b, c) => c ||
     `${briefContext(b)}\n\n2 POSTS INSTAGRAM.\nPost 1 — Carrossel: capa + 4-5 slides + CTA. Legenda + hashtags.\nPost 2 — Reels 15-30s: roteiro cena a cena + música + legenda.\nSepare com [POST 1 — Carrossel] e [POST 2 — Reels].`,
 
-  roteiro_video_curto: (b, custom) =>
-    custom ||
+  roteiro_video_curto: (b, c) => c ||
     `${briefContext(b)}\n\nROTEIRO VÍDEO 15-30s para Reels e Shorts.\nCena a cena: [Xs–Ys] Visual | Texto na tela | Locução | Música.\nAbertura impactante em 3s, produto em uso, oferta (${b.oferta_promocional}), CTA final. Tom: ${b.tom_comunicacao}.`,
 };
 
-// ─── API callers ──────────────────────────────────────────────────────────────
 
-/** Shared for OpenAI, Groq, Grok (xAI) and Mistral — all OpenAI-compatible */
-async function callOpenAICompat(
-  prompt: string,
-  model: AIModel,
-  apiKey: string,
-  baseUrl: string,
-): Promise<string> {
+// ─── API callers (texto) ──────────────────────────────────────────────────────
+
+async function callOpenAICompat(prompt: string, model: AIModel, apiKey: string, baseUrl: string): Promise<string> {
   const res = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({
-      model: model,
-      messages: [
-        { role: "system", content: SYSTEM_ROLE },
-        { role: "user", content: prompt },
-      ],
-      temperature: 0.7,
-      max_tokens: 2000,
+      model, temperature: 0.7, max_tokens: 2000,
+      messages: [{ role: "system", content: SYSTEM_ROLE }, { role: "user", content: prompt }],
     }),
   });
   if (!res.ok) {
@@ -279,8 +195,7 @@ async function callGemini(prompt: string, model: AIModel, apiKey: string): Promi
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    const msg = (err as { error?: { message?: string } }).error?.message ?? res.statusText;
-    throw new Error(`Gemini error ${res.status}: ${msg}`);
+    throw new Error(`Gemini error ${res.status}: ${(err as { error?: { message?: string } }).error?.message ?? res.statusText}`);
   }
   const data = await res.json();
   return (data.candidates?.[0]?.content?.parts?.[0]?.text ?? "").trim();
@@ -289,276 +204,257 @@ async function callGemini(prompt: string, model: AIModel, apiKey: string): Promi
 async function callAnthropic(prompt: string, model: AIModel, apiKey: string): Promise<string> {
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: model,
-      max_tokens: 2048,
-      system: SYSTEM_ROLE,
-      messages: [{ role: "user", content: prompt }],
-    }),
+    headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+    body: JSON.stringify({ model, max_tokens: 2048, system: SYSTEM_ROLE, messages: [{ role: "user", content: prompt }] }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    const errAny = err as { error?: { message?: string }; message?: string };
-    throw new Error(`Anthropic error ${res.status}: ${errAny.error?.message ?? errAny.message ?? res.statusText}`);
+    const e = err as { error?: { message?: string }; message?: string };
+    throw new Error(`Anthropic error ${res.status}: ${e.error?.message ?? e.message ?? res.statusText}`);
   }
   const data = await res.json();
-  return ((data.content?.[0]?.text) ?? "").trim();
+  return (data.content?.[0]?.text ?? "").trim();
 }
 
-async function callAI(prompt: string): Promise<string> {
+async function callAI(prompt: string, moduleKey?: string): Promise<string> {
   const config = loadAIConfig();
-  const { model } = config;
+  const model = moduleKey ? getModuleModel(moduleKey, config) : config.model;
 
   if (isGroqModel(model)) {
     if (!config.groqKey) throw new Error("Chave Groq não configurada em Configurações.");
     return withRetry(() => callOpenAICompat(prompt, model, config.groqKey, "https://api.groq.com/openai/v1"));
   }
-
   if (isOpenAIModel(model)) {
     if (!config.openaiKey) throw new Error("Chave OpenAI não configurada em Configurações.");
     return withRetry(() => callOpenAICompat(prompt, model, config.openaiKey, "https://api.openai.com/v1"));
   }
-
   if (isGrokModel(model)) {
     if (!config.grokKey) throw new Error("Chave Grok (xAI) não configurada em Configurações.");
     return withRetry(() => callOpenAICompat(prompt, model, config.grokKey, "https://api.x.ai/v1"));
   }
-
   if (isMistralModel(model)) {
     if (!config.mistralKey) throw new Error("Chave Mistral não configurada em Configurações.");
     return withRetry(() => callOpenAICompat(prompt, model, config.mistralKey, "https://api.mistral.ai/v1"));
   }
-
   if (isAnthropicModel(model)) {
     if (!config.anthropicKey) throw new Error("Chave Anthropic não configurada em Configurações.");
     return withRetry(() => callAnthropic(prompt, model, config.anthropicKey));
   }
-
-  // Default: Gemini
   if (!config.geminiKey) throw new Error("Chave Gemini não configurada em Configurações.");
   return withRetry(() => callGemini(prompt, model, config.geminiKey));
 }
 
-// ─── Groq TTS — PlayAI ───────────────────────────────────────────────────────
 
-/**
- * Groq TTS usa o modelo "playai-tts" (multilingual).
- * Vozes disponíveis (amostra): Celeste-PlayAI, Fritz-PlayAI, Valentina-PlayAI,
- * Nia-PlayAI, Mason-PlayAI, Eleanor-PlayAI, Judy-PlayAI.
- *
- * NOTA: o modelo "canopylabs/orpheus-3b-0.1-ft" foi removido da Groq —
- * use apenas "playai-tts".
- */
-const TTS_MODEL = "playai-tts";           // único modelo TTS disponível na Groq
-const TTS_VOICE_PRIMARY = "Celeste-PlayAI";  // voz feminina, som natural em PT-BR
-const TTS_VOICE_FALLBACK = "Fritz-PlayAI";   // fallback dentro do mesmo modelo
+// ─── TTS helpers ──────────────────────────────────────────────────────────────
 
-/**
- * Converte ArrayBuffer para base64 sem estourar a stack (chunked).
- */
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);
   let binary = "";
   const chunkSize = 8192;
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    const chunk = bytes.subarray(i, i + chunkSize);
-    binary += String.fromCharCode(...chunk);
-  }
+  for (let i = 0; i < bytes.length; i += chunkSize)
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
   return btoa(binary);
 }
 
-/**
- * Limpa o roteiro de podcast para TTS:
- * - remove cabeçalhos markdown (# Podcast ...)
- * - remove marcadores de tempo ([INTRO 0:00–0:20])
- * - colapsa linhas em branco excessivas
- * - trunca em ~3 000 caracteres (≈ 4–5 min de áudio)
- */
+function pcmBase64ToWavDataUrl(base64: string, sampleRate = 24000, numChannels = 1, bitsPerSample = 16): string {
+  const pcmBytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+  const dataSize = pcmBytes.length;
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
+  const writeStr = (offset: number, str: string) => {
+    for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+  };
+  writeStr(0, "RIFF");
+  view.setUint32(4, 36 + dataSize, true);
+  writeStr(8, "WAVE");
+  writeStr(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * numChannels * (bitsPerSample / 8), true);
+  view.setUint16(32, numChannels * (bitsPerSample / 8), true);
+  view.setUint16(34, bitsPerSample, true);
+  writeStr(36, "data");
+  view.setUint32(40, dataSize, true);
+  new Uint8Array(buffer, 44).set(pcmBytes);
+  const wavBytes = new Uint8Array(buffer);
+  let binary = "";
+  for (let i = 0; i < wavBytes.length; i++) binary += String.fromCharCode(wavBytes[i]);
+  return `data:audio/wav;base64,${btoa(binary)}`;
+}
+
 function cleanScriptForTTS(script: string): string {
   return script
-    .replace(/^#+\s.*/gm, "")                   // remove ## headings
-    .replace(/^\[\d+:\d+.*?\]/gm, "")            // remove timestamps [0:00–0:20]
-    .replace(/^\[.*?\]\s*/gm, "")               // remove outros marcadores [BLOCO ...]
+    .replace(/^\*{1,2}\(.*?\)\*{1,2}\s*$/gm, "")
+    .replace(/^\*{1,2}\[.*?\]\*{1,2}[^\n]*$/gm, "")
+    .replace(/^\[.*?\][^\n]*$/gm, "")
+    .replace(/^\*{1,2}[^*\n]+?\(.*?\)\s*:\*{1,2}\s*/gm, "")
+    .replace(/^\*{1,2}[^*\n]+?:\*{1,2}\s*/gm, "")
+    .replace(/^[A-ZÀ-Ú][a-zA-ZÀ-Ú\s()]{2,30}:\s+/gm, "")
+    .replace(/^-{3,}\s*$/gm, "")
+    .replace(/^\*{3,}\s*$/gm, "")
+    .replace(/^#+\s.*/gm, "")
+    .replace(/\*{1,2}([^*\n]+)\*{1,2}/g, "$1")
+    .replace(/\*+/g, "")
+    .replace(/\(\d+:\d+(?:[–-]\d+:\d+)?\)/g, "")
+    .replace(/\[\d+:\d+(?:[–-]\d+:\d+)?\]/g, "")
+    .replace(/\[.*?\]/g, "")
+    .replace(/\([^)]{0,60}\)/g, "")
     .replace(/\n{3,}/g, "\n\n")
     .trim()
-    .slice(0, 3000);                              // limite seguro para o modelo
+    .slice(0, 3000);
 }
 
-/**
- * Tenta gerar TTS com uma voz específica do modelo playai-tts.
- */
-async function tryTTS(
-  apiKey: string,
-  inputText: string,
-  voice: string,
-): Promise<ArrayBuffer | null> {
-  const res = await fetch("https://api.groq.com/openai/v1/audio/speech", {
+
+// ── Gemini TTS ────────────────────────────────────────────────────────────────
+async function callGeminiNativeAudioTTS(apiKey: string, inputText: string): Promise<string> {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${apiKey}`;
+  const res = await fetch(url, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: TTS_MODEL,
-      voice,
-      input: inputText,
-      response_format: "wav",
+      contents: [{ role: "user", parts: [{ text: inputText }] }],
+      generationConfig: {
+        responseModalities: ["AUDIO"],
+        speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: "Aoede" } } },
+      },
     }),
   });
-
-  if (res.ok) return res.arrayBuffer();
-
-  const errBody = await res.json().catch(() => ({}));
-  const errMsg = (errBody as { error?: { message?: string } }).error?.message ?? res.statusText;
-
-  // Apenas retorna null se for erro de voz/modelo (404/400) — permite fallback de voz
-  if (res.status === 404 || res.status === 400) {
-    console.warn(`[BriefFlow] TTS voz "${voice}" falhou (${res.status}): ${errMsg}`);
-    return null;
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(`Gemini TTS error ${res.status}: ${(err as { error?: { message?: string } }).error?.message ?? res.statusText}`);
   }
-
-  // Erros 401, 429, 5xx — lança diretamente
-  throw new Error(`Groq TTS error ${res.status}: ${errMsg}`);
+  const data = await res.json();
+  const part = data?.candidates?.[0]?.content?.parts?.[0];
+  const b64 = part?.inlineData?.data as string | undefined;
+  if (!b64) throw new Error("Gemini TTS: resposta sem dados de áudio.");
+  const mimeType: string = part?.inlineData?.mimeType ?? "audio/wav";
+  if (mimeType.includes("L16") || mimeType.includes("pcm")) {
+    const rateMatch = mimeType.match(/rate=(\d+)/);
+    const sampleRate = rateMatch ? parseInt(rateMatch[1], 10) : 24000;
+    return pcmBase64ToWavDataUrl(b64, sampleRate);
+  }
+  return `data:${mimeType};base64,${b64}`;
 }
 
-/**
- * Gera áudio WAV do roteiro de podcast via Groq TTS (playai-tts).
- * Requer que a chave Groq esteja configurada em Configurações.
- * Retorna uma data URL `data:audio/wav;base64,...` pronta para <audio src="...">.
- *
- * Lança erro se:
- * - chave Groq não configurada
- * - API retornar erro de autenticação, cota etc.
- */
-export async function generatePodcastAudio(script: string): Promise<string> {
-  const config = loadAIConfig();
-  if (!config.groqKey) {
-    throw new Error(
-      "TTS requer a API do Groq. Configure a chave Groq em ⚙️ Configurações.",
-    );
-  }
+const callGeminiTTS = callGeminiNativeAudioTTS;
 
-  const inputText = cleanScriptForTTS(script);
-  if (!inputText) {
-    throw new Error("Roteiro vazio após limpeza. Gere o podcast antes de converter para áudio.");
-  }
 
-  // Tenta voz primária (Celeste-PlayAI)
-  let buffer = await tryTTS(config.groqKey, inputText, TTS_VOICE_PRIMARY);
+// ── Groq TTS ──────────────────────────────────────────────────────────────────
+const GROQ_TTS_MODEL = "playai-tts";
+const GROQ_TTS_PRIMARY = "Celeste-PlayAI";
+const GROQ_TTS_FALLBACK = "Fritz-PlayAI";
 
-  // Se a voz primária não estiver disponível, tenta a voz de fallback (Fritz-PlayAI)
-  if (!buffer) {
-    console.warn(`[BriefFlow] TTS usando voz de fallback: ${TTS_VOICE_FALLBACK}`);
-    buffer = await tryTTS(config.groqKey, inputText, TTS_VOICE_FALLBACK);
-  }
+async function tryGroqVoice(apiKey: string, inputText: string, voice: string): Promise<ArrayBuffer | null> {
+  const res = await fetch("https://api.groq.com/openai/v1/audio/speech", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({ model: GROQ_TTS_MODEL, voice, input: inputText, response_format: "wav" }),
+  });
+  if (res.ok) return res.arrayBuffer();
+  const err = await res.json().catch(() => ({}));
+  const msg = (err as { error?: { message?: string } }).error?.message ?? res.statusText;
+  if (res.status === 404 || res.status === 400) { console.warn(`[BriefFlow] Groq voz "${voice}" (${res.status}): ${msg}`); return null; }
+  throw new Error(`Groq TTS error ${res.status}: ${msg}`);
+}
 
-  if (!buffer) {
-    throw new Error(
-      `Groq TTS: nenhuma voz disponível no momento. Tente novamente em alguns instantes.`,
-    );
-  }
-
+async function callGroqTTS(apiKey: string, inputText: string): Promise<string> {
+  let buffer = await tryGroqVoice(apiKey, inputText, GROQ_TTS_PRIMARY);
+  if (!buffer) buffer = await tryGroqVoice(apiKey, inputText, GROQ_TTS_FALLBACK);
+  if (!buffer) throw new Error("Groq TTS: nenhuma voz disponível no momento.");
   return `data:audio/wav;base64,${arrayBufferToBase64(buffer)}`;
 }
 
+
+// ── OpenAI TTS ────────────────────────────────────────────────────────────────
+async function callOpenAITTS(apiKey: string, inputText: string): Promise<string> {
+  const res = await fetch("https://api.openai.com/v1/audio/speech", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({ model: "tts-1", voice: "nova", input: inputText, response_format: "wav" }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(`OpenAI TTS error ${res.status}: ${(err as { error?: { message?: string } }).error?.message ?? res.statusText}`);
+  }
+  return `data:audio/wav;base64,${arrayBufferToBase64(await res.arrayBuffer())}`;
+}
+
+
+// ─── generatePodcastAudio — roteador por módulo ───────────────────────────────
+
+export async function generatePodcastAudio(script: string): Promise<string> {
+  const config = loadAIConfig();
+  const audioModel = getModuleModel("audio", config);
+  const provider = getModelProvider(audioModel);
+  const inputText = cleanScriptForTTS(script);
+  if (!inputText) throw new Error("Roteiro vazio. Gere o podcast antes de converter para áudio.");
+
+  if (audioModel === "gemini-2.5-flash-live") {
+    if (!config.geminiKey) throw new Error("Chave Gemini não configurada em ⚙️ Configurações.");
+    return callGeminiNativeAudioTTS(config.geminiKey, inputText);
+  }
+  if (provider === "groq") {
+    if (!config.groqKey) throw new Error("Chave Groq não configurada em ⚙️ Configurações.");
+    return callGroqTTS(config.groqKey, inputText);
+  }
+  if (provider === "openai") {
+    if (!config.openaiKey) throw new Error("Chave OpenAI não configurada em ⚙️ Configurações.");
+    return callOpenAITTS(config.openaiKey, inputText);
+  }
+  if (provider === "gemini") {
+    if (!config.geminiKey) throw new Error("Chave Gemini não configurada em ⚙️ Configurações.");
+    return callGeminiTTS(config.geminiKey, inputText);
+  }
+
+  // Fallback automático
+  if (config.groqKey) { console.warn("[BriefFlow] TTS fallback → Groq"); return callGroqTTS(config.groqKey, inputText); }
+  if (config.geminiKey) { console.warn("[BriefFlow] TTS fallback → Gemini TTS"); return callGeminiNativeAudioTTS(config.geminiKey, inputText); }
+
+  throw new Error(`O provedor "${provider}" não tem TTS nativo. Configure Groq ou Gemini em ⚙️ Configurações.`);
+}
+
+
 // ─── Brief inference ──────────────────────────────────────────────────────────
 
-/**
- * Builds the brief extraction prompt.
- *
- * Key design decision: the prompt includes a strict JSON template with the
- * EXACT snake_case keys the model must use. This prevents Llama/Groq from
- * returning Portuguese-named keys like "público-alvo" or "proposta comercial".
- * The transcription block is always injected — even when customPrompt is used.
- */
-function buildBriefPrompt(
-  nome: string,
-  transcricao: string,
-  customPrompt?: string,
-): string {
-  const transcriptionBlock =
-    `\nNome da campanha: ${nome}` +
-    `\n=== TRANSCRIÇÃO ===\n${transcricao}\n===================`;
-
+function buildBriefPrompt(nome: string, transcricao: string, customPrompt?: string): string {
+  const block = `\nNome da campanha: ${nome}\n=== TRANSCRIÇÃO ===\n${transcricao}\n===================`;
   if (!customPrompt) {
     return (
       `Extraia informações da transcrição e retorne EXATAMENTE o seguinte objeto JSON.\n` +
       `NÃO renomeie nenhuma chave. Use EXATAMENTE os nomes de campo abaixo (snake_case):\n\n` +
-      `{\n` +
-      `  "marca": "",\n` +
-      `  "campanha": "",\n` +
-      `  "publico_alvo": "",\n` +
-      `  "proposta_comercial": "",\n` +
-      `  "oferta_promocional": "",\n` +
-      `  "subcategorias": [],\n` +
-      `  "diferenciais_tecnicos": [],\n` +
-      `  "beneficios_revendedor": [],\n` +
-      `  "beneficios_cliente_final": [],\n` +
+      `{\n  "marca": "",\n  "campanha": "",\n  "publico_alvo": "",\n  "proposta_comercial": "",\n` +
+      `  "oferta_promocional": "",\n  "subcategorias": [],\n  "diferenciais_tecnicos": [],\n` +
+      `  "beneficios_revendedor": [],\n  "beneficios_cliente_final": [],\n` +
       `  "objecoes_argumentos": [{"objecao": "", "argumento": ""}],\n` +
-      `  "tom_comunicacao": "",\n` +
-      `  "observacoes": "",\n` +
-      `  "inferencias_ia": []\n` +
-      `}\n\n` +
-      `REGRAS OBRIGATÓRIAS:\n` +
-      `- Use SOMENTE informações presentes na transcrição.\n` +
-      `- Se um campo não estiver claro, retorne [] para arrays ou "" para strings. NUNCA retorne null.\n` +
-      `- NÃO traduza nem renomeie as chaves. "publico_alvo" deve aparecer exatamente como "publico_alvo".\n` +
-      `- Responda APENAS com o JSON válido, SEM markdown, SEM blocos de código, SEM texto antes ou depois.\n` +
-      transcriptionBlock
+      `  "tom_comunicacao": "",\n  "observacoes": "",\n  "inferencias_ia": []\n}\n\n` +
+      `REGRAS:\n- Use SOMENTE informações da transcrição.\n` +
+      `- Se um campo não estiver claro, retorne [] ou "". NUNCA null.\n` +
+      `- NÃO renomeie as chaves. Responda APENAS com JSON válido, SEM markdown.\n` +
+      block
     );
   }
-
-  // Support explicit {{transcricao}} placeholder in custom prompts
-  if (customPrompt.includes("{{transcricao}}")) {
-    return customPrompt
-      .replace("{{nome}}", nome)
-      .replace("{{transcricao}}", transcricao);
-  }
-
-  // No placeholder — append the transcription so the model always has context
-  return customPrompt + "\n" + transcriptionBlock;
+  if (customPrompt.includes("{{transcricao}}"))
+    return customPrompt.replace("{{nome}}", nome).replace("{{transcricao}}", transcricao);
+  return customPrompt + "\n" + block;
 }
 
 export async function inferBriefFromTranscriptAI(nome: string, transcricao: string): Promise<string> {
-  if (!transcricao || !transcricao.trim()) {
-    throw new Error(
-      "Transcrição vazia. Grave ou cole o texto da reunião antes de gerar o briefing.",
-    );
-  }
-
+  if (!transcricao?.trim()) throw new Error("Transcrição vazia. Cole o texto antes de gerar o briefing.");
   const config = loadAIConfig();
-  const customPrompt = config.prompts["brief"];
-  const prompt = buildBriefPrompt(nome, transcricao, customPrompt);
-
-  const raw = await callAI(prompt);
-
-  // 1. Strip markdown code fences (e.g. ```json ... ```) added by some models
+  const prompt = buildBriefPrompt(nome, transcricao, config.prompts["brief"]);
+  const raw = await callAI(prompt, "brief");
   const cleaned = sanitizeJsonResponse(raw);
-
-  // 2. Parse, normalize field names, fill nulls, then re-serialize
   try {
-    const parsed = JSON.parse(cleaned) as Record<string, unknown>;
-    const normalized = normalizeBriefFields(parsed);
-    return JSON.stringify(normalized);
-  } catch {
-    // If parsing fails, return the cleaned string — the caller surfaces the error
-    return cleaned;
-  }
+    return JSON.stringify(normalizeBriefFields(JSON.parse(cleaned) as Record<string, unknown>));
+  } catch { return cleaned; }
 }
+
 
 // ─── Generate all materials ───────────────────────────────────────────────────
 
-export type GenerationProgress = {
-  current: number;
-  total: number;
-  key: MaterialKey;
-  label: string;
-};
+export type GenerationProgress = { current: number; total: number; key: MaterialKey; label: string; };
 
 const MATERIAL_LABELS: Record<MaterialKey, string> = {
   podcast_revendedores: "Podcast 5 min",
@@ -576,29 +472,50 @@ const MATERIAL_LABELS: Record<MaterialKey, string> = {
 export async function generateAllMaterials(
   brief: StructuredBrief,
   onProgress?: (p: GenerationProgress) => void,
+  keysToGenerate?: MaterialKey[], // ✅ seleção parcial de materiais
 ): Promise<Partial<Record<MaterialKey, string>>> {
   const config = loadAIConfig();
-  const keys = Object.keys(PROMPTS) as MaterialKey[];
+  const keys = keysToGenerate ?? (Object.keys(PROMPTS) as MaterialKey[]);
   const results: Partial<Record<MaterialKey, string>> = {};
+
+  // Gemini free tier: 15 RPM → mínimo 5s entre chamadas; Groq: 30 RPM → 2s
+  const isGroq = isGroqModel(config.model);
+  const delayBetween = isGroq ? 2000 : 5000;
 
   for (let i = 0; i < keys.length; i++) {
     const key = keys[i];
     onProgress?.({ current: i + 1, total: keys.length, key, label: MATERIAL_LABELS[key] });
 
-    const customPrompt = config.prompts[key];
+    const rawCustomPrompt = config.prompts[key];
+
+    // ✅ Substitui placeholders do prompt customizado com dados reais do brief
+    const customPrompt = rawCustomPrompt
+      ? rawCustomPrompt
+          .replace(/\{\{nome\}\}/g, brief.campanha)
+          .replace(/\{\{marca\}\}/g, brief.marca)
+          .replace(/\{\{oferta\}\}/g, brief.oferta_promocional)
+          .replace(/\{\{publico\}\}/g, brief.publico_alvo)
+          .replace(/\{\{tom\}\}/g, brief.tom_comunicacao)
+      : undefined;
+
     const prompt = PROMPTS[key](brief, customPrompt);
 
     try {
       results[key] = await callAI(prompt);
     } catch (err) {
-      results[key] = `[ERRO ao gerar este material]\n${(err as Error).message}`;
+      const msg = (err as Error).message;
+      // ✅ 429: registra erro no material mas CONTINUA para o próximo
+      results[key] = `[Rate limit — tente regerar este material individualmente]\n${msg}`;
+      console.warn(`[BriefFlow] Pulando "${MATERIAL_LABELS[key]}" por erro: ${msg}`);
+
+      // Pausa extra após 429 para dar tempo ao rate limit resetar
+      if (msg.includes("429") || msg.includes("Rate limit")) {
+        await new Promise((r) => setTimeout(r, 10000));
+      }
     }
 
-    // Pausa entre materiais para respeitar rate limits
-    // Groq: 30 RPM = pode ser mais rápido (2s); Gemini free: 15 RPM (4.5s)
     if (i < keys.length - 1) {
-      const isGroq = isGroqModel(config.model);
-      await new Promise((r) => setTimeout(r, isGroq ? 2000 : 4500));
+      await new Promise((r) => setTimeout(r, delayBetween));
     }
   }
 

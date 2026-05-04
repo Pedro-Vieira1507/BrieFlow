@@ -4,7 +4,7 @@ import { inferBriefFromTranscriptAI } from "@/lib/generateMaterials";
 import { getActiveKey } from "@/lib/aiConfig";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Sparkles, Save, Loader2, Zap } from "lucide-react";
 import { toast } from "sonner";
 
@@ -12,23 +12,12 @@ export const Route = createFileRoute("/campanha/$id/transcricao")({
   component: Page,
 });
 
-/**
- * Normalizes the raw JSON returned by the AI into a valid StructuredBrief.
- *
- * Problems solved:
- * - AI may use singular 'beneficio_cliente_final' instead of the plural
- *   'beneficios_cliente_final' expected by the TypeScript type.
- * - Any array field may be missing or null — default to [].
- * - objecoes_argumentos items may have different key names.
- */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function normalizeBrief(raw: any): StructuredBrief {
   const toArr = (v: unknown): string[] =>
     Array.isArray(v) ? (v as string[]) : [];
 
-  const toObjArr = (
-    v: unknown,
-  ): { objecao: string; argumento: string }[] => {
+  const toObjArr = (v: unknown): { objecao: string; argumento: string }[] => {
     if (!Array.isArray(v)) return [];
     return (v as Record<string, string>[]).map((item) => ({
       objecao: item.objecao ?? item.objeção ?? item.objecoes ?? "",
@@ -43,24 +32,13 @@ function normalizeBrief(raw: any): StructuredBrief {
     proposta_comercial: raw.proposta_comercial ?? raw.proposta ?? "",
     oferta_promocional: raw.oferta_promocional ?? raw.oferta ?? "",
     subcategorias: toArr(raw.subcategorias),
-    diferenciais_tecnicos: toArr(
-      raw.diferenciais_tecnicos ?? raw.diferenciais,
-    ),
-    beneficios_revendedor: toArr(
-      raw.beneficios_revendedor ?? raw.beneficios_revendedores,
-    ),
-    // Support both plural and singular forms returned by the AI
-    beneficios_cliente_final: toArr(
-      raw.beneficios_cliente_final ?? raw.beneficio_cliente_final,
-    ),
-    objecoes_argumentos: toObjArr(
-      raw.objecoes_argumentos ?? raw.objecoes,
-    ),
+    diferenciais_tecnicos: toArr(raw.diferenciais_tecnicos ?? raw.diferenciais),
+    beneficios_revendedor: toArr(raw.beneficios_revendedor ?? raw.beneficios_revendedores),
+    beneficios_cliente_final: toArr(raw.beneficios_cliente_final ?? raw.beneficio_cliente_final),
+    objecoes_argumentos: toObjArr(raw.objecoes_argumentos ?? raw.objecoes),
     tom_comunicacao: raw.tom_comunicacao ?? raw.tom ?? "",
     observacoes: raw.observacoes ?? raw.observacao ?? "",
-    inferencias_ia: toArr(
-      raw.inferencias_ia ?? raw.inferencias,
-    ),
+    inferencias_ia: toArr(raw.inferencias_ia ?? raw.inferencias),
   };
 }
 
@@ -70,10 +48,20 @@ function Page() {
   const c = useCampaign(id);
   const hasKey = !!getActiveKey();
 
-  const [text, setText] = useState<string>(c?.transcricao ?? "");
+  const [text, setText] = useState<string>("");
   const [inferring, setInferring] = useState(false);
 
-  if (!c) return <p className="p-8 text-muted-foreground">Campanha não encontrada.</p>;
+  // ✅ FIX: sincroniza o textarea quando a campanha carrega do store
+  // useRef evita sobrescrever edições manuais após o primeiro load
+  const initializedRef = useRef(false);
+  useEffect(() => {
+    if (c?.transcricao && !initializedRef.current) {
+      setText(c.transcricao);
+      initializedRef.current = true;
+    }
+  }, [c?.transcricao]);
+
+  if (!c) return <p className="text-muted-foreground">Campanha não encontrada.</p>;
 
   function salvar() {
     store.setTranscricao(id, text);
@@ -115,12 +103,8 @@ function Page() {
   }
 
   return (
-    <div className="p-6 md:p-8 max-w-4xl mx-auto space-y-6">
+    <div className="space-y-6">
       <div>
-        <Link to="/campanha/$id/transcricao" params={{ id }} className="text-sm text-muted-foreground hover:underline">
-          ← {c.nome}
-        </Link>
-        <h1 className="text-2xl font-bold mt-1">Transcrição</h1>
         <p className="text-muted-foreground text-sm">
           Cole ou edite a transcrição da reunião/vídeo. A IA vai extrair o brief automaticamente.
         </p>
@@ -133,7 +117,7 @@ function Page() {
         <CardContent className="space-y-3">
           <textarea
             value={text}
-            onChange={e => setText(e.target.value)}
+            onChange={(e) => setText(e.target.value)}
             rows={16}
             placeholder="Cole aqui a transcrição da reunião, script do vídeo ou briefing em texto livre..."
             className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 resize-y font-mono"
