@@ -216,9 +216,10 @@ async function callAnthropic(prompt: string, model: AIModel, apiKey: string): Pr
   return (data.content?.[0]?.text ?? "").trim();
 }
 
-async function callAI(prompt: string, moduleKey?: string): Promise<string> {
+async function callAI(prompt: string, moduleKey?: string, systemRole?: string): Promise<string> {
   const config = loadAIConfig();
   const model = moduleKey ? getModuleModel(moduleKey, config) : config.model;
+  const system = systemRole ?? SYSTEM_ROLE;
 
   if (isGroqModel(model)) {
     if (!config.groqKey) throw new Error("Chave Groq não configurada em Configurações.");
@@ -240,8 +241,18 @@ async function callAI(prompt: string, moduleKey?: string): Promise<string> {
     if (!config.anthropicKey) throw new Error("Chave Anthropic não configurada em Configurações.");
     return withRetry(() => callAnthropic(prompt, model, config.anthropicKey));
   }
+  // Gemini
+  void system; // system_instruction já é passado internamente em callGemini
   if (!config.geminiKey) throw new Error("Chave Gemini não configurada em Configurações.");
   return withRetry(() => callGemini(prompt, model, config.geminiKey));
+}
+
+/**
+ * Alias público de callAI — usado por módulos externos (ex: generatePptx.ts)
+ * para chamar a LLM configurada sem depender de módulos internos.
+ */
+export async function callLLM(prompt: string, _systemRole?: string): Promise<string> {
+  return callAI(prompt);
 }
 
 
@@ -472,13 +483,12 @@ const MATERIAL_LABELS: Record<MaterialKey, string> = {
 export async function generateAllMaterials(
   brief: StructuredBrief,
   onProgress?: (p: GenerationProgress) => void,
-  keysToGenerate?: MaterialKey[], // ✅ seleção parcial de materiais
+  keysToGenerate?: MaterialKey[],
 ): Promise<Partial<Record<MaterialKey, string>>> {
   const config = loadAIConfig();
   const keys = keysToGenerate ?? (Object.keys(PROMPTS) as MaterialKey[]);
   const results: Partial<Record<MaterialKey, string>> = {};
 
-  // Gemini free tier: 15 RPM → mínimo 5s entre chamadas; Groq: 30 RPM → 2s
   const isGroq = isGroqModel(config.model);
   const delayBetween = isGroq ? 2000 : 5000;
 
@@ -488,7 +498,6 @@ export async function generateAllMaterials(
 
     const rawCustomPrompt = config.prompts[key];
 
-    // ✅ Substitui placeholders do prompt customizado com dados reais do brief
     const customPrompt = rawCustomPrompt
       ? rawCustomPrompt
           .replace(/\{\{nome\}\}/g, brief.campanha)
@@ -504,11 +513,9 @@ export async function generateAllMaterials(
       results[key] = await callAI(prompt);
     } catch (err) {
       const msg = (err as Error).message;
-      // ✅ 429: registra erro no material mas CONTINUA para o próximo
       results[key] = `[Rate limit — tente regerar este material individualmente]\n${msg}`;
       console.warn(`[BriefFlow] Pulando "${MATERIAL_LABELS[key]}" por erro: ${msg}`);
 
-      // Pausa extra após 429 para dar tempo ao rate limit resetar
       if (msg.includes("429") || msg.includes("Rate limit")) {
         await new Promise((r) => setTimeout(r, 10000));
       }
