@@ -1,18 +1,7 @@
 import { callLLM } from "./generateMaterials";
 import { type StructuredBrief } from "./store";
 
-// System role compartilhado — mesma identidade do SYSTEM_ROLE de generateMaterials
-const SOCIAL_SYSTEM_ROLE =
-  "Você é um especialista em marketing B2B e copywriting para o setor laboratorial. " +
-  "Escreva em português brasileiro, tom profissional mas acessível. " +
-  "Responda SOMENTE com JSON válido, sem markdown, sem explicações adicionais.";
-
-// Helper: injeta system role no início do prompt para que callLLM o use
-function withRole(prompt: string): string {
-  return `${SOCIAL_SYSTEM_ROLE}\n\n${prompt}`;
-}
-
-// ─── Tipos ────────────────────────────────────────────────────────────────────
+// ─── Tipos ──────────────────────────────────────────────────────────────────
 
 export interface LinkedInPost {
   titulo: string;
@@ -71,60 +60,46 @@ export interface VideoRoteiro {
   legenda: string;
 }
 
-// Helper de parse JSON seguro
-function parseJSON<T>(raw: string, label: string): T {
-  // Remove markdown code fences se existirem
-  const cleaned = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
+export interface EmailSequencia {
+  emails: { assunto: string; preheader: string; html: string }[];
+  tipo: "revendedores" | "cliente_final";
+}
+
+// ─── Helper: extrai JSON de string que pode ter markdown fence ───────────────
+
+function parseJson<T>(raw: string, label: string): T {
+  const cleaned = raw
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```\s*$/, "")
+    .trim();
   const match = cleaned.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error(`IA não retornou JSON válido para ${label}.`);
+  if (!match) throw new Error(`IA não retornou JSON válido para ${label}. Tente novamente.`);
   try {
     return JSON.parse(match[0]) as T;
   } catch {
-    throw new Error(`Erro ao interpretar JSON de ${label}: resposta malformada.`);
+    throw new Error(`Erro ao interpretar JSON de ${label}. Tente novamente.`);
   }
 }
 
-// ─── LinkedIn ─────────────────────────────────────────────────────────────────
+// ─── Contexto comum ───────────────────────────────────────────────────────
+
+function ctx(brief: StructuredBrief, nomeCampanha: string): string {
+  return `Marca: ${brief.marca} | Campanha: ${nomeCampanha} | Oferta: ${brief.oferta_promocional} | Público: ${brief.publico_alvo} | Tom: ${brief.tom_comunicacao} | Diferenciais: ${brief.diferenciais_tecnicos?.join("; ") ?? ""} | Subcategorias: ${brief.subcategorias?.join(", ") ?? ""}`;
+}
+
+// ─── LinkedIn ──────────────────────────────────────────────────────────────────
 
 export async function generateLinkedInPosts(
   texto: string,
   brief: StructuredBrief,
   nomeCampanha: string,
 ): Promise<LinkedInPost[]> {
-  const prompt = withRole(`Você é especialista em LinkedIn marketing B2B para o setor científico-laboratorial.
+  const prompt = `Você é especialista em LinkedIn marketing B2B para o setor científico-laboratorial.\nEscreva em português brasileiro. Tom: ${brief.tom_comunicacao}.\n\n${ctx(brief, nomeCampanha)}\n\nTEXTO DE REFERÊNCIA:\n${texto}\n\nCrie 2 posts profissionais para LinkedIn.\nPost 1 (autoridade): Insight técnico + posicionamento de ${brief.marca} como referência. Gancho forte nas primeiras 2 linhas.\nPost 2 (oferta): "${brief.oferta_promocional}" com dados/resultados + urgência + CTA.\n\nRetorne SOMENTE JSON válido sem markdown:\n{\n  "posts": [\n    {\n      "titulo": "Gancho inicial (1-2 linhas que param o scroll)",\n      "corpo": "Corpo em parágrafos curtos com linha em branco entre eles. Max 150 palavras.",\n      "hashtags": ["hashtag1","hashtag2","hashtag3","hashtag4","hashtag5"],\n      "tipo": "autoridade",\n      "cta": "Chamada para ação final"\n    },\n    {\n      "titulo": "...",\n      "corpo": "...",\n      "hashtags": ["..."],\n      "tipo": "oferta",\n      "cta": "..."\n    }\n  ]\n}`;
 
-Com base no TEXTO e BRIEF, crie 2 posts profissionais para LinkedIn.
-
-TEXTO: ${texto}
-Marca: ${brief.marca} | Campanha: ${nomeCampanha} | Oferta: ${brief.oferta_promocional} | Tom: ${brief.tom_comunicacao}
-Diferenciais: ${brief.diferenciais_tecnicos.join("; ")}
-Benefícios revendedor: ${brief.beneficios_revendedor.join("; ")}
-
-Retorne SOMENTE JSON válido:
-{
-  "posts": [
-    {
-      "titulo": "Gancho inicial impactante (1-2 linhas que param o scroll)",
-      "corpo": "Corpo do post em parágrafos curtos com linhas em branco. Max 150 palavras.",
-      "hashtags": ["hashtag1", "hashtag2", "hashtag3", "hashtag4", "hashtag5"],
-      "tipo": "autoridade",
-      "cta": "Chamada para ação final do post"
-    },
-    {
-      "titulo": "...",
-      "corpo": "...",
-      "hashtags": ["..."],
-      "tipo": "oferta",
-      "cta": "..."
-    }
-  ]
-}
-
-Post 1 (autoridade): Insight técnico + posicionamento de ${brief.marca} como referência no setor.
-Post 2 (oferta): Apresentação de ${brief.oferta_promocional} com dados/resultados e urgência.`);
-
-  const raw = await callLLM(prompt);
-  return parseJSON<{ posts: LinkedInPost[] }>(raw, "LinkedIn").posts;
+  const data = parseJson<{ posts?: LinkedInPost[] }>(await callLLM(prompt), "LinkedIn");
+  if (!Array.isArray(data.posts) || data.posts.length === 0)
+    throw new Error("Nenhum post LinkedIn foi gerado. Tente novamente.");
+  return data.posts;
 }
 
 // ─── Facebook ─────────────────────────────────────────────────────────────────
@@ -134,37 +109,12 @@ export async function generateFacebookPosts(
   brief: StructuredBrief,
   nomeCampanha: string,
 ): Promise<FacebookPost[]> {
-  const prompt = withRole(`Você é especialista em Facebook marketing para laboratórios e distribuidores.
+  const prompt = `Você é especialista em Facebook marketing para distribuidores e laboratórios.\nEscreva em português brasileiro. Tom amigável mas profissional.\n\n${ctx(brief, nomeCampanha)}\n\nTEXTO DE REFERÊNCIA:\n${texto}\n\nCrie 2 posts para Facebook.\nPost 1 (apresentação): Apresentação amigável de ${brief.marca} com benefícios e emojis. Max 120 palavras.\nPost 2 (oferta): "${brief.oferta_promocional}" com urgência, emojis e CTA claro. Max 100 palavras.\n\nRetorne SOMENTE JSON válido sem markdown:\n{\n  "posts": [\n    {\n      "texto": "Texto completo com emojis e parágrafos curtos",\n      "cta": "Chamada para ação",\n      "emojis": "3-5 emojis temáticos usados no post",\n      "tipo": "apresentacao"\n    },\n    {\n      "texto": "...",\n      "cta": "...",\n      "emojis": "...",\n      "tipo": "oferta"\n    }\n  ]\n}`;
 
-Com base no TEXTO e BRIEF, crie 2 posts para Facebook.
-
-TEXTO: ${texto}
-Marca: ${brief.marca} | Campanha: ${nomeCampanha} | Oferta: ${brief.oferta_promocional} | Tom: ${brief.tom_comunicacao}
-Benefícios cliente final: ${brief.beneficios_cliente_final.join("; ")}
-
-Retorne SOMENTE JSON válido:
-{
-  "posts": [
-    {
-      "texto": "Texto completo do post com emojis (max 120 palavras, parágrafos curtos)",
-      "cta": "Chamada para ação",
-      "emojis": "3-5 emojis temáticos usados no post",
-      "tipo": "apresentacao"
-    },
-    {
-      "texto": "...",
-      "cta": "...",
-      "emojis": "...",
-      "tipo": "oferta"
-    }
-  ]
-}
-
-Post 1: Apresentação amigável da marca/produto com benefícios para o laboratório.
-Post 2: Oferta ${brief.oferta_promocional} com urgência, emojis e CTA claro.`);
-
-  const raw = await callLLM(prompt);
-  return parseJSON<{ posts: FacebookPost[] }>(raw, "Facebook").posts;
+  const data = parseJson<{ posts?: FacebookPost[] }>(await callLLM(prompt), "Facebook");
+  if (!Array.isArray(data.posts) || data.posts.length === 0)
+    throw new Error("Nenhum post Facebook foi gerado. Tente novamente.");
+  return data.posts;
 }
 
 // ─── Instagram ────────────────────────────────────────────────────────────────
@@ -174,84 +124,25 @@ export async function generateInstagramData(
   brief: StructuredBrief,
   nomeCampanha: string,
 ): Promise<InstagramData> {
-  const prompt = withRole(`Você é especialista em Instagram marketing para o setor laboratorial.
+  const prompt = `Você é especialista em Instagram marketing para o setor laboratorial.\nEscreva em português brasileiro.\n\n${ctx(brief, nomeCampanha)}\n\nTEXTO DE REFERÊNCIA:\n${texto}\n\nCrie 1 carrossel (5-7 slides) e 1 roteiro de Reels (15-25s) para Instagram.\n\nCarrossel: Slide 1 = capa impactante. Slides 2-5 = conteúdo. Último slide = CTA.\nReels: 4-6 cenas dinâmicas de 3-5s cada. Ritmo acelerado.\nUse cores: #6C63FF, #7C3AED, #A78BFA, #F59E0B, #10B981.\n\nRetorne SOMENTE JSON válido sem markdown:\n{\n  "carrossel": {\n    "slides": [\n      { "numero": 1, "visual": "descrição do visual", "texto": "Texto curto do slide", "cor": "#6C63FF" }\n    ],\n    "legenda": "Legenda completa com emoji e CTA",\n    "hashtags": ["hashtag1","hashtag2"]\n  },\n  "reels": {\n    "duracao": "20s",\n    "cenas": [\n      { "tempo": "0-3s", "visual": "visual da cena", "texto": "Texto na tela", "locucao": "Fala do narrador" }\n    ],\n    "legenda": "Legenda do reels",\n    "musica": "Estilo musical sugerido",\n    "hashtags": ["hashtag1"]\n  }\n}`;
 
-Com base no TEXTO e BRIEF, crie 1 carrossel e 1 roteiro de Reels para Instagram.
-
-TEXTO: ${texto}
-Marca: ${brief.marca} | Campanha: ${nomeCampanha} | Oferta: ${brief.oferta_promocional} | Tom: ${brief.tom_comunicacao}
-Subcategorias: ${brief.subcategorias.join(", ")}
-
-Retorne SOMENTE JSON válido:
-{
-  "carrossel": {
-    "slides": [
-      { "numero": 1, "visual": "descrição do visual/imagem", "texto": "Texto do slide (curto, impactante)", "cor": "#6C63FF" },
-      { "numero": 2, "visual": "...", "texto": "...", "cor": "#7C3AED" }
-    ],
-    "legenda": "Legenda completa do post com emoji e CTA",
-    "hashtags": ["hashtag1", "hashtag2", "hashtag3"]
-  },
-  "reels": {
-    "duracao": "20s",
-    "cenas": [
-      { "tempo": "0-3s", "visual": "visual da cena", "texto": "Texto na tela", "locucao": "Fala do narrador" }
-    ],
-    "legenda": "Legenda do reels com CTA",
-    "musica": "Sugestão de estilo musical",
-    "hashtags": ["hashtag1", "hashtag2"]
-  }
+  const data = parseJson<InstagramData>(await callLLM(prompt), "Instagram");
+  if (!data.carrossel?.slides || !data.reels?.cenas)
+    throw new Error("Dados de Instagram incompletos. Tente novamente.");
+  return data;
 }
 
-Carrossel: 5-7 slides. Slide 1 = capa impactante com ${brief.marca}. Slides 2-5 = benefícios/produtos. Último = CTA.
-Reels: 15-25s, 4-6 cenas de 3-5s cada. Use cores da paleta: #6C63FF, #7C3AED, #A78BFA, #F59E0B, #10B981`);
-
-  const raw = await callLLM(prompt);
-  return parseJSON<InstagramData>(raw, "Instagram");
-}
-
-// ─── Roteiro de Vídeo ─────────────────────────────────────────────────────────
+// ─── Roteiro de Vídeo ─────────────────────────────────────────────────────────────
 
 export async function generateVideoRoteiro(
   texto: string,
   brief: StructuredBrief,
   nomeCampanha: string,
 ): Promise<VideoRoteiro> {
-  const prompt = withRole(`Você é diretor criativo especialista em vídeos curtos para redes sociais (Reels, Shorts, TikTok).
+  const prompt = `Você é diretor criativo especialista em vídeos curtos para Reels, Shorts e TikTok do setor laboratorial.\nEscreva em português brasileiro.\n\n${ctx(brief, nomeCampanha)}\n\nTEXTO DE REFERÊNCIA:\n${texto}\n\nCrie um roteiro de vídeo 15-30s profissional e dinâmico.\nRegras:\n- 5-7 cenas de 3-5s cada\n- Cena 1: Hook em 3s (pergunta ou dado surpreendente)\n- Cenas 2-4: Produto em ação, diferenciais rápidos\n- Cena 5-6: Destaque da oferta "${brief.oferta_promocional}"\n- Cena final: CTA com urgência\n- Ambiente de laboratório realista\n\nRetorne SOMENTE JSON válido sem markdown:\n{\n  "titulo": "Título criativo do vídeo",\n  "duracao": "25s",\n  "formato": "Vertical 9:16 (Reels/Shorts)",\n  "cenas": [\n    {\n      "numero": 1,\n      "tempo": "0-3s",\n      "visual": "Descrição detalhada da cena",\n      "textTela": "Texto na tela (curto, impactante)",\n      "locucao": "Texto exato da narração",\n      "musica": "Descrição do som"\n    }\n  ],\n  "cta": "Call-to-action final",\n  "legenda": "Legenda para redes (com emojis e hashtags)"\n}`;
 
-Com base no TEXTO e BRIEF, crie um roteiro de vídeo 15-30s profissional e dinâmico.
-
-TEXTO: ${texto}
-Marca: ${brief.marca} | Campanha: ${nomeCampanha} | Oferta: ${brief.oferta_promocional} | Tom: ${brief.tom_comunicacao}
-Diferenciais: ${brief.diferenciais_tecnicos.join("; ")}
-
-Retorne SOMENTE JSON válido:
-{
-  "titulo": "Título criativo do vídeo",
-  "duracao": "25s",
-  "formato": "Vertical 9:16 (Reels/Shorts)",
-  "cenas": [
-    {
-      "numero": 1,
-      "tempo": "0-3s",
-      "visual": "Descrição detalhada do visual/imagem da cena",
-      "textTela": "Texto que aparece na tela (curto, impactante)",
-      "locucao": "Texto exato da narração/locução",
-      "musica": "Descrição do som/música nesta cena"
-    }
-  ],
-  "cta": "Call-to-action final do vídeo",
-  "legenda": "Legenda para postar nas redes (com emojis e hashtags)"
-}
-
-REGRAS:
-- 5-7 cenas de 3-5s cada
-- Cena 1: Hook impactante em 3s (pergunta ou dado surpreendente sobre ${brief.subcategorias[0] ?? brief.marca})
-- Cenas 2-4: Produto em ação, diferenciais rápidos (${brief.diferenciais_tecnicos.slice(0, 2).join(", ")})
-- Cena 5-6: Oferta ${brief.oferta_promocional} com visual da promoção
-- Cena final: CTA direto com urgência
-- Locação coerente com ambiente de laboratório`);
-
-  const raw = await callLLM(prompt);
-  return parseJSON<VideoRoteiro>(raw, "Roteiro de vídeo");
+  const data = parseJson<VideoRoteiro>(await callLLM(prompt), "Roteiro de Vídeo");
+  if (!Array.isArray(data.cenas) || data.cenas.length === 0)
+    throw new Error("Cenas do roteiro não foram geradas. Tente novamente.");
+  return data;
 }
