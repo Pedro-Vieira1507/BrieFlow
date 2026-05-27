@@ -5,13 +5,14 @@ import {
   generatePodcastAudio,
   type GenerationProgress,
 } from "@/lib/generateMaterials";
+import { parseSlides, generatePptx } from "@/lib/generatePptx";
 import { getActiveKey, loadAIConfig } from "@/lib/aiConfig";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Progress } from "@/components/ui/progress";
-import { Copy, Download, Sparkles, Loader2, Zap, Mic } from "lucide-react";
+import { Copy, Download, Sparkles, Loader2, Zap, Mic, Presentation } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -27,10 +28,13 @@ function Page() {
   const [generating, setGenerating] = useState(false);
   const [progress, setProgress] = useState<GenerationProgress | null>(null);
 
-  // ── Podcast TTS state ────────────────────────────────────────────────────
+  // Podcast TTS state
   const [audioSrc, setAudioSrc] = useState<string | null>(null);
   const [ttsLoading, setTtsLoading] = useState(false);
   const audioRef = useRef<HTMLAudioElement>(null);
+
+  // PPTX state
+  const [pptxLoading, setPptxLoading] = useState(false);
 
   const keys = c?.materiais ? (Object.keys(c.materiais) as MaterialKey[]) : [];
 
@@ -38,7 +42,6 @@ function Page() {
     if (keys.length && !active) setActive(keys[0]);
   }, [keys, active]);
 
-  // Clear audio when switching campaigns
   useEffect(() => {
     setAudioSrc(null);
   }, [id]);
@@ -58,7 +61,7 @@ function Page() {
       store.update(id, { materiais, status: "materiais_gerados" });
       toast.success("Todos os materiais gerados com sucesso!");
       setActive("");
-      setAudioSrc(null); // reset audio when script changes
+      setAudioSrc(null);
     } catch (err) {
       toast.error(`Erro: ${(err as Error).message}`);
     } finally {
@@ -80,16 +83,11 @@ function Page() {
       toast.error("Gere o roteiro do podcast antes de converter para áudio.");
       return;
     }
-    if (!loadAIConfig().groqKey) {
-      toast.error("TTS requer a chave Groq. Configure em ⚙️ Configurações.");
-      return;
-    }
     setTtsLoading(true);
     try {
       const dataUrl = await generatePodcastAudio(script);
       setAudioSrc(dataUrl);
       toast.success("Áudio gerado com sucesso! 🎙️");
-      // Auto-play after a short delay
       setTimeout(() => audioRef.current?.play(), 300);
     } catch (err) {
       toast.error(`Erro ao gerar áudio: ${(err as Error).message}`);
@@ -105,6 +103,33 @@ function Page() {
     a.download = `${c!.nome.replace(/[^a-z0-9]+/gi, "_")}_podcast.wav`;
     a.click();
     toast.success("Download do áudio iniciado");
+  }
+
+  async function gerarPptx() {
+    const texto =
+      edited["apresentacao_slides"] ?? c?.materiais?.["apresentacao_slides"] ?? "";
+    if (!texto) {
+      toast.error("Gere a apresentação antes de exportar o PPTX.");
+      return;
+    }
+    if (!c?.brief) {
+      toast.error("Brief não encontrado.");
+      return;
+    }
+    setPptxLoading(true);
+    try {
+      const slides = parseSlides(texto);
+      if (slides.length === 0) {
+        toast.error("Não foi possível identificar slides no conteúdo. Verifique o formato.");
+        return;
+      }
+      await generatePptx(slides, c.brief, c.nome);
+      toast.success(`PPTX gerado com ${slides.length} slides! 📊`);
+    } catch (err) {
+      toast.error(`Erro ao gerar PPTX: ${(err as Error).message}`);
+    } finally {
+      setPptxLoading(false);
+    }
   }
 
   if (keys.length === 0) {
@@ -145,6 +170,7 @@ function Page() {
     navigator.clipboard.writeText(content);
     toast.success("Conteúdo copiado");
   }
+
   function download() {
     const ext = MATERIAL_META[currentKey].ext;
     const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
@@ -166,7 +192,9 @@ function Page() {
             <div className="flex items-center gap-2 text-sm font-medium">
               <Loader2 className="h-4 w-4 animate-spin text-accent" />
               Gerando: {progress.label}
-              <span className="ml-auto text-xs text-muted-foreground">{progress.current}/{progress.total}</span>
+              <span className="ml-auto text-xs text-muted-foreground">
+                {progress.current}/{progress.total}
+              </span>
             </div>
             <Progress value={Math.round((progress.current / progress.total) * 100)} className="h-2" />
           </CardContent>
@@ -208,8 +236,9 @@ function Page() {
                     {MATERIAL_META[k].descricao} · Exporta como .{MATERIAL_META[k].ext}
                   </p>
                 </div>
+
                 <div className="flex gap-2 shrink-0 flex-wrap justify-end">
-                  {/* TTS button — only on podcast tab */}
+                  {/* Botão TTS — apenas no podcast */}
                   {k === "podcast_revendedores" && (
                     <Button
                       variant="outline"
@@ -226,6 +255,25 @@ function Page() {
                       {ttsLoading ? "Gerando áudio…" : "🎙️ Gerar Áudio"}
                     </Button>
                   )}
+
+                  {/* Botão PPTX — apenas na aba de apresentação */}
+                  {k === "apresentacao_slides" && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={gerarPptx}
+                      disabled={pptxLoading}
+                      className="border-emerald-500/40 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950"
+                    >
+                      {pptxLoading ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Presentation className="h-4 w-4" />
+                      )}
+                      {pptxLoading ? "Gerando PPTX…" : "📊 Baixar PPTX"}
+                    </Button>
+                  )}
+
                   <Button variant="outline" size="sm" onClick={copy}>
                     <Copy className="h-4 w-4" /> Copiar
                   </Button>
@@ -234,8 +282,9 @@ function Page() {
                   </Button>
                 </div>
               </CardHeader>
+
               <CardContent className="space-y-4">
-                {/* Audio player — rendered only after TTS is generated, on podcast tab */}
+                {/* Player de áudio (podcast) */}
                 {k === "podcast_revendedores" && audioSrc && (
                   <div className="rounded-xl border border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-950/30 p-4 space-y-3">
                     <div className="flex items-center justify-between">
@@ -264,12 +313,33 @@ function Page() {
                   </div>
                 )}
 
-                {/* TTS loading state */}
+                {/* Loading TTS */}
                 {k === "podcast_revendedores" && ttsLoading && (
                   <div className="rounded-xl border border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-950/30 p-4">
                     <div className="flex items-center gap-3 text-sm text-violet-600 dark:text-violet-400">
                       <Loader2 className="h-4 w-4 animate-spin" />
-                      Convertendo roteiro em áudio, Por favor aguarde.
+                      Convertendo roteiro em áudio, por favor aguarde…
+                    </div>
+                  </div>
+                )}
+
+                {/* Banner informativo PPTX */}
+                {k === "apresentacao_slides" && !pptxLoading && (
+                  <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30 p-3">
+                    <p className="text-xs text-emerald-700 dark:text-emerald-300 flex items-center gap-2">
+                      <Presentation className="h-3.5 w-3.5 shrink-0" />
+                      Edite o conteúdo abaixo se necessário e clique em{" "}
+                      <strong>📊 Baixar PPTX</strong> para exportar com design profissional.
+                    </p>
+                  </div>
+                )}
+
+                {/* Loading PPTX */}
+                {k === "apresentacao_slides" && pptxLoading && (
+                  <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30 p-4">
+                    <div className="flex items-center gap-3 text-sm text-emerald-600 dark:text-emerald-400">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Montando apresentação PowerPoint…
                     </div>
                   </div>
                 )}
@@ -281,7 +351,9 @@ function Page() {
                   className="font-mono text-sm leading-relaxed"
                   placeholder={
                     k === "podcast_revendedores"
-                      ? "Roteiro do podcast aparece aqui. Edite o texto e clique em 🎙️ Gerar Áudio para converter."
+                      ? "Roteiro do podcast aparece aqui. Edite e clique em 🎙️ Gerar Áudio."
+                      : k === "apresentacao_slides"
+                      ? "Apresentação aparece aqui. Edite e clique em 📊 Baixar PPTX."
                       : ""
                   }
                 />
@@ -289,7 +361,7 @@ function Page() {
                 {k === "podcast_revendedores" && !audioSrc && !ttsLoading && (
                   <p className="text-xs text-muted-foreground text-center">
                     💡 Edite o roteiro acima se necessário e clique em{" "}
-                    <strong>🎙️ Gerar Áudio</strong> para criar o arquivo WAV (requer chave Groq).
+                    <strong>🎙️ Gerar Áudio</strong> para criar o arquivo WAV.
                   </p>
                 )}
               </CardContent>
