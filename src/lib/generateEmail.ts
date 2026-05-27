@@ -1,6 +1,8 @@
 import { callLLM } from "./generateMaterials";
 import { type StructuredBrief } from "./store";
 
+// ─── Tipos ────────────────────────────────────────────────────────────────────
+
 export interface EmailData {
   assunto: string;
   preheader: string;
@@ -12,13 +14,19 @@ export interface EmailSequencia {
   tipo: "revendedores" | "cliente_final";
 }
 
-// ─── Prompt ────────────────────────────────────────────────────────────────
+// Helper de parse JSON seguro (mesmo padrão de generateSocialPosts)
+function parseJSON<T>(raw: string, label: string): T {
+  const cleaned = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
+  const match = cleaned.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error(`IA não retornou JSON válido para ${label}.`);
+  try {
+    return JSON.parse(match[0]) as T;
+  } catch {
+    throw new Error(`Erro ao interpretar JSON de ${label}: resposta malformada.`);
+  }
+}
 
-const BASE_STYLE = `
-  font-family: 'Segoe UI', Arial, sans-serif;
-  background: #f0f2f5;
-  margin: 0; padding: 0;
-`;
+// ─── Gerador ──────────────────────────────────────────────────────────────────
 
 export async function generateEmailSequencia(
   textoRaw: string,
@@ -27,9 +35,18 @@ export async function generateEmailSequencia(
   tipo: "revendedores" | "cliente_final",
 ): Promise<EmailSequencia> {
   const qtd = tipo === "revendedores" ? 2 : 3;
-  const prompt = `Você é um especialista em email marketing B2B para o setor laboratorial.
 
-Com base no TEXTO e BRIEF abaixo, gere ${qtd} e-mails HTML profissionais completos e modernos.
+  const contextoPublico = tipo === "revendedores"
+    ? `Público: Revendedores de equipamentos laboratoriais.\nBenefícios foco: ${brief.beneficios_revendedor.join("; ")}`
+    : `Público: Laboratórios e clientes finais.\nBenefícios foco: ${brief.beneficios_cliente_final.join("; ")}`;
+
+  const estrutura = tipo === "revendedores"
+    ? "E-mail 1: Apresentação da linha com diferenciais técnicos e oportunidade de negócio.\nE-mail 2: Urgência da oferta com CTA forte e condições comerciais."
+    : "E-mail 1 (Topo): Apresentação de " + brief.marca + " + ecossistema Forlab + autoridade.\nE-mail 2 (Meio): Diferenciais técnicos vs. concorrentes + casos de uso.\nE-mail 3 (Fundo): Oferta " + brief.oferta_promocional + " + urgência + CTA direto para compra.";
+
+  const prompt = `Você é especialista em email marketing B2B para o setor laboratorial. Responda SOMENTE com JSON válido, sem markdown.
+
+Com base no TEXTO e BRIEF abaixo, gere ${qtd} e-mails HTML profissionais, modernos e responsivos.
 
 TEXTO:
 ${textoRaw}
@@ -38,42 +55,41 @@ BRIEF:
 - Campanha: ${nomeCampanha}
 - Marca: ${brief.marca}
 - Oferta: ${brief.oferta_promocional}
-- Público: ${brief.publico_alvo}
 - Tom: ${brief.tom_comunicacao}
-- Benefícios revendedor: ${brief.beneficios_revendedor?.join("; ") ?? ""}
-- Benefícios cliente final: ${brief.beneficios_cliente_final?.join("; ") ?? ""}
+- Diferenciais: ${brief.diferenciais_tecnicos.join("; ")}
+- ${contextoPublico}
 
-Retorne SOMENTE um JSON válido sem markdown:
+ESTRUTURA DOS E-MAILS:
+${estrutura}
+
+Retorne SOMENTE este JSON válido (sem texto antes ou depois):
 {
   "emails": [
     {
-      "assunto": "Linha de assunto do e-mail (chamativa, max 60 chars)",
-      "preheader": "Texto de preheader (max 90 chars)",
-      "html": "HTML COMPLETO do e-mail responsivo aqui"
+      "assunto": "Linha de assunto chamativa (max 60 chars)",
+      "preheader": "Texto de preheader complementar (max 90 chars)",
+      "html": "HTML COMPLETO do e-mail aqui"
     }
   ]
 }
 
-REQUISITOS DO HTML:
-- Use tabela de largura 600px centralizada com fundo branco
-- Fundo externo: #f0f2f5
-- Header com fundo #0F172A (azul escuro), logo em texto branco bold 22px, subtitulo em #A78BFA
-- Hero section com título grande (#1E293B), descrição, botão CTA laranja (#F59E0B) com cantos arredondados
-- Seção de benefícios/features com ícones emoji e texto
-- Destaque da oferta em caixa com borda roxa (#6C63FF) e fundo #F5F3FF
-- Footer com fundo #1E293B, texto cinza, link de descadastro
-- CSS inline em todos os elementos (não use <style> tag)
-- Totalmente responsivo com max-width: 600px
-- Use emojis estrategicamente
-- ${tipo === "revendedores" ? "E-mail 1: Apresentação da linha com diferenciais. E-mail 2: Urgencia da oferta com CTA forte" : "E-mail 1: Apresentação e autoridade. E-mail 2: Diferenciais vs concorrentes. E-mail 3: Oferta + urgência + CTA direto"}`;
+REQUISITOS DO HTML DE CADA E-MAIL:
+- Tabela centralizada, max-width 600px, bgcolor="#f0f2f5" no body
+- Header: bgcolor="#0F172A", logo da marca em texto branco bold 22px, subtítulo em cor #A78BFA
+- Hero: título grande (#1E293B bold), descrição, botão CTA bgcolor="#F59E0B" border-radius 6px texto branco
+- Seção de benefícios/features: ícones emoji + texto descritivo por item
+- Destaque da oferta: caixa com border 2px solid #6C63FF, bgcolor #F5F3FF, texto da oferta em destaque
+- Footer: bgcolor="#1E293B", texto cinza claro, link de descadastro
+- TODOS os estilos inline (sem tag <style>)
+- Totalmente responsivo
+- Use emojis estrategicamente nos títulos e benefícios`;
 
   const raw = await callLLM(prompt);
-  const match = raw.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error("IA não retornou JSON válido para os e-mails.");
-  const parsed = JSON.parse(match[0]) as EmailSequencia;
-  parsed.tipo = tipo;
-  return parsed;
+  const parsed = parseJSON<{ emails: EmailData[] }>(raw, `e-mails (${tipo})`);
+  return { emails: parsed.emails, tipo };
 }
+
+// ─── Download ─────────────────────────────────────────────────────────────────
 
 export function downloadEmailHtml(html: string, index: number, nomeCampanha: string, tipo: string): void {
   const blob = new Blob([html], { type: "text/html;charset=utf-8" });
@@ -84,5 +100,3 @@ export function downloadEmailHtml(html: string, index: number, nomeCampanha: str
   a.click();
   URL.revokeObjectURL(url);
 }
-
-export { BASE_STYLE };

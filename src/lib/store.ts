@@ -58,12 +58,12 @@ export const MATERIAL_META: Record<
   apresentacao_slides:   { label: "Apresentação 10 slides",              descricao: "Slides estruturados para revendedores",  icone: "presentation",     ext: "pptx" },
   folheto_a4:            { label: "Folheto A4 — Cliente final",          descricao: "Folheto promocional A4",                 icone: "file-text",        ext: "pdf"  },
   ficha_tecnica:         { label: "Ficha técnica — Vendedores",          descricao: "Ficha técnica interna",                  icone: "clipboard-list",   ext: "pdf"  },
-  emails_revendedores:   { label: "Sequência 2 e-mails — Revendedores",  descricao: "Sequência comercial",                    icone: "mail",             ext: "docx" },
-  emails_cliente_final:  { label: "Sequência 3 e-mails — Cliente final", descricao: "Sequência de nutrição",                  icone: "mail",             ext: "docx" },
-  posts_linkedin:        { label: "2 posts LinkedIn",                    descricao: "Conteúdo B2B",                           icone: "linkedin",         ext: "txt"  },
-  posts_facebook:        { label: "2 posts Facebook",                    descricao: "Conteúdo social",                        icone: "facebook",         ext: "txt"  },
-  posts_instagram:       { label: "2 posts Instagram",                   descricao: "Conteúdo visual",                        icone: "instagram",        ext: "txt"  },
-  roteiro_video_curto:   { label: "Roteiro vídeo 15-30s",                descricao: "Roteiro curto para Reels/Shorts",        icone: "video",            ext: "txt"  },
+  emails_revendedores:   { label: "Sequência 2 e-mails — Revendedores",  descricao: "Sequência comercial HTML",               icone: "mail",             ext: "docx" },
+  emails_cliente_final:  { label: "Sequência 3 e-mails — Cliente final", descricao: "Sequência de nutrição HTML",             icone: "mail",             ext: "docx" },
+  posts_linkedin:        { label: "2 posts LinkedIn",                    descricao: "Conteúdo B2B com preview",               icone: "linkedin",         ext: "txt"  },
+  posts_facebook:        { label: "2 posts Facebook",                    descricao: "Conteúdo social com preview",            icone: "facebook",         ext: "txt"  },
+  posts_instagram:       { label: "2 posts Instagram",                   descricao: "Carrossel + Reels com preview",          icone: "instagram",        ext: "txt"  },
+  roteiro_video_curto:   { label: "Roteiro vídeo 15-30s",                descricao: "Roteiro com timeline visual",            icone: "video",            ext: "txt"  },
 };
 
 export type Campaign = {
@@ -122,8 +122,6 @@ export const store = {
   setBrief: (id: string, brief: StructuredBrief) => {
     store.update(id, { brief, status: "brief_gerado" });
   },
-  // ✅ Persiste materiais gerados — recebe resultado já pronto de generateAllMaterials
-  // Faz merge com materiais existentes para preservar os não regerados
   setMateriais: (
     id: string,
     materiais: Partial<Record<MaterialKey, string>>,
@@ -137,9 +135,13 @@ export const store = {
       status: "materiais_gerados",
     });
   },
-  /** Apenas para o botão "Usar exemplo (mock)" — explícito e intencional */
+  // FIX: limpa podcastAudioUrl ao regerar mock para evitar player fantasma
   generateMockMaterials: (id: string) => {
-    store.update(id, { materiais: buildMockMaterials(), status: "materiais_gerados" });
+    store.update(id, {
+      materiais: buildMockMaterials(),
+      status: "materiais_gerados",
+      podcastAudioUrl: undefined,
+    });
   },
   setPodcastAudio: (id: string, podcastAudioUrl: string) => {
     store.update(id, { podcastAudioUrl });
@@ -205,7 +207,6 @@ export function inferBriefFromTranscript(nome: string, transcricao: string): Str
   };
 }
 
-// Mock materials — usado APENAS quando o usuário clica em "Usar exemplo (mock)"
 function buildMockMaterials(): Partial<Record<MaterialKey, string>> {
   return {
     podcast_revendedores:  "# Podcast de exemplo\n\nEste é um material de demonstração. Gere os materiais reais com IA.",
