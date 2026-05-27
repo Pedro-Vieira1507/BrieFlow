@@ -5,14 +5,21 @@ import {
   generatePodcastAudio,
   type GenerationProgress,
 } from "@/lib/generateMaterials";
-import { parseSlides, generatePptx } from "@/lib/generatePptx";
+import { parseSlides, generatePptx, generateSlidesWithAI } from "@/lib/generatePptx";
+import {
+  generateFolhetoData,
+  renderFolhetoCanvas,
+  downloadFolhetoPng,
+} from "@/lib/generateFolheto";
 import { getActiveKey, loadAIConfig } from "@/lib/aiConfig";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Progress } from "@/components/ui/progress";
-import { Copy, Download, Sparkles, Loader2, Zap, Mic, Presentation } from "lucide-react";
+import {
+  Copy, Download, Sparkles, Loader2, Zap, Mic, Presentation, ImageIcon,
+} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -35,6 +42,12 @@ function Page() {
 
   // PPTX state
   const [pptxLoading, setPptxLoading] = useState(false);
+  const [pptxProgress, setPptxProgress] = useState<{ current: number; total: number } | null>(null);
+
+  // Folheto PNG state
+  const [folhetoLoading, setFolhetoLoading] = useState(false);
+  const [folhetoPreview, setFolhetoPreview] = useState<string | null>(null);
+  const folhetoCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const keys = c?.materiais ? (Object.keys(c.materiais) as MaterialKey[]) : [];
 
@@ -44,6 +57,7 @@ function Page() {
 
   useEffect(() => {
     setAudioSrc(null);
+    setFolhetoPreview(null);
   }, [id]);
 
   if (!c) return null;
@@ -62,6 +76,7 @@ function Page() {
       toast.success("Todos os materiais gerados com sucesso!");
       setActive("");
       setAudioSrc(null);
+      setFolhetoPreview(null);
     } catch (err) {
       toast.error(`Erro: ${(err as Error).message}`);
     } finally {
@@ -75,6 +90,7 @@ function Page() {
     toast.success("Materiais de exemplo gerados (mock).");
     setActive("");
     setAudioSrc(null);
+    setFolhetoPreview(null);
   }
 
   async function gerarAudio() {
@@ -106,30 +122,61 @@ function Page() {
   }
 
   async function gerarPptx() {
-    const texto =
-      edited["apresentacao_slides"] ?? c?.materiais?.["apresentacao_slides"] ?? "";
+    const texto = edited["apresentacao_slides"] ?? c?.materiais?.["apresentacao_slides"] ?? "";
     if (!texto) {
       toast.error("Gere a apresentação antes de exportar o PPTX.");
       return;
     }
-    if (!c?.brief) {
-      toast.error("Brief não encontrado.");
-      return;
-    }
+    if (!c?.brief) { toast.error("Brief não encontrado."); return; }
+    if (!hasKey) { toast.error("Configure sua chave de API para gerar o PPTX com IA."); return; }
     setPptxLoading(true);
+    setPptxProgress(null);
     try {
-      const slides = parseSlides(texto);
-      if (slides.length === 0) {
-        toast.error("Não foi possível identificar slides no conteúdo. Verifique o formato.");
-        return;
-      }
-      await generatePptx(slides, c.brief, c.nome);
-      toast.success(`PPTX gerado com ${slides.length} slides! 📊`);
+      toast.info("🤖 Analisando roteiro com IA...");
+      const slides = await generateSlidesWithAI(texto, c.brief, c.nome);
+      toast.info(`📸 Montando ${slides.length} slides com imagens...`);
+      await generatePptx(slides, c.brief, c.nome, (cur, tot) =>
+        setPptxProgress({ current: cur, total: tot })
+      );
+      toast.success(`✅ PPTX gerado com ${slides.length} slides!`);
     } catch (err) {
       toast.error(`Erro ao gerar PPTX: ${(err as Error).message}`);
     } finally {
       setPptxLoading(false);
+      setPptxProgress(null);
     }
+  }
+
+  async function gerarFolheto() {
+    const texto = edited["folheto_a4"] ?? c?.materiais?.["folheto_a4"] ?? "";
+    if (!texto) {
+      toast.error("Gere o texto do folheto antes de criar a imagem.");
+      return;
+    }
+    if (!c?.brief) { toast.error("Brief não encontrado."); return; }
+    if (!hasKey) { toast.error("Configure sua chave de API para gerar o folheto com IA."); return; }
+    setFolhetoLoading(true);
+    setFolhetoPreview(null);
+    try {
+      toast.info("🤖 IA estruturando o folheto...");
+      const folhetoData = await generateFolhetoData(texto, c.brief, c.nome);
+      toast.info("🎨 Renderizando design...");
+      const canvas = renderFolhetoCanvas(folhetoData, c.brief.marca || c.nome);
+      folhetoCanvasRef.current = canvas;
+      const preview = canvas.toDataURL("image/png");
+      setFolhetoPreview(preview);
+      toast.success("Folheto gerado com sucesso! 🖼️");
+    } catch (err) {
+      toast.error(`Erro ao gerar folheto: ${(err as Error).message}`);
+    } finally {
+      setFolhetoLoading(false);
+    }
+  }
+
+  function downloadFolheto() {
+    if (!folhetoCanvasRef.current) return;
+    downloadFolhetoPng(folhetoCanvasRef.current, c!.nome);
+    toast.success("Download do folheto iniciado 🖼️");
   }
 
   if (keys.length === 0) {
@@ -238,39 +285,49 @@ function Page() {
                 </div>
 
                 <div className="flex gap-2 shrink-0 flex-wrap justify-end">
-                  {/* Botão TTS — apenas no podcast */}
+
+                  {/* 🎙️ Botão TTS — apenas no podcast */}
                   {k === "podcast_revendedores" && (
                     <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={gerarAudio}
-                      disabled={ttsLoading}
+                      variant="outline" size="sm"
+                      onClick={gerarAudio} disabled={ttsLoading}
                       className="border-violet-500/40 text-violet-600 hover:bg-violet-50 dark:hover:bg-violet-950"
                     >
-                      {ttsLoading ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Mic className="h-4 w-4" />
-                      )}
+                      {ttsLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mic className="h-4 w-4" />}
                       {ttsLoading ? "Gerando áudio…" : "🎙️ Gerar Áudio"}
                     </Button>
                   )}
 
-                  {/* Botão PPTX — apenas na aba de apresentação */}
+                  {/* 📊 Botão PPTX — apenas na aba de apresentação */}
                   {k === "apresentacao_slides" && (
                     <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={gerarPptx}
-                      disabled={pptxLoading}
+                      variant="outline" size="sm"
+                      onClick={gerarPptx} disabled={pptxLoading}
                       className="border-emerald-500/40 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950"
                     >
-                      {pptxLoading ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Presentation className="h-4 w-4" />
-                      )}
+                      {pptxLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Presentation className="h-4 w-4" />}
                       {pptxLoading ? "Gerando PPTX…" : "📊 Baixar PPTX"}
+                    </Button>
+                  )}
+
+                  {/* 🖼️ Botão Folheto PNG — apenas na aba folheto_a4 */}
+                  {k === "folheto_a4" && (
+                    <Button
+                      variant="outline" size="sm"
+                      onClick={gerarFolheto} disabled={folhetoLoading}
+                      className="border-pink-500/40 text-pink-600 hover:bg-pink-50 dark:hover:bg-pink-950"
+                    >
+                      {folhetoLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageIcon className="h-4 w-4" />}
+                      {folhetoLoading ? "Gerando folheto…" : "🖼️ Gerar Folheto PNG"}
+                    </Button>
+                  )}
+
+                  {/* Botão download PNG — aparece após gerar o folheto */}
+                  {k === "folheto_a4" && folhetoPreview && (
+                    <Button size="sm" onClick={downloadFolheto}
+                      className="bg-pink-600 hover:bg-pink-700 text-white"
+                    >
+                      <Download className="h-4 w-4" /> Baixar PNG
                     </Button>
                   )}
 
@@ -284,6 +341,7 @@ function Page() {
               </CardHeader>
 
               <CardContent className="space-y-4">
+
                 {/* Player de áudio (podcast) */}
                 {k === "podcast_revendedores" && audioSrc && (
                   <div className="rounded-xl border border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-950/30 p-4 space-y-3">
@@ -291,22 +349,13 @@ function Page() {
                       <p className="text-sm font-medium text-violet-700 dark:text-violet-300 flex items-center gap-2">
                         <Mic className="h-4 w-4" /> Áudio gerado · Orpheus TTS
                       </p>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={downloadAudio}
-                        className="text-violet-600 hover:text-violet-800 h-7 px-2"
-                      >
+                      <Button variant="ghost" size="sm" onClick={downloadAudio}
+                        className="text-violet-600 hover:text-violet-800 h-7 px-2">
                         <Download className="h-3 w-3 mr-1" /> .wav
                       </Button>
                     </div>
                     {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-                    <audio
-                      ref={audioRef}
-                      controls
-                      src={audioSrc}
-                      className="w-full h-10 accent-violet-600"
-                    />
+                    <audio ref={audioRef} controls src={audioSrc} className="w-full h-10 accent-violet-600" />
                     <p className="text-xs text-muted-foreground">
                       Voz: Celeste (PT-BR) · Modelo: PlayAI TTS via Groq · Formato: WAV
                     </p>
@@ -323,24 +372,77 @@ function Page() {
                   </div>
                 )}
 
-                {/* Banner informativo PPTX */}
+                {/* Banner PPTX */}
                 {k === "apresentacao_slides" && !pptxLoading && (
                   <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30 p-3">
                     <p className="text-xs text-emerald-700 dark:text-emerald-300 flex items-center gap-2">
                       <Presentation className="h-3.5 w-3.5 shrink-0" />
-                      Edite o conteúdo abaixo se necessário e clique em{" "}
-                      <strong>📊 Baixar PPTX</strong> para exportar com design profissional.
+                      Edite o conteúdo abaixo se necessário e clique em <strong>📊 Baixar PPTX</strong> para exportar.
                     </p>
                   </div>
                 )}
 
                 {/* Loading PPTX */}
                 {k === "apresentacao_slides" && pptxLoading && (
-                  <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30 p-4">
+                  <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30 p-4 space-y-2">
                     <div className="flex items-center gap-3 text-sm text-emerald-600 dark:text-emerald-400">
                       <Loader2 className="h-4 w-4 animate-spin" />
-                      Montando apresentação PowerPoint…
+                      {pptxProgress
+                        ? `Montando slide ${pptxProgress.current} de ${pptxProgress.total}…`
+                        : "IA gerando estrutura dos slides…"}
                     </div>
+                    {pptxProgress && (
+                      <Progress
+                        value={Math.round((pptxProgress.current / pptxProgress.total) * 100)}
+                        className="h-1.5"
+                      />
+                    )}
+                  </div>
+                )}
+
+                {/* Banner Folheto */}
+                {k === "folheto_a4" && !folhetoLoading && !folhetoPreview && (
+                  <div className="rounded-xl border border-pink-200 dark:border-pink-800 bg-pink-50 dark:bg-pink-950/30 p-3">
+                    <p className="text-xs text-pink-700 dark:text-pink-300 flex items-center gap-2">
+                      <ImageIcon className="h-3.5 w-3.5 shrink-0" />
+                      Edite o texto abaixo se necessário e clique em <strong>🖼️ Gerar Folheto PNG</strong> para criar o design.
+                    </p>
+                  </div>
+                )}
+
+                {/* Loading Folheto */}
+                {k === "folheto_a4" && folhetoLoading && (
+                  <div className="rounded-xl border border-pink-200 dark:border-pink-800 bg-pink-50 dark:bg-pink-950/30 p-4">
+                    <div className="flex items-center gap-3 text-sm text-pink-600 dark:text-pink-400">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      IA estruturando conteúdo e renderizando design…
+                    </div>
+                  </div>
+                )}
+
+                {/* Preview do Folheto */}
+                {k === "folheto_a4" && folhetoPreview && (
+                  <div className="rounded-xl border border-pink-200 dark:border-pink-800 overflow-hidden">
+                    <div className="bg-pink-50 dark:bg-pink-950/30 px-4 py-2 flex items-center justify-between">
+                      <p className="text-xs font-medium text-pink-700 dark:text-pink-300 flex items-center gap-2">
+                        <ImageIcon className="h-3.5 w-3.5" /> Folheto gerado · A4 PNG
+                      </p>
+                      <Button variant="ghost" size="sm" onClick={downloadFolheto}
+                        className="text-pink-600 hover:text-pink-800 h-7 px-2">
+                        <Download className="h-3 w-3 mr-1" /> Baixar PNG
+                      </Button>
+                    </div>
+                    <div className="p-3 bg-muted/30 flex justify-center">
+                      <img
+                        src={folhetoPreview}
+                        alt="Preview do folheto"
+                        className="max-w-full rounded shadow-lg"
+                        style={{ maxHeight: 520 }}
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground text-center py-2">
+                      794 × 1123 px (A4) · Clique em Baixar PNG para salvar em alta resolução
+                    </p>
                   </div>
                 )}
 
@@ -354,14 +456,15 @@ function Page() {
                       ? "Roteiro do podcast aparece aqui. Edite e clique em 🎙️ Gerar Áudio."
                       : k === "apresentacao_slides"
                       ? "Apresentação aparece aqui. Edite e clique em 📊 Baixar PPTX."
+                      : k === "folheto_a4"
+                      ? "Texto do folheto aparece aqui. Edite e clique em 🖼️ Gerar Folheto PNG."
                       : ""
                   }
                 />
 
                 {k === "podcast_revendedores" && !audioSrc && !ttsLoading && (
                   <p className="text-xs text-muted-foreground text-center">
-                    💡 Edite o roteiro acima se necessário e clique em{" "}
-                    <strong>🎙️ Gerar Áudio</strong> para criar o arquivo WAV.
+                    💡 Edite o roteiro acima se necessário e clique em <strong>🎙️ Gerar Áudio</strong> para criar o arquivo WAV.
                   </p>
                 )}
               </CardContent>
