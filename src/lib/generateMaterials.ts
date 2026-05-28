@@ -248,11 +248,13 @@ async function callAI(prompt: string, moduleKey?: string, systemRole?: string): 
 }
 
 /**
- * Alias público de callAI — usado por módulos externos (ex: generatePptx.ts)
+ * Alias público de callAI — usado por módulos externos (ex: generatePptx.ts, generateEmail.ts, generateSocialPosts.ts)
  * para chamar a LLM configurada sem depender de módulos internos.
+ *
+ * FIX: o parâmetro systemRole agora é repassado corretamente para callAI.
  */
-export async function callLLM(prompt: string, _systemRole?: string): Promise<string> {
-  return callAI(prompt);
+export async function callLLM(prompt: string, systemRole?: string): Promise<string> {
+  return callAI(prompt, undefined, systemRole);
 }
 
 
@@ -510,7 +512,9 @@ export async function generateAllMaterials(
     const prompt = PROMPTS[key](brief, customPrompt);
 
     try {
-      results[key] = await callAI(prompt);
+      // FIX: passa o moduleKey (key) para que callAI use o modelo configurado
+      // para cada módulo individualmente, em vez de sempre usar o modelo global.
+      results[key] = await callAI(prompt, key);
     } catch (err) {
       const msg = (err as Error).message;
       results[key] = `[Rate limit — tente regerar este material individualmente]\n${msg}`;

@@ -1,5 +1,9 @@
 import { callLLM } from "./generateMaterials";
 import { type StructuredBrief } from "./store";
+// FIX: EmailSequencia é importada de generateEmail para evitar duplicação de interface.
+import { type EmailSequencia } from "./generateEmail";
+
+export type { EmailSequencia };
 
 // ─── Tipos ──────────────────────────────────────────────────────────────────
 
@@ -58,11 +62,6 @@ export interface VideoRoteiro {
   }[];
   cta: string;
   legenda: string;
-}
-
-export interface EmailSequencia {
-  emails: { assunto: string; preheader: string; html: string }[];
-  tipo: "revendedores" | "cliente_final";
 }
 
 // ─── Helper: extrai JSON de string que pode ter markdown fence ───────────────
