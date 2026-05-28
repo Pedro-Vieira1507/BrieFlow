@@ -1,24 +1,27 @@
 """
-visual_ai.py — Módulo de geração visual para o pipeline BriefFlow.
+visual_ai.py — Geração visual do pipeline BriefFlow.
 
-Integrações disponíveis (com opções gratuitas):
-  - Gamma API         → Slides (plano gratuito: 400 créditos/mês)
-  - Canva API         → E-mails, Folhetos, Ficha Técnica (plano gratuito disponível)
-  - DALL-E 3          → Posts (pago, ~$0.04/imagem)
-  - Gemini Imagen     → Posts (gratuito via Google AI Studio até cota mensal)
-  - Pexels API        → Imagens de stock gratuitas (totalmente free)
+Funciona 100% com as chaves gratuitas já disponíveis:
+  - GEMINI_API_KEY  → Já usado no pipeline (Google AI Studio — gratuito)
+  - PEXELS_API_KEY  → Imagens de stock gratuitas (https://www.pexels.com/api)
 
-Variáveis necessárias no .env:
-  GAMMA_API_KEY           → https://gamma.app (gratuito)
-  CANVA_API_KEY           → https://www.canva.com/developers (gratuito)
-  OPENAI_API_KEY          → https://platform.openai.com (pago, DALL-E 3)
-  GEMINI_API_KEY          → já existente no pipeline (gratuito, Imagen)
-  PEXELS_API_KEY          → https://www.pexels.com/api (totalmente gratuito)
+O que cada função faz:
+  - Slides     → Gerado localmente via python-pptx (template existente do projeto)
+  - E-mails    → HTML estático gerado pelo Gemini + renderizado em PDF com WeasyPrint
+  - Folhetos   → HTML estático gerado pelo Gemini + renderizado em PDF com WeasyPrint
+  - Ficha Téc. → HTML estático gerado pelo Gemini + renderizado em PDF com WeasyPrint
+  - Posts      → Gemini Imagen (gratuito) com fallback automático para Pexels
 
-Controle via .env:
-  VISUAL_AI_PROVIDER_SLIDES=gamma        # gamma | skip
-  VISUAL_AI_PROVIDER_DESIGN=canva        # canva | skip
-  VISUAL_AI_PROVIDER_POSTS=gemini_imagen # gemini_imagen | dalle | pexels | skip
+NOTA sobre Gamma e Canva:
+  - Gamma não possui API pública disponível (apenas plano Enterprise / waitlist).
+  - Canva API requer conta Enterprise. Nenhuma delas tem plano gratuito via API.
+  - Por isso, usamos soluções locais equivalentes que não precisam de chave.
+
+Dependencias novas (adicionar ao requirements.txt):
+  weasyprint>=61.0
+  # python-pptx já está no projeto
+  # google-genai já está no projeto
+  # requests já está no projeto
 """
 
 from __future__ import annotations
@@ -26,7 +29,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-import time
+import textwrap
 from pathlib import Path
 from typing import Optional
 
@@ -38,17 +41,16 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Configuração de providers via .env
+# Configurações via .env
 # ---------------------------------------------------------------------------
-PROVIDER_SLIDES = os.getenv("VISUAL_AI_PROVIDER_SLIDES", "gamma").strip().lower()
-PROVIDER_DESIGN = os.getenv("VISUAL_AI_PROVIDER_DESIGN", "canva").strip().lower()
-PROVIDER_POSTS  = os.getenv("VISUAL_AI_PROVIDER_POSTS", "gemini_imagen").strip().lower()
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+GEMINI_MODEL   = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+PEXELS_API_KEY = os.getenv("PEXELS_API_KEY", "").strip()
 
-GAMMA_API_KEY   = os.getenv("GAMMA_API_KEY", "").strip()
-CANVA_API_KEY   = os.getenv("CANVA_API_KEY", "").strip()
-OPENAI_API_KEY  = os.getenv("OPENAI_API_KEY", "").strip()
-GEMINI_API_KEY  = os.getenv("GEMINI_API_KEY", "").strip()
-PEXELS_API_KEY  = os.getenv("PEXELS_API_KEY", "").strip()
+PROVIDER_POSTS = os.getenv("VISUAL_AI_PROVIDER_POSTS", "gemini_imagen").strip().lower()
+# gemini_imagen → tenta Gemini Imagen, fallback Pexels
+# pexels        → usa Pexels direto (sem geração de imagem)
+# skip          → não gera imagem de post
 
 
 # ---------------------------------------------------------------------------
@@ -58,167 +60,222 @@ PEXELS_API_KEY  = os.getenv("PEXELS_API_KEY", "").strip()
 def _save_bytes(path: Path, data: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(data)
-    logger.info("[visual_ai] Arquivo salvo: %s", path)
+    logger.info("[visual_ai] Salvo: %s", path)
 
 
 def _save_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text.strip() + "\n", encoding="utf-8")
-    logger.info("[visual_ai] Arquivo salvo: %s", path)
+    logger.info("[visual_ai] Salvo: %s", path)
 
 
-# ---------------------------------------------------------------------------
-# SLIDES → Gamma API (gratuito: 400 créditos/mês)
-# Documentação: https://gamma.app/developers
-# ---------------------------------------------------------------------------
-
-def send_to_gamma(slides_text: str, title: str, out_dir: Path) -> Optional[Path]:
-    """
-    Envia o texto de slides para a Gamma API e salva o link gerado.
-    Plano gratuito: 400 créditos/mês em https://gamma.app.
-    Retorna o caminho do arquivo .txt com o link da apresentação.
-    """
-    if PROVIDER_SLIDES == "skip":
-        logger.info("[visual_ai] PROVIDER_SLIDES=skip, slides visuais ignorados.")
-        return None
-
-    if not GAMMA_API_KEY:
-        logger.warning(
-            "[visual_ai] GAMMA_API_KEY não definido. "
-            "Obtenha gratuitamente em https://gamma.app → Settings → API. "
-            "Slides visuais não serão gerados."
+def _gemini_client():
+    """Retorna cliente Gemini reutilizando a chave já configurada no pipeline."""
+    if not GEMINI_API_KEY:
+        raise RuntimeError(
+            "GEMINI_API_KEY não definido. Configure em https://aistudio.google.com/app/apikey"
         )
-        return None
+    from google import genai
+    return genai.Client(api_key=GEMINI_API_KEY)
 
-    url = "https://api.gamma.app/generate"
-    payload = {
-        "title": title,
-        "text": slides_text,
-        "mode": "presentation",
-        "language": "pt",
-    }
-    headers = {
-        "Authorization": f"Bearer {GAMMA_API_KEY}",
-        "Content-Type": "application/json",
-    }
 
+# ---------------------------------------------------------------------------
+# HTML → PDF via WeasyPrint (geração local, sem API)
+# ---------------------------------------------------------------------------
+
+def _html_to_pdf(html: str, output_path: Path) -> Optional[Path]:
+    """
+    Converte HTML em PDF usando WeasyPrint (local, sem API, sem custo).
+    Retorna o caminho do PDF gerado ou None em caso de erro.
+    """
     try:
-        logger.info("[visual_ai] Enviando slides para Gamma API...")
-        response = requests.post(url, json=payload, headers=headers, timeout=60)
-        response.raise_for_status()
-        data = response.json()
-
-        presentation_url = data.get("url") or data.get("presentationUrl") or str(data)
-        output_path = out_dir / "slides_gamma_link.txt"
-        _save_text(output_path, f"Apresentação gerada no Gamma:\n{presentation_url}\n")
-        logger.info("[visual_ai] Gamma: apresentação criada em %s", presentation_url)
+        from weasyprint import HTML as WeasyprintHTML
+        WeasyprintHTML(string=html).write_pdf(str(output_path))
+        logger.info("[visual_ai] PDF gerado: %s", output_path)
         return output_path
-
-    except requests.HTTPError as e:
-        logger.error("[visual_ai] Gamma HTTPError: %s — %s", e, e.response.text if e.response else "")
+    except ImportError:
+        logger.error(
+            "[visual_ai] WeasyPrint não instalado. Execute: pip install weasyprint"
+        )
     except Exception as e:
-        logger.error("[visual_ai] Gamma erro inesperado: %s", e)
-
+        logger.error("[visual_ai] Falha ao gerar PDF '%s': %s", output_path.name, e)
     return None
 
 
 # ---------------------------------------------------------------------------
-# DESIGN (E-mails, Folhetos, Ficha Técnica) → Canva Connect API
-# Plano gratuito disponível em: https://www.canva.com/developers
+# PROMPT AUXILIAR: pede ao Gemini para gerar HTML formatado
 # ---------------------------------------------------------------------------
 
-def send_to_canva(
-    content_text: str,
-    asset_type: str,          # "email" | "folheto" | "ficha"
-    title: str,
-    out_dir: Path,
-    template_id: Optional[str] = None,
-) -> Optional[Path]:
+def _generate_html_via_gemini(content_text: str, asset_type: str, campaign_name: str) -> Optional[str]:
     """
-    Cria um design no Canva via Connect API com o conteúdo do asset.
-    Plano gratuito disponível: https://www.canva.com/developers.
-    Retorna o caminho do arquivo .txt com o link do design.
+    Usa o Gemini (chave já disponível) para converter o texto do asset
+    em um HTML bonito e formatado, pronto para impressão.
     """
-    if PROVIDER_DESIGN == "skip":
-        logger.info("[visual_ai] PROVIDER_DESIGN=skip, design visual ignorado para '%s'.", asset_type)
-        return None
-
-    if not CANVA_API_KEY:
-        logger.warning(
-            "[visual_ai] CANVA_API_KEY não definido. "
-            "Registre-se gratuitamente em https://www.canva.com/developers. "
-            "Design visual não será gerado para '%s'.",
-            asset_type,
-        )
-        return None
-
-    # Mapeamento de tipo para nome amigável no Canva
-    type_label_map = {
-        "email": "Email Marketing",
-        "folheto": "Folheto A4",
-        "ficha": "Ficha Técnica",
-        "post": "Post para Redes Sociais",
+    style_map = {
+        "email": """
+            body { font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 32px; color: #222; }
+            h1 { color: #005B96; font-size: 22px; border-bottom: 2px solid #005B96; padding-bottom: 8px; }
+            h2 { color: #005B96; font-size: 16px; margin-top: 24px; }
+            p { line-height: 1.7; font-size: 14px; }
+            .cta { background: #005B96; color: white; padding: 12px 24px; border-radius: 4px; display: inline-block; margin-top: 16px; text-decoration: none; font-weight: bold; }
+            .footer { margin-top: 32px; font-size: 11px; color: #888; border-top: 1px solid #ddd; padding-top: 12px; }
+        """,
+        "folheto": """
+            @page { size: A4; margin: 15mm; }
+            body { font-family: Arial, sans-serif; color: #222; font-size: 13px; }
+            h1 { background: #005B96; color: white; padding: 12px 16px; font-size: 20px; margin: 0 0 16px; }
+            h2 { color: #005B96; font-size: 15px; margin-top: 20px; border-left: 4px solid #005B96; padding-left: 8px; }
+            ul { padding-left: 20px; }
+            li { line-height: 1.8; }
+            .cta-box { background: #f0f7ff; border: 2px solid #005B96; padding: 16px; margin-top: 24px; border-radius: 4px; }
+        """,
+        "ficha": """
+            @page { size: A4; margin: 15mm; }
+            body { font-family: Arial, sans-serif; color: #222; font-size: 12px; }
+            h1 { color: #005B96; font-size: 18px; border-bottom: 3px solid #005B96; padding-bottom: 6px; }
+            h2 { background: #e8f4fd; color: #005B96; padding: 6px 10px; font-size: 13px; margin-top: 16px; }
+            ul { padding-left: 18px; }
+            li { line-height: 1.7; }
+            table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+            th { background: #005B96; color: white; padding: 8px; text-align: left; }
+            td { border: 1px solid #ddd; padding: 6px 8px; }
+        """,
     }
-    design_title = f"{type_label_map.get(asset_type, asset_type)} — {title}"
 
-    url = "https://api.canva.com/rest/v1/designs"
-    payload: dict = {
-        "title": design_title,
-        "design_type": {"name": "doc"},
-    }
-    if template_id:
-        payload["asset_id"] = template_id
+    css = style_map.get(asset_type, style_map["folheto"])
+    asset_label = {"email": "E-mail de Marketing", "folheto": "Folheto Promocional", "ficha": "Ficha Técnica"}.get(asset_type, asset_type)
 
-    headers = {
-        "Authorization": f"Bearer {CANVA_API_KEY}",
-        "Content-Type": "application/json",
-    }
+    prompt = f"""Você é um designer HTML. Converta o texto abaixo em um HTML completo e bem formatado para impressão.
+
+Tipo: {asset_label}
+Campanha: {campaign_name}
+
+Texto de conteúdo:
+---
+{content_text}
+---
+
+Regras:
+- Retorne APENAS o código HTML, sem explicações, sem markdown, sem ```html.
+- Use esta CSS embutida exatamente:
+<style>{css}</style>
+- Estruture semanticamente com <h1>, <h2>, <p>, <ul>, <li>.
+- Adicione um rodapé sutil com o nome da campanha.
+- Use cores corporativas azul #005B96.
+- O HTML deve ser autocontido (nenhum arquivo externo).
+"""
 
     try:
-        logger.info("[visual_ai] Criando design Canva para '%s'...", asset_type)
-        response = requests.post(url, json=payload, headers=headers, timeout=30)
-        response.raise_for_status()
-        data = response.json()
-
-        design_url = (
-            data.get("design", {}).get("urls", {}).get("edit_url")
-            or data.get("url")
-            or str(data)
+        from google.genai import types as gtypes
+        client = _gemini_client()
+        response = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=gtypes.Part.from_text(text=prompt),
+            config=gtypes.GenerateContentConfig(temperature=0.3),
         )
-        output_path = out_dir / f"{asset_type}_canva_link.txt"
-        _save_text(
-            output_path,
-            f"Design '{asset_type}' criado no Canva:\n{design_url}\n\n"
-            f"--- Conteúdo para preenchimento manual ---\n{content_text}",
-        )
-        logger.info("[visual_ai] Canva: design '%s' criado em %s", asset_type, design_url)
-        return output_path
-
-    except requests.HTTPError as e:
-        logger.error("[visual_ai] Canva HTTPError ('%s'): %s — %s", asset_type, e, e.response.text if e.response else "")
+        html = (response.text or "").strip()
+        # Remove possível bloco markdown que o modelo possa retornar
+        if html.startswith("```"):
+            html = html.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+        return html
     except Exception as e:
-        logger.error("[visual_ai] Canva erro inesperado ('%s'): %s", asset_type, e)
-
-    return None
+        logger.error("[visual_ai] Gemini falhou ao gerar HTML para '%s': %s", asset_type, e)
+        return None
 
 
 # ---------------------------------------------------------------------------
-# POSTS → Gemini Imagen (GRATUITO via Google AI Studio)
-# Cota gratuita: https://ai.google.dev/pricing
+# E-MAILS → HTML + PDF (Gemini gera HTML, WeasyPrint renderiza PDF)
 # ---------------------------------------------------------------------------
 
-def generate_post_image_gemini(
-    prompt_text: str,
-    asset_key: str,
-    out_dir: Path,
-) -> Optional[Path]:
+def generate_email_visual(content_text: str, campaign_name: str, out_dir: Path) -> dict:
     """
-    Gera imagem para post usando Gemini Imagen (google-genai).
-    GRATUITO via Google AI Studio até a cota mensal.
-    Requer GEMINI_API_KEY já definido no .env.
+    Gera e-mail em HTML formatado (para disparar) e PDF (para impressão / aprovação).
+    Usa Gemini para formatar + WeasyPrint para renderizar. Sem API externa paga.
+    """
+    results: dict = {}
+    logger.info("[visual_ai] Gerando e-mail visual (Gemini + WeasyPrint)...")
+
+    html = _generate_html_via_gemini(content_text, "email", campaign_name)
+    if not html:
+        logger.warning("[visual_ai] HTML de e-mail não foi gerado.")
+        return results
+
+    html_path = out_dir / "email_formatado.html"
+    _save_text(html_path, html)
+    results["email_html"] = str(html_path)
+
+    pdf_path = out_dir / "email_formatado.pdf"
+    pdf = _html_to_pdf(html, pdf_path)
+    if pdf:
+        results["email_pdf"] = str(pdf)
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# FOLHETO → HTML + PDF
+# ---------------------------------------------------------------------------
+
+def generate_folheto_visual(content_text: str, campaign_name: str, out_dir: Path) -> dict:
+    """Gera folheto A4 em HTML + PDF via Gemini + WeasyPrint."""
+    results: dict = {}
+    logger.info("[visual_ai] Gerando folheto visual (Gemini + WeasyPrint)...")
+
+    html = _generate_html_via_gemini(content_text, "folheto", campaign_name)
+    if not html:
+        logger.warning("[visual_ai] HTML de folheto não foi gerado.")
+        return results
+
+    html_path = out_dir / "folheto_formatado.html"
+    _save_text(html_path, html)
+    results["folheto_html"] = str(html_path)
+
+    pdf_path = out_dir / "folheto_formatado.pdf"
+    pdf = _html_to_pdf(html, pdf_path)
+    if pdf:
+        results["folheto_pdf"] = str(pdf)
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# FICHA TÉCNICA → HTML + PDF
+# ---------------------------------------------------------------------------
+
+def generate_ficha_visual(content_text: str, campaign_name: str, out_dir: Path) -> dict:
+    """Gera ficha técnica formatada em HTML + PDF via Gemini + WeasyPrint."""
+    results: dict = {}
+    logger.info("[visual_ai] Gerando ficha técnica visual (Gemini + WeasyPrint)...")
+
+    html = _generate_html_via_gemini(content_text, "ficha", campaign_name)
+    if not html:
+        logger.warning("[visual_ai] HTML de ficha técnica não foi gerado.")
+        return results
+
+    html_path = out_dir / "ficha_formatada.html"
+    _save_text(html_path, html)
+    results["ficha_html"] = str(html_path)
+
+    pdf_path = out_dir / "ficha_formatada.pdf"
+    pdf = _html_to_pdf(html, pdf_path)
+    if pdf:
+        results["ficha_pdf"] = str(pdf)
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# POSTS → Gemini Imagen (gratuito) com fallback Pexels (gratuito)
+# ---------------------------------------------------------------------------
+
+def generate_post_image_gemini(content_text: str, asset_key: str, out_dir: Path) -> Optional[Path]:
+    """
+    Gera imagem para post usando Gemini Imagen.
+    Gratuito via Google AI Studio até a cota mensal.
+    Modelo: imagen-3.0-generate-002
     """
     if not GEMINI_API_KEY:
-        logger.warning("[visual_ai] GEMINI_API_KEY não definido. Imagem de post não será gerada.")
+        logger.warning("[visual_ai] GEMINI_API_KEY não definido. Imagem não será gerada.")
         return None
 
     try:
@@ -227,9 +284,10 @@ def generate_post_image_gemini(
 
         client = genai.Client(api_key=GEMINI_API_KEY)
         image_prompt = (
-            f"Crie uma imagem profissional e atraente para post de marketing B2B no estilo editorial. "
-            f"Tema: {prompt_text[:300]}. "
-            f"Estilo: limpo, cores neutras com destaque em azul corporativo, sem texto na imagem."
+            f"Imagem profissional para post de marketing B2B corporativo. "
+            f"Tema: {content_text[:250].replace(chr(10), ' ')}. "
+            f"Estilo: fotografia editorial limpa, cores azul corporativo e branco, "
+            f"ambiente laboratorial ou técnico. Sem texto na imagem."
         )
         logger.info("[visual_ai] Gerando imagem via Gemini Imagen para '%s'...", asset_key)
         response = client.models.generate_images(
@@ -239,167 +297,84 @@ def generate_post_image_gemini(
         )
         if response.generated_images:
             img_bytes = response.generated_images[0].image.image_bytes
-            output_path = out_dir / f"{asset_key}_post_gemini.png"
+            output_path = out_dir / f"{asset_key}_post.png"
             _save_bytes(output_path, img_bytes)
             return output_path
-        else:
-            logger.warning("[visual_ai] Gemini Imagen: nenhuma imagem retornada para '%s'.", asset_key)
-    except ImportError:
-        logger.error("[visual_ai] google-genai não instalado. Execute: pip install google-genai")
+        logger.warning("[visual_ai] Gemini Imagen: nenhuma imagem retornada para '%s'.", asset_key)
     except Exception as e:
         logger.error("[visual_ai] Gemini Imagen erro ('%s'): %s", asset_key, e)
-
     return None
 
 
-# ---------------------------------------------------------------------------
-# POSTS → DALL-E 3 via OpenAI API (pago, ~$0.04/imagem)
-# ---------------------------------------------------------------------------
-
-def generate_post_image_dalle(
-    prompt_text: str,
-    asset_key: str,
-    out_dir: Path,
-) -> Optional[Path]:
+def fetch_pexels_image(query: str, asset_key: str, out_dir: Path) -> Optional[Path]:
     """
-    Gera imagem para post usando DALL-E 3 (OpenAI).
-    Requer OPENAI_API_KEY no .env. Custo: ~$0.04 por imagem.
-    """
-    if not OPENAI_API_KEY:
-        logger.warning("[visual_ai] OPENAI_API_KEY não definido. Imagem DALL-E não será gerada.")
-        return None
-
-    url = "https://api.openai.com/v1/images/generations"
-    image_prompt = (
-        f"Imagem profissional para post de marketing B2B. "
-        f"Tema: {prompt_text[:300]}. "
-        f"Estilo editorial, limpo, cores corporativas, sem texto."
-    )
-    payload = {
-        "model": "dall-e-3",
-        "prompt": image_prompt,
-        "n": 1,
-        "size": "1024x1024",
-        "response_format": "url",
-    }
-    headers = {
-        "Authorization": f"Bearer {OPENAI_API_KEY}",
-        "Content-Type": "application/json",
-    }
-
-    try:
-        logger.info("[visual_ai] Gerando imagem DALL-E 3 para '%s'...", asset_key)
-        response = requests.post(url, json=payload, headers=headers, timeout=60)
-        response.raise_for_status()
-        data = response.json()
-        image_url = data["data"][0]["url"]
-
-        img_response = requests.get(image_url, timeout=30)
-        img_response.raise_for_status()
-        output_path = out_dir / f"{asset_key}_post_dalle.png"
-        _save_bytes(output_path, img_response.content)
-        return output_path
-
-    except requests.HTTPError as e:
-        logger.error("[visual_ai] DALL-E HTTPError ('%s'): %s", asset_key, e)
-    except Exception as e:
-        logger.error("[visual_ai] DALL-E erro ('%s'): %s", asset_key, e)
-
-    return None
-
-
-# ---------------------------------------------------------------------------
-# FALLBACK GRATUITO → Pexels (stock photos 100% gratuitas)
-# Registro gratuito: https://www.pexels.com/api
-# ---------------------------------------------------------------------------
-
-def fetch_pexels_image(
-    query: str,
-    asset_key: str,
-    out_dir: Path,
-) -> Optional[Path]:
-    """
-    Busca uma imagem relevante no Pexels (API totalmente gratuita).
-    Útil como fallback quando as outras APIs não estiverem disponíveis.
-    Registro gratuito: https://www.pexels.com/api.
+    Busca imagem relevante no Pexels (100% gratuito).
+    Usado como fallback quando Gemini Imagen não está disponível.
+    Registro gratuito: https://www.pexels.com/api
     """
     if not PEXELS_API_KEY:
         logger.warning(
             "[visual_ai] PEXELS_API_KEY não definido. "
-            "Registre-se gratuitamente em https://www.pexels.com/api."
+            "Registre-se gratuitamente em https://www.pexels.com/api"
         )
         return None
 
-    url = "https://api.pexels.com/v1/search"
-    params = {"query": query[:100], "per_page": 1, "orientation": "landscape"}
-    headers = {"Authorization": PEXELS_API_KEY}
-
     try:
-        logger.info("[visual_ai] Buscando imagem Pexels para '%s' (query: %s)...", asset_key, query[:50])
+        url = "https://api.pexels.com/v1/search"
+        params = {"query": query[:80], "per_page": 1, "orientation": "landscape"}
+        headers = {"Authorization": PEXELS_API_KEY}
+
+        logger.info("[visual_ai] Buscando imagem Pexels para '%s'...", asset_key)
         response = requests.get(url, params=params, headers=headers, timeout=20)
         response.raise_for_status()
         data = response.json()
 
         photos = data.get("photos", [])
         if not photos:
-            logger.warning("[visual_ai] Pexels: nenhuma foto encontrada para '%s'.", query)
+            logger.warning("[visual_ai] Pexels: nenhuma foto para query '%s'.", query)
             return None
 
         photo_url = photos[0]["src"]["large2x"]
-        img_response = requests.get(photo_url, timeout=30)
-        img_response.raise_for_status()
+        img_resp = requests.get(photo_url, timeout=30)
+        img_resp.raise_for_status()
 
         output_path = out_dir / f"{asset_key}_post_pexels.jpg"
-        _save_bytes(output_path, img_response.content)
+        _save_bytes(output_path, img_resp.content)
         return output_path
-
-    except requests.HTTPError as e:
-        logger.error("[visual_ai] Pexels HTTPError ('%s'): %s", asset_key, e)
     except Exception as e:
         logger.error("[visual_ai] Pexels erro ('%s'): %s", asset_key, e)
-
     return None
 
 
-# ---------------------------------------------------------------------------
-# Interface pública principal
-# ---------------------------------------------------------------------------
-
-def generate_post_image(
-    content_text: str,
-    asset_key: str,
-    out_dir: Path,
-) -> Optional[Path]:
+def generate_post_image(content_text: str, asset_key: str, out_dir: Path) -> Optional[Path]:
     """
-    Gera imagem para post usando o provider configurado em VISUAL_AI_PROVIDER_POSTS.
-    Ordem de prioridade: gemini_imagen → dalle → pexels → skip.
+    Gera imagem de post com fallback automático:
+      1. Gemini Imagen (gratuito, cota mensal)
+      2. Pexels (100% gratuito, sem limite)
+    Configurado por VISUAL_AI_PROVIDER_POSTS no .env.
     """
     if PROVIDER_POSTS == "skip":
         return None
 
-    # Extrai palavras-chave do conteúdo para usar como prompt/query
-    keyword_summary = content_text[:200].replace("\n", " ").strip()
+    keyword = content_text[:150].replace("\n", " ").strip()
 
-    if PROVIDER_POSTS == "gemini_imagen":
-        result = generate_post_image_gemini(keyword_summary, asset_key, out_dir)
+    if PROVIDER_POSTS in ("gemini_imagen", "gemini"):
+        result = generate_post_image_gemini(content_text, asset_key, out_dir)
         if result:
             return result
-        logger.info("[visual_ai] Gemini Imagen falhou, tentando Pexels como fallback...")
-        return fetch_pexels_image(keyword_summary, asset_key, out_dir)
-
-    if PROVIDER_POSTS == "dalle":
-        result = generate_post_image_dalle(keyword_summary, asset_key, out_dir)
-        if result:
-            return result
-        logger.info("[visual_ai] DALL-E falhou, tentando Pexels como fallback...")
-        return fetch_pexels_image(keyword_summary, asset_key, out_dir)
+        logger.info("[visual_ai] Gemini Imagen falhou — usando Pexels como fallback...")
+        return fetch_pexels_image(keyword, asset_key, out_dir)
 
     if PROVIDER_POSTS == "pexels":
-        return fetch_pexels_image(keyword_summary, asset_key, out_dir)
+        return fetch_pexels_image(keyword, asset_key, out_dir)
 
-    logger.warning("[visual_ai] PROVIDER_POSTS='%s' desconhecido. Use: gemini_imagen, dalle, pexels ou skip.", PROVIDER_POSTS)
+    logger.warning("[visual_ai] PROVIDER_POSTS='%s' inválido. Use: gemini_imagen, pexels ou skip.", PROVIDER_POSTS)
     return None
 
+
+# ---------------------------------------------------------------------------
+# Interface pública: orquestrador principal
+# ---------------------------------------------------------------------------
 
 def run_visual_generation(
     brief: dict,
@@ -412,39 +387,35 @@ def run_visual_generation(
 ) -> dict:
     """
     Orquestra toda a geração visual para um brief.
-    Retorna um dicionário com os resultados de cada etapa.
+    Retorna dicionário com os caminhos de todos os arquivos gerados.
+
+    Nota: Slides visuais já são gerados pelo módulo slides_ppt.py (PPTX).
+    Este módulo complementa com: PDFs (emails, folheto, ficha) + imagens de post.
     """
-    campaign_name = brief.get("campanha", brief.get("titulo", "Campanha"))
+    campaign_name = brief.get("campanha", brief.get("titulo", brief.get("nome", "Campanha")))
     results: dict = {}
 
-    # 1. Slides → Gamma
-    if slides_text:
-        logger.info("[visual_ai] Iniciando geração visual de slides (Gamma)...")
-        results["slides_gamma"] = send_to_gamma(slides_text, campaign_name, out_dir)
-        time.sleep(1)
-
-    # 2. E-mails → Canva
+    # E-mails → HTML + PDF
     if emails_text:
-        logger.info("[visual_ai] Iniciando geração visual de e-mails (Canva)...")
-        results["emails_canva"] = send_to_canva(emails_text, "email", campaign_name, out_dir)
-        time.sleep(1)
+        results.update(generate_email_visual(emails_text, campaign_name, out_dir))
 
-    # 3. Folheto → Canva
+    # Folheto → HTML + PDF
     if folheto_text:
-        logger.info("[visual_ai] Iniciando geração visual de folheto (Canva)...")
-        results["folheto_canva"] = send_to_canva(folheto_text, "folheto", campaign_name, out_dir)
-        time.sleep(1)
+        results.update(generate_folheto_visual(folheto_text, campaign_name, out_dir))
 
-    # 4. Ficha Técnica → Canva
+    # Ficha Técnica → HTML + PDF
     if ficha_text:
-        logger.info("[visual_ai] Iniciando geração visual de ficha técnica (Canva)...")
-        results["ficha_canva"] = send_to_canva(ficha_text, "ficha", campaign_name, out_dir)
-        time.sleep(1)
+        results.update(generate_ficha_visual(ficha_text, campaign_name, out_dir))
 
-    # 5. Posts → Gemini Imagen / DALL-E / Pexels
+    # Posts → Gemini Imagen (fallback: Pexels)
     if post_text:
-        logger.info("[visual_ai] Iniciando geração visual de post (provider: %s)...", PROVIDER_POSTS)
-        results["post_image"] = generate_post_image(post_text, "post_instagram", out_dir)
+        post_keyword = brief.get("produto", brief.get("linha", campaign_name))
+        post_img = generate_post_image(
+            content_text=f"{post_keyword} {post_text[:100]}",
+            asset_key="post_instagram",
+            out_dir=out_dir,
+        )
+        if post_img:
+            results["post_image"] = str(post_img)
 
-    # Converte Path para str para serialização no manifest
-    return {k: str(v) if v else None for k, v in results.items()}
+    return results
