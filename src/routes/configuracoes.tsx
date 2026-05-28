@@ -22,7 +22,7 @@ import { useState, useEffect } from "react";
 import {
   Save, Eye, EyeOff, CheckCircle2, ExternalLink,
   KeyRound, Sparkles, Mic, Building2, Globe, Palette,
-  FileText, Link,
+  FileText, Link, Wand2, X,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -325,49 +325,63 @@ function Configuracoes() {
                 </div>
               </div>
 
-              {/* ── Sites para análise de design ── */}
-              <div className="rounded-xl border border-violet-300 dark:border-violet-700 bg-violet-50/60 dark:bg-violet-950/20 p-4 space-y-4">
-                <div className="flex items-center gap-2">
-                  <Globe className="h-4 w-4 text-violet-500" />
-                  <p className="text-sm font-semibold text-violet-800 dark:text-violet-300">
-                    🎨 Análise de Design pelo Site
-                  </p>
-                  <span className="ml-auto rounded-full bg-violet-200 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300 text-xs font-medium px-2 py-0.5">
-                    IA analisa e extrai identidade visual
+              {/* ── Sites para análise de design — DESTAQUE ── */}
+              <div className="rounded-xl border-2 border-violet-400 dark:border-violet-600 bg-gradient-to-br from-violet-50 to-violet-100/60 dark:from-violet-950/30 dark:to-violet-900/20 p-5 space-y-4 shadow-sm">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="flex items-center gap-2">
+                    <Globe className="h-5 w-5 text-violet-600 dark:text-violet-400" />
+                    <p className="text-sm font-bold text-violet-900 dark:text-violet-200">
+                      🎨 Análise de Design pelo Site
+                    </p>
+                  </div>
+                  <span className="rounded-full bg-violet-600 text-white text-xs font-semibold px-2.5 py-0.5">
+                    IA extrai identidade visual automaticamente
                   </span>
                 </div>
 
-                <p className="text-xs text-violet-700 dark:text-violet-400 leading-relaxed">
-                  Informe o(s) site(s) da <strong>distribuidora</strong>. A IA irá acessá-los e extrair
-                  automaticamente: paleta de cores, tipografia, estilo de layout e tom visual.
-                  Esses elementos serão aplicados em <strong>todos os materiais gerados</strong>.
-                  <br />
-                  <span className="font-semibold text-violet-800 dark:text-violet-200">
+                <div className="rounded-lg bg-white/70 dark:bg-violet-950/40 border border-violet-200 dark:border-violet-700 px-4 py-3 text-xs text-violet-800 dark:text-violet-300 space-y-1.5">
+                  <p className="font-semibold text-sm">Como funciona:</p>
+                  <p>
+                    1. Informe o(s) site(s) da <strong>distribuidora</strong> abaixo.
+                  </p>
+                  <p>
+                    2. A IA irá <strong>acessar e analisar</strong> os sites antes de gerar cada material,
+                    extraindo paleta de cores, tipografia, estilo de layout e tom visual.
+                  </p>
+                  <p>
+                    3. Os elementos extraídos são aplicados em <strong>todos os materiais gerados</strong>
+                    — e-mails, slides, posts e folhetos.
+                  </p>
+                  <p className="font-semibold text-violet-900 dark:text-violet-200 mt-1">
                     ⚠️ Use sempre o site da distribuidora — nunca do fabricante divulgado.
-                  </span>
-                </p>
+                  </p>
+                </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-1.5">
-                    <Label className="flex items-center gap-1.5">
-                      <Globe className="h-3.5 w-3.5 text-violet-500" />
+                    <Label className="flex items-center gap-1.5 text-violet-800 dark:text-violet-300 font-semibold">
+                      <Globe className="h-3.5 w-3.5 text-violet-600" />
                       Site Principal da Distribuidora
+                      <span className="rounded-full bg-violet-200 text-violet-700 dark:bg-violet-800 dark:text-violet-300 text-xs font-medium px-1.5 py-0.5">
+                        principal
+                      </span>
                     </Label>
                     <Input
                       placeholder="https://www.forlab.com.br"
                       type="url"
                       value={distribuidora.siteUrl}
                       onChange={(e) => setDist("siteUrl", e.target.value)}
+                      className="border-violet-300 dark:border-violet-600 focus:ring-violet-400"
                     />
-                    <p className="text-xs text-muted-foreground">
-                      Site institucional — fonte primária de referência de design e identidade visual.
+                    <p className="text-xs text-violet-600 dark:text-violet-400">
+                      Site institucional — fonte <strong>primária</strong> de referência de design e identidade visual.
                     </p>
                   </div>
 
                   <div className="space-y-1.5">
-                    <Label className="flex items-center gap-1.5">
+                    <Label className="flex items-center gap-1.5 text-violet-700 dark:text-violet-400">
                       <Link className="h-3.5 w-3.5 text-violet-400" />
-                      Site Secundário / Portal de Revendedores
+                      Portal de Revendedores / Site Secundário
                       <span className="ml-1 rounded-full bg-violet-100 text-violet-600 dark:bg-violet-900/30 dark:text-violet-400 text-xs px-1.5 py-0.5">
                         opcional
                       </span>
@@ -377,22 +391,77 @@ function Configuracoes() {
                       type="url"
                       value={distribuidora.siteUrlSecundario}
                       onChange={(e) => setDist("siteUrlSecundario", e.target.value)}
+                      className="border-violet-200 dark:border-violet-700"
                     />
                     <p className="text-xs text-muted-foreground">
-                      Portal de revendedores ou loja virtual — complementa a análise de design para materiais de vendas.
+                      Portal de revendedores ou loja virtual — complementa a análise para materiais de vendas.
                     </p>
                   </div>
                 </div>
 
                 {temSite && (
-                  <div className="rounded-md bg-violet-100 dark:bg-violet-900/30 border border-violet-200 dark:border-violet-700 px-3 py-2 text-xs text-violet-700 dark:text-violet-300 flex items-start gap-2">
+                  <div className="rounded-md bg-violet-100 dark:bg-violet-900/30 border border-violet-300 dark:border-violet-700 px-3 py-2.5 text-xs text-violet-800 dark:text-violet-300 flex items-start gap-2">
                     <span className="text-base leading-none mt-0.5">🔍</span>
                     <span>
-                      A IA irá <strong>acessar e analisar</strong> {distribuidora.siteUrl && distribuidora.siteUrlSecundario ? "os dois sites" : "este site"} antes de gerar cada material,
-                      extraindo paleta de cores, tipografia e estilo visual para garantir consistência com a identidade da distribuidora.
+                      A IA irá <strong>acessar e analisar</strong>{" "}
+                      {distribuidora.siteUrl && distribuidora.siteUrlSecundario ? "os dois sites" : "este site"}{" "}
+                      antes de gerar cada material, extraindo paleta de cores, tipografia e estilo visual
+                      para garantir consistência com a identidade da distribuidora.
                     </span>
                   </div>
                 )}
+
+                {/* ── Paleta extraída pela IA ── */}
+                <div className="space-y-1.5">
+                  <Label className="flex items-center gap-1.5 text-violet-700 dark:text-violet-400">
+                    <Wand2 className="h-3.5 w-3.5 text-violet-500" />
+                    Paleta Extraída pela IA
+                    <span className="ml-1 rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 text-xs px-1.5 py-0.5">
+                      confirmação visual
+                    </span>
+                  </Label>
+                  <div className="relative">
+                    <Input
+                      placeholder="Ex: Primária: #1A3C6E | Secundária: #F5A623 | Fundo: #FFFFFF | Texto: #333333"
+                      value={distribuidora.paletaExtraida}
+                      onChange={(e) => setDist("paletaExtraida", e.target.value)}
+                      className="pr-8 text-sm font-mono border-violet-200 dark:border-violet-700"
+                    />
+                    {distribuidora.paletaExtraida && (
+                      <button
+                        type="button"
+                        onClick={() => setDist("paletaExtraida", "")}
+                        className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground"
+                        title="Limpar paleta (força nova análise)"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Este campo é preenchido automaticamente pela IA após analisar o site.
+                    Limpe-o para forçar uma nova extração. Você também pode editar manualmente.
+                  </p>
+
+                  {/* Preview visual das cores extraídas */}
+                  {distribuidora.paletaExtraida && (() => {
+                    const hexMatches = distribuidora.paletaExtraida.match(/#[0-9A-Fa-f]{3,6}/g);
+                    if (!hexMatches || hexMatches.length === 0) return null;
+                    return (
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="text-xs text-muted-foreground">Preview:</span>
+                        {hexMatches.slice(0, 6).map((hex, i) => (
+                          <div
+                            key={i}
+                            className="w-6 h-6 rounded-full border border-border shadow-sm"
+                            style={{ backgroundColor: hex }}
+                            title={hex}
+                          />
+                        ))}
+                      </div>
+                    );
+                  })()}
+                </div>
               </div>
 
               {/* Identidade visual manual */}
@@ -496,6 +565,9 @@ function Configuracoes() {
                   )}
                   {distribuidora.siteUrlSecundario && (
                     <p>• Site secundário: <a href={distribuidora.siteUrlSecundario} target="_blank" rel="noopener noreferrer" className="underline">{distribuidora.siteUrlSecundario}</a></p>
+                  )}
+                  {distribuidora.paletaExtraida && (
+                    <p>• Paleta extraída pela IA: <span className="font-mono">{distribuidora.paletaExtraida.slice(0, 80)}{distribuidora.paletaExtraida.length > 80 ? "…" : ""}</span></p>
                   )}
                   {distribuidora.notasDesign && (
                     <p>• Notas de design personalizadas: ativas ✅</p>

@@ -236,6 +236,14 @@ export type DistribuidoraPerfil = {
 
   /** E-mail de contato exibido nos materiais */
   emailContato: string;
+
+  /**
+   * Paleta extraída pela IA após análise do site.
+   * Preenchido automaticamente pelo agente como feedback visual de confirmação.
+   * Formato sugerido: "Primária: #1A3C6E | Secundária: #F5A623 | Fundo: #FFFFFF | Texto: #333333"
+   * O usuário pode editar ou limpar este campo para forçar uma nova análise.
+   */
+  paletaExtraida: string;
 };
 
 // ─── Config type ──────────────────────────────────────────────────────────────
@@ -271,6 +279,7 @@ export const DEFAULT_DISTRIBUIDORA: DistribuidoraPerfil = {
   endereco: "",
   contato: "",
   emailContato: "",
+  paletaExtraida: "",
 };
 
 const DEFAULT_CONFIG: AIConfig = {
@@ -338,7 +347,18 @@ export function getModuleModel(moduleKey: string, config: AIConfig): AIModel {
 
 /**
  * Monta um bloco de contexto rico sobre a distribuidora para injetar nos prompts.
- * Instrui a IA a acessar o site e extrair paleta, tipografia e tom de design.
+ *
+ * GROUNDING / TOOL_USE:
+ * Quando o modelo suportar grounding (ex: Gemini com Google Search grounding ou
+ * tool_use com fetch de URL), o site informado em `siteUrl` e `siteUrlSecundario`
+ * deve ser acessado diretamente como ferramenta antes da geração dos materiais.
+ * O resultado esperado é a extração de: paleta de cores, tipografia, tom visual e
+ * estrutura de layout — que devem ser armazenados em `paletaExtraida` e injetados
+ * como contexto adicional nas chamadas subsequentes.
+ *
+ * Caso o modelo não suporte acesso direto a URLs, as instruções abaixo orientam
+ * o modelo a simular a análise com base nas informações manuais fornecidas.
+ *
  * Retorna string vazia se nenhuma informação foi preenchida.
  */
 export function buildDistribuidoraContext(d: DistribuidoraPerfil): string {
@@ -362,22 +382,44 @@ export function buildDistribuidoraContext(d: DistribuidoraPerfil): string {
   if (d.tom)     lines.push(`- Tom de comunicação: ${d.tom}`);
 
   if (d.siteUrl || d.siteUrlSecundario) {
-    lines.push("", "🌐 REFERÊNCIAS DE DESIGN (sites da distribuidora):");
+    lines.push(
+      "",
+      "🌐 REFERÊNCIAS DE DESIGN — INSTRUÇÃO DE ACESSO E ANÁLISE:",
+      "IMPORTANTE: Se você possui a capacidade de acessar URLs (tool_use / grounding / fetch),",
+      "ACESSE os sites abaixo ANTES de gerar qualquer material. Extraia e aplique:",
+      "  1. Paleta de cores predominante (primária, secundária, fundo, texto)",
+      "  2. Tipografia utilizada (fontes de título e corpo)",
+      "  3. Estilo de layout (espaçamentos, arredondamentos, estilo dos botões)",
+      "  4. Tom visual geral (formal/moderno/técnico/próximo)",
+      "Se NÃO conseguir acessar, informe explicitamente e use as informações manuais abaixo.",
+    );
     if (d.siteUrl) {
       lines.push(
-        `- Site principal: ${d.siteUrl}`,
-        `  → ACESSE este site e analise: paleta de cores predominante, tipografia usada,`,
-        `    layout geral (headers, botões, cards), tom visual (formal/moderno/próximo).`,
+        "",
+        `- [SITE PRINCIPAL] ${d.siteUrl}`,
+        `  → Fonte primária de identidade visual. Analise homepage, seção de produtos e rodapé.`,
         `  → Utilize EXATAMENTE essas escolhas de design nos materiais gerados.`,
         `  → NÃO use as cores ou o estilo visual do fabricante divulgado.`,
       );
     }
     if (d.siteUrlSecundario) {
       lines.push(
-        `- Site secundário / portal de revendedores: ${d.siteUrlSecundario}`,
-        `  → Use este como referência complementar de design para materiais de vendas.`,
+        "",
+        `- [SITE SECUNDÁRIO / PORTAL DE REVENDEDORES] ${d.siteUrlSecundario}`,
+        `  → Complemento de design para materiais de vendas e comunicação com revendedores.`,
+        `  → Priorize este site para materiais voltados ao canal de vendas.`,
       );
     }
+  }
+
+  // Paleta extraída pela IA (feedback de confirmação)
+  if (d.paletaExtraida) {
+    lines.push(
+      "",
+      "✅ PALETA JÁ EXTRAÍDA (análise anterior do site):",
+      `  ${d.paletaExtraida}`,
+      "  → Use estes valores como referência de cores. Se o site foi atualizado, ignore e reanalize.",
+    );
   }
 
   if (d.coresMarca) {
@@ -410,6 +452,7 @@ export function buildDistribuidoraContext(d: DistribuidoraPerfil): string {
     "⚠️  REGRA CRÍTICA:",
     "Nunca atribua os materiais ao fabricante do produto divulgado.",
     "Sempre identifique a distribuidora como a empresa que produz e envia os conteúdos.",
+    "Se acessou o site com sucesso, confirme no início da sua resposta quais cores e fontes foram extraídas.",
     "═══════════════════════════════════════════════════════════",
   );
 
