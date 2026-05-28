@@ -22,6 +22,7 @@ import { useState, useEffect } from "react";
 import {
   Save, Eye, EyeOff, CheckCircle2, ExternalLink,
   KeyRound, Sparkles, Mic, Building2, Globe, Palette,
+  FileText, Link,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -262,6 +263,7 @@ function Configuracoes() {
   );
 
   const distPreenchida = !!(distribuidora.nome || distribuidora.siteUrl);
+  const temSite = !!(distribuidora.siteUrl || distribuidora.siteUrlSecundario);
 
   return (
     <AppShell>
@@ -293,8 +295,9 @@ function Configuracoes() {
               </div>
               <p className="text-xs text-muted-foreground mt-1">
                 A empresa distribuidora é <strong>quem assina e envia</strong> os materiais.
-                A marca divulgada é o produto/fabricante informado no brief. A IA usará as informações
-                abaixo para adaptar design, tom e identidade visual de todos os materiais.
+                A marca divulgada é o produto/fabricante informado no brief.
+                A IA usará as informações abaixo — incluindo a análise do site — para adaptar
+                design, tom e identidade visual de todos os materiais à distribuidora.
               </p>
             </CardHeader>
             <CardContent className="space-y-5">
@@ -313,38 +316,101 @@ function Configuracoes() {
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <Label className="flex items-center gap-1.5">
-                    <Globe className="h-3.5 w-3.5 text-violet-500" />
-                    Site da Distribuidora
-                    <span className="ml-1 rounded-full bg-violet-100 text-violet-600 dark:bg-violet-900/30 dark:text-violet-400 text-xs px-1.5 py-0.5">
-                      IA analisa design
-                    </span>
-                  </Label>
+                  <Label>Slogan / Posicionamento</Label>
                   <Input
-                    placeholder="https://www.forlab.com.br"
-                    type="url"
-                    value={distribuidora.siteUrl}
-                    onChange={(e) => setDist("siteUrl", e.target.value)}
+                    placeholder="Ex: Soluções completas para laboratórios"
+                    value={distribuidora.slogan}
+                    onChange={(e) => setDist("slogan", e.target.value)}
                   />
-                  <p className="text-xs text-muted-foreground">
-                    A IA referencia este site para alinhar cores, tom e layout dos materiais à identidade da distribuidora.
-                  </p>
                 </div>
               </div>
 
-              {/* Identidade visual */}
+              {/* ── Sites para análise de design ── */}
+              <div className="rounded-xl border border-violet-300 dark:border-violet-700 bg-violet-50/60 dark:bg-violet-950/20 p-4 space-y-4">
+                <div className="flex items-center gap-2">
+                  <Globe className="h-4 w-4 text-violet-500" />
+                  <p className="text-sm font-semibold text-violet-800 dark:text-violet-300">
+                    🎨 Análise de Design pelo Site
+                  </p>
+                  <span className="ml-auto rounded-full bg-violet-200 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300 text-xs font-medium px-2 py-0.5">
+                    IA analisa e extrai identidade visual
+                  </span>
+                </div>
+
+                <p className="text-xs text-violet-700 dark:text-violet-400 leading-relaxed">
+                  Informe o(s) site(s) da <strong>distribuidora</strong>. A IA irá acessá-los e extrair
+                  automaticamente: paleta de cores, tipografia, estilo de layout e tom visual.
+                  Esses elementos serão aplicados em <strong>todos os materiais gerados</strong>.
+                  <br />
+                  <span className="font-semibold text-violet-800 dark:text-violet-200">
+                    ⚠️ Use sempre o site da distribuidora — nunca do fabricante divulgado.
+                  </span>
+                </p>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <Label className="flex items-center gap-1.5">
+                      <Globe className="h-3.5 w-3.5 text-violet-500" />
+                      Site Principal da Distribuidora
+                    </Label>
+                    <Input
+                      placeholder="https://www.forlab.com.br"
+                      type="url"
+                      value={distribuidora.siteUrl}
+                      onChange={(e) => setDist("siteUrl", e.target.value)}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Site institucional — fonte primária de referência de design e identidade visual.
+                    </p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label className="flex items-center gap-1.5">
+                      <Link className="h-3.5 w-3.5 text-violet-400" />
+                      Site Secundário / Portal de Revendedores
+                      <span className="ml-1 rounded-full bg-violet-100 text-violet-600 dark:bg-violet-900/30 dark:text-violet-400 text-xs px-1.5 py-0.5">
+                        opcional
+                      </span>
+                    </Label>
+                    <Input
+                      placeholder="https://revendedores.forlab.com.br"
+                      type="url"
+                      value={distribuidora.siteUrlSecundario}
+                      onChange={(e) => setDist("siteUrlSecundario", e.target.value)}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Portal de revendedores ou loja virtual — complementa a análise de design para materiais de vendas.
+                    </p>
+                  </div>
+                </div>
+
+                {temSite && (
+                  <div className="rounded-md bg-violet-100 dark:bg-violet-900/30 border border-violet-200 dark:border-violet-700 px-3 py-2 text-xs text-violet-700 dark:text-violet-300 flex items-start gap-2">
+                    <span className="text-base leading-none mt-0.5">🔍</span>
+                    <span>
+                      A IA irá <strong>acessar e analisar</strong> {distribuidora.siteUrl && distribuidora.siteUrlSecundario ? "os dois sites" : "este site"} antes de gerar cada material,
+                      extraindo paleta de cores, tipografia e estilo visual para garantir consistência com a identidade da distribuidora.
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Identidade visual manual */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <Label className="flex items-center gap-1.5">
                     <Palette className="h-3.5 w-3.5 text-violet-500" />
-                    Cores da Marca
+                    Cores da Marca (hex manuais)
+                    <span className="ml-1 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 text-xs px-1.5 py-0.5">
+                      prioridade sobre o site
+                    </span>
                   </Label>
                   <Input
                     placeholder="Ex: #1A3C6E (azul principal), #F5A623 (laranja CTA)"
                     value={distribuidora.coresMarca}
                     onChange={(e) => setDist("coresMarca", e.target.value)}
                   />
-                  <p className="text-xs text-muted-foreground">Informe os hex das cores principais para os e-mails HTML.</p>
+                  <p className="text-xs text-muted-foreground">Quando preenchido, estes hex têm prioridade sobre as cores extraídas do site.</p>
                 </div>
                 <div className="space-y-1.5">
                   <Label>Tom de Comunicação</Label>
@@ -356,13 +422,26 @@ function Configuracoes() {
                 </div>
               </div>
 
+              {/* Notas adicionais de design */}
               <div className="space-y-1.5">
-                <Label>Slogan / Posicionamento</Label>
-                <Input
-                  placeholder="Ex: Soluções completas para laboratórios"
-                  value={distribuidora.slogan}
-                  onChange={(e) => setDist("slogan", e.target.value)}
+                <Label className="flex items-center gap-1.5">
+                  <FileText className="h-3.5 w-3.5 text-violet-500" />
+                  Notas de Design / Instruções Adicionais para a IA
+                  <span className="ml-1 rounded-full bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 text-xs px-1.5 py-0.5">
+                    opcional
+                  </span>
+                </Label>
+                <Textarea
+                  rows={3}
+                  placeholder={`Ex: Usar sempre fundo branco nos e-mails. Ícones arredondados. Fonte principal: Montserrat.\nCabeçalho dos e-mails deve ter a logo à esquerda e cor #1A3C6E.\nEvitar elementos muito carregados — design limpo e moderno.`}
+                  value={distribuidora.notasDesign}
+                  onChange={(e) => setDist("notasDesign", e.target.value)}
+                  className="text-sm"
                 />
+                <p className="text-xs text-muted-foreground">
+                  Use este campo para instruções específicas de design que não estão visíveis no site,
+                  ou quando o site é protegido por login. A IA seguirá estas instruções em todos os materiais.
+                </p>
               </div>
 
               {/* Dados para rodapé de e-mail */}
@@ -414,6 +493,12 @@ function Configuracoes() {
                   <p>• A IA saberá que o remetente é a distribuidora — não o fabricante divulgado</p>
                   {distribuidora.siteUrl && (
                     <p>• Design referenciado em: <a href={distribuidora.siteUrl} target="_blank" rel="noopener noreferrer" className="underline">{distribuidora.siteUrl}</a></p>
+                  )}
+                  {distribuidora.siteUrlSecundario && (
+                    <p>• Site secundário: <a href={distribuidora.siteUrlSecundario} target="_blank" rel="noopener noreferrer" className="underline">{distribuidora.siteUrlSecundario}</a></p>
+                  )}
+                  {distribuidora.notasDesign && (
+                    <p>• Notas de design personalizadas: ativas ✅</p>
                   )}
                 </div>
               )}

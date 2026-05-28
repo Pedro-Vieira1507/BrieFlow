@@ -186,24 +186,54 @@ export function geminiApiId(model: AIModel): string {
 
 // ─── Perfil da Distribuidora ──────────────────────────────────────────────────
 
-/** Informações sobre a empresa distribuidora que produz os materiais. */
+/**
+ * Informações sobre a empresa distribuidora que produz e assina os materiais.
+ * A marca divulgada é o fabricante/produto informado no brief — não a distribuidora.
+ */
 export type DistribuidoraPerfil = {
   /** Nome da empresa distribuidora (ex: Forlab) */
   nome: string;
-  /** Site principal — a IA analisa design, cores e identidade visual */
+
+  /**
+   * Site institucional principal da distribuidora.
+   * A IA acessa e analisa este URL para extrair:
+   * paleta de cores, tipografia, tom de voz e layout.
+   * Use sempre o site da DISTRIBUIDORA — nunca do fabricante divulgado.
+   */
   siteUrl: string;
-  /** Cores principais da marca (ex: "#1A3C6E, #F5A623") */
+
+  /**
+   * Site secundário opcional (ex: portal do revendedor, loja virtual, hotsite).
+   * Complementa a análise de design quando o site principal não reflete
+   * o estilo visual usado nos materiais de vendas.
+   */
+  siteUrlSecundario: string;
+
+  /** Cores principais da marca em hex (ex: "#1A3C6E, #F5A623") */
   coresMarca: string;
-  /** Tom de comunicação da distribuidora */
+
+  /** Tom de comunicação da distribuidora (ex: "Técnico e consultivo") */
   tom: string;
-  /** Slogan ou posicionamento */
+
+  /** Slogan ou posicionamento da distribuidora */
   slogan: string;
-  /** CNPJ / razão social (opcional, para rodapés de e-mail) */
+
+  /**
+   * Notas adicionais de design/identidade visual para guiar a IA.
+   * Ex: "Usar sempre fundo branco, ícones arredondados, fontes sans-serif."
+   * Útil quando o site não está disponível publicamente ou é protegido.
+   */
+  notasDesign: string;
+
+  /** CNPJ / razão social (para rodapés de e-mail) */
   razaoSocial: string;
+
   /** Endereço para rodapé de e-mail */
   endereco: string;
+
   /** Telefone / WhatsApp de contato */
   contato: string;
+
   /** E-mail de contato exibido nos materiais */
   emailContato: string;
 };
@@ -232,9 +262,11 @@ const STORAGE_KEY = "briefflow_ai_config";
 export const DEFAULT_DISTRIBUIDORA: DistribuidoraPerfil = {
   nome: "",
   siteUrl: "",
+  siteUrlSecundario: "",
   coresMarca: "",
   tom: "",
   slogan: "",
+  notasDesign: "",
   razaoSocial: "",
   endereco: "",
   contato: "",
@@ -305,28 +337,82 @@ export function getModuleModel(moduleKey: string, config: AIConfig): AIModel {
 }
 
 /**
- * Monta um bloco de contexto sobre a distribuidora para injetar nos prompts.
+ * Monta um bloco de contexto rico sobre a distribuidora para injetar nos prompts.
+ * Instrui a IA a acessar o site e extrair paleta, tipografia e tom de design.
  * Retorna string vazia se nenhuma informação foi preenchida.
  */
 export function buildDistribuidoraContext(d: DistribuidoraPerfil): string {
   if (!d.nome && !d.siteUrl) return "";
+
   const lines: string[] = [
-    "IDENTIDADE DA EMPRESA DISTRIBUIDORA (quem assina e produz os materiais):",
+    "═══════════════════════════════════════════════════════════",
+    "CONTEXTO DA EMPRESA DISTRIBUIDORA — LEIA COM ATENÇÃO",
+    "═══════════════════════════════════════════════════════════",
+    "",
+    "📌 PAPEL DA DISTRIBUIDORA:",
+    "Os materiais abaixo são produzidos e assinados pela empresa DISTRIBUIDORA.",
+    "O produto/marca divulgado é do FABRICANTE — a distribuidora é quem comercializa e envia.",
+    "Portanto: o remetente, o design e a identidade visual devem refletir a DISTRIBUIDORA, não o fabricante.",
+    "",
+    "🏢 DADOS DA DISTRIBUIDORA:",
   ];
-  if (d.nome)          lines.push(`- Nome: ${d.nome}`);
-  if (d.slogan)        lines.push(`- Slogan/Posicionamento: ${d.slogan}`);
-  if (d.siteUrl)       lines.push(`- Site: ${d.siteUrl} — use as cores, tom e identidade visual deste site como referência de design dos materiais`);
-  if (d.coresMarca)    lines.push(`- Cores da marca: ${d.coresMarca}`);
-  if (d.tom)           lines.push(`- Tom de comunicação: ${d.tom}`);
-  if (d.razaoSocial)   lines.push(`- Razão social: ${d.razaoSocial}`);
-  if (d.endereco)      lines.push(`- Endereço (rodapé): ${d.endereco}`);
-  if (d.contato)       lines.push(`- Contato/WhatsApp: ${d.contato}`);
-  if (d.emailContato)  lines.push(`- E-mail de contato: ${d.emailContato}`);
+
+  if (d.nome)    lines.push(`- Nome: ${d.nome}`);
+  if (d.slogan)  lines.push(`- Slogan / Posicionamento: ${d.slogan}`);
+  if (d.tom)     lines.push(`- Tom de comunicação: ${d.tom}`);
+
+  if (d.siteUrl || d.siteUrlSecundario) {
+    lines.push("", "🌐 REFERÊNCIAS DE DESIGN (sites da distribuidora):");
+    if (d.siteUrl) {
+      lines.push(
+        `- Site principal: ${d.siteUrl}`,
+        `  → ACESSE este site e analise: paleta de cores predominante, tipografia usada,`,
+        `    layout geral (headers, botões, cards), tom visual (formal/moderno/próximo).`,
+        `  → Utilize EXATAMENTE essas escolhas de design nos materiais gerados.`,
+        `  → NÃO use as cores ou o estilo visual do fabricante divulgado.`,
+      );
+    }
+    if (d.siteUrlSecundario) {
+      lines.push(
+        `- Site secundário / portal de revendedores: ${d.siteUrlSecundario}`,
+        `  → Use este como referência complementar de design para materiais de vendas.`,
+      );
+    }
+  }
+
+  if (d.coresMarca) {
+    lines.push(
+      "",
+      "🎨 CORES DEFINIDAS MANUALMENTE (têm prioridade sobre a análise do site):",
+      `- ${d.coresMarca}`,
+      "  → Use estes hex exatos em botões, cabeçalhos, destaques e CTAs dos e-mails HTML.",
+    );
+  }
+
+  if (d.notasDesign) {
+    lines.push(
+      "",
+      "📝 NOTAS ADICIONAIS DE DESIGN (instruções manuais da distribuidora):",
+      ...d.notasDesign.split("\n").map((l) => `  ${l}`),
+    );
+  }
+
+  if (d.razaoSocial || d.endereco || d.contato || d.emailContato) {
+    lines.push("", "📧 DADOS PARA RODAPÉ DOS E-MAILS:");
+    if (d.razaoSocial)  lines.push(`- Razão social / CNPJ: ${d.razaoSocial}`);
+    if (d.endereco)     lines.push(`- Endereço: ${d.endereco}`);
+    if (d.contato)      lines.push(`- Telefone / WhatsApp: ${d.contato}`);
+    if (d.emailContato) lines.push(`- E-mail: ${d.emailContato}`);
+  }
+
   lines.push(
-    "IMPORTANTE: os materiais são produzidos pela distribuidora acima para divulgar a marca do fabricante.",
-    "A distribuidora é quem assina, envia e aparece como remetente. O fabricante é o produto divulgado.",
-    "Adapte todo o design, cores e identidade visual à distribuidora — não ao fabricante."
+    "",
+    "⚠️  REGRA CRÍTICA:",
+    "Nunca atribua os materiais ao fabricante do produto divulgado.",
+    "Sempre identifique a distribuidora como a empresa que produz e envia os conteúdos.",
+    "═══════════════════════════════════════════════════════════",
   );
+
   return lines.join("\n");
 }
 
