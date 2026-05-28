@@ -12,36 +12,6 @@ export const Route = createFileRoute("/campanha/$id/transcricao")({
   component: Page,
 });
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function normalizeBrief(raw: any): StructuredBrief {
-  const toArr = (v: unknown): string[] =>
-    Array.isArray(v) ? (v as string[]) : [];
-
-  const toObjArr = (v: unknown): { objecao: string; argumento: string }[] => {
-    if (!Array.isArray(v)) return [];
-    return (v as Record<string, string>[]).map((item) => ({
-      objecao: item.objecao ?? item.objeção ?? item.objecoes ?? "",
-      argumento: item.argumento ?? item.argumentos ?? "",
-    }));
-  };
-
-  return {
-    marca: raw.marca ?? "",
-    campanha: raw.campanha ?? "",
-    publico_alvo: raw.publico_alvo ?? raw.publico ?? "",
-    proposta_comercial: raw.proposta_comercial ?? raw.proposta ?? "",
-    oferta_promocional: raw.oferta_promocional ?? raw.oferta ?? "",
-    subcategorias: toArr(raw.subcategorias),
-    diferenciais_tecnicos: toArr(raw.diferenciais_tecnicos ?? raw.diferenciais),
-    beneficios_revendedor: toArr(raw.beneficios_revendedor ?? raw.beneficios_revendedores),
-    beneficios_cliente_final: toArr(raw.beneficios_cliente_final ?? raw.beneficio_cliente_final),
-    objecoes_argumentos: toObjArr(raw.objecoes_argumentos ?? raw.objecoes),
-    tom_comunicacao: raw.tom_comunicacao ?? raw.tom ?? "",
-    observacoes: raw.observacoes ?? raw.observacao ?? "",
-    inferencias_ia: toArr(raw.inferencias_ia ?? raw.inferencias),
-  };
-}
-
 function Page() {
   const { id } = Route.useParams();
   const nav = useNavigate();
@@ -51,8 +21,7 @@ function Page() {
   const [text, setText] = useState<string>("");
   const [inferring, setInferring] = useState(false);
 
-  // ✅ FIX: sincroniza o textarea quando a campanha carrega do store
-  // useRef evita sobrescrever edições manuais após o primeiro load
+  // sincroniza o textarea quando a campanha carrega do store
   const initializedRef = useRef(false);
   useEffect(() => {
     if (c?.transcricao && !initializedRef.current) {
@@ -73,16 +42,17 @@ function Page() {
     setInferring(true);
     try {
       store.setTranscricao(id, text);
-      const raw = await inferBriefFromTranscriptAI(c!.nome, text);
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(raw);
-      } catch {
-        const match = raw.match(/\{[\s\S]*\}/);
-        if (!match) throw new Error(raw.slice(0, 200));
-        parsed = JSON.parse(match[0]);
+
+      // inferBriefFromTranscriptAI já retorna JSON stringificado e normalizado.
+      // NÃO re-parsear nem re-normalizar aqui — isso sobrescreveria o trabalho feito lá.
+      const jsonStr = await inferBriefFromTranscriptAI(c!.nome, text);
+      const brief: StructuredBrief = JSON.parse(jsonStr) as StructuredBrief;
+
+      // Garante que o campo campanha nunca fique vazio: usa o nome da campanha como fallback
+      if (!brief.campanha?.trim()) {
+        brief.campanha = c!.nome;
       }
-      const brief: StructuredBrief = normalizeBrief(parsed);
+
       store.setBrief(id, brief);
       toast.success("Brief gerado pela IA com sucesso!");
       nav({ to: "/campanha/$id/brief", params: { id } });
