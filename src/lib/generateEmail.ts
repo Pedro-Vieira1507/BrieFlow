@@ -1,5 +1,6 @@
 import { callLLM } from "./generateMaterials";
 import { type StructuredBrief } from "./store";
+import { loadAIConfig, buildDistribuidoraContext } from "./aiConfig";
 
 export interface EmailData {
   assunto: string;
@@ -36,34 +37,37 @@ function repairControlChars(input: string): string {
   return out;
 }
 
+/**
+ * Extrai o bloco { ... } externo usando depth-counter —
+ * ignora } dentro de strings e de CSS, evitando o bug do lastIndexOf.
+ */
+function extractOuterObject(s: string): string {
+  const start = s.indexOf("{");
+  if (start === -1) return s;
+  let depth = 0;
+  let inString = false;
+  let esc = false;
+  for (let i = start; i < s.length; i++) {
+    const ch = s[i];
+    if (esc) { esc = false; continue; }
+    if (ch === "\\") { esc = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === "{") depth++;
+    else if (ch === "}") { depth--; if (depth === 0) return s.slice(start, i + 1); }
+  }
+  return s.slice(start);
+}
+
 function sanitizeAndParse<T>(raw: string): T {
   let s = raw.trim()
     .replace(/^```(?:json)?\s*/i, "")
     .replace(/\s*```\s*$/, "")
-    .trim();
-
-  s = s
+    .trim()
     .replace(/[\u201C\u201D\u201E\u201F]/g, '"')
     .replace(/[\u2018\u2019\u201A\u201B]/g, "'");
 
-  // Extrai o bloco { ... } usando contador de profundidade para não cortar em } de CSS
-  const start = s.indexOf("{");
-  if (start !== -1) {
-    let depth = 0;
-    let inString = false;
-    let esc = false;
-    let end = -1;
-    for (let i = start; i < s.length; i++) {
-      const ch = s[i];
-      if (esc) { esc = false; continue; }
-      if (ch === "\\") { esc = true; continue; }
-      if (ch === '"') { inString = !inString; continue; }
-      if (inString) continue;
-      if (ch === "{") depth++;
-      else if (ch === "}") { depth--; if (depth === 0) { end = i; break; } }
-    }
-    if (end !== -1) s = s.slice(start, end + 1);
-  }
+  s = extractOuterObject(s);
 
   try { return JSON.parse(s) as T; } catch { /* continua */ }
   const repaired = repairControlChars(s);
@@ -86,17 +90,40 @@ async function generateSingleEmail(
 ): Promise<EmailData> {
   const tipoLabel = tipo === "revendedores" ? "revendedores B2B" : "clientes finais (laboratórios)";
 
+  // Carrega contexto da distribuidora configurada
+  const config = loadAIConfig();
+  const distCtx = buildDistribuidoraContext(config.distribuidora);
+  const dist = config.distribuidora;
+
+  // Monta as cores do header/CTA usando as cores da distribuidora (com fallback)
+  const corHeader  = dist.coresMarca?.match(/#[0-9a-fA-F]{3,6}/)?.[0] ?? "#0F172A";
+  const corCTA     = dist.coresMarca?.match(/#[0-9a-fA-F]{3,6}/g)?.[1] ?? "#F59E0B";
+  const nomeRem    = dist.nome       || "[Nome da Distribuidora]";
+  const siteRem    = dist.siteUrl    || "#";
+  const endRem     = dist.endereco   || "";
+  const emailRem   = dist.emailContato || "";
+  const telRem     = dist.contato    || "";
+  const razaoRem   = dist.razaoSocial || "";
+
+  const rodapeInfo = [
+    razaoRem && `Razão social: ${razaoRem}`,
+    endRem   && `Endereço: ${endRem}`,
+    telRem   && `Contato: ${telRem}`,
+    emailRem && `E-mail: ${emailRem}`,
+  ].filter(Boolean).join(" · ");
+
   const prompt = `Você é especialista em email marketing para o setor laboratorial e científico.
 
 Gere o E-MAIL ${numero} de ${total} para ${tipoLabel}.
 
-CONTEXTO:
-- Marca: ${brief.marca}
+${distCtx ? distCtx + "\n" : ""}
+CONTEXTO DA CAMPANHA (produto/marca divulgada):
+- Marca do produto: ${brief.marca}
 - Campanha: ${nomeCampanha}
 - Oferta: ${brief.oferta_promocional}
 - Público: ${brief.publico_alvo}
-- Tom: ${brief.tom_comunicacao}
-- Diferenciais: ${brief.diferenciais_tecnicos?.join("; ") ?? ""}
+- Tom da campanha: ${brief.tom_comunicacao}
+- Diferenciais técnicos: ${brief.diferenciais_tecnicos?.join("; ") ?? ""}
 - Benefícios revendedor: ${brief.beneficios_revendedor?.join("; ") ?? ""}
 - Benefícios cliente final: ${brief.beneficios_cliente_final?.join("; ") ?? ""}
 - Subcategorias: ${brief.subcategorias?.join(", ") ?? ""}
@@ -108,7 +135,7 @@ INSTRUÇÃO DESTE E-MAIL:
 ${instrucao}
 
 Retorne SOMENTE o JSON abaixo, sem markdown, sem explicações extras.
-USE ASPAS SIMPLES em TODOS os atributos HTML para não quebrar o JSON.
+USE ASPAS SIMPLES em TODOS os atributos HTML.
 
 {
   "assunto": "Assunto chamativo max 60 chars",
@@ -118,11 +145,12 @@ USE ASPAS SIMPLES em TODOS os atributos HTML para não quebrar o JSON.
 
 REQUISITOS HTML:
 - Tabela 600px centralizada, fundo externo #f0f2f5
-- Header fundo #0F172A, marca branco bold 22px, subtítulo #A78BFA
-- Hero: título grande, descrição, botão CTA cor #F59E0B border-radius 8px
+- Header: fundo ${corHeader}, nome "${nomeRem}" em branco bold 22px (o remetente é a distribuidora)
+- Subtítulo no header referenciando a marca do produto divulgada
+- Hero: título grande sobre a campanha, descrição, botão CTA cor ${corCTA} border-radius 8px
 - Seção benefícios com emojis
-- Destaque oferta: borda #6C63FF fundo #F5F3FF
-- Footer #1E293B texto cinza link descadastro
+- Destaque oferta com borda e fundo suave
+- Footer: fundo escuro, logo/nome "${nomeRem}", site ${siteRem}${rodapeInfo ? ", " + rodapeInfo : ""}, link descadastro
 - TODO CSS inline com ASPAS SIMPLES (style='...')
 - Sem tag <style> separada
 - Responsivo max-width 600px`;
@@ -134,11 +162,11 @@ REQUISITOS HTML:
     parsed = sanitizeAndParse<EmailData>(raw);
   } catch {
     // Fallback: extrai campos individualmente por regex
-    const assuntoM = raw.match(/"assunto"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/);
+    const assuntoM  = raw.match(/"assunto"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/);
     const preheaderM = raw.match(/"preheader"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/);
-    const htmlM = raw.match(/<table[\s\S]*<\/table>/i) ?? raw.match(/<html[\s\S]*<\/html>/i);
+    const htmlM     = raw.match(/<table[\s\S]*<\/table>/i) ?? raw.match(/<html[\s\S]*<\/html>/i);
     parsed = {
-      assunto: assuntoM?.[1] ?? `E-mail ${numero}`,
+      assunto:  assuntoM?.[1]  ?? `E-mail ${numero}`,
       preheader: preheaderM?.[1] ?? "",
       html: htmlM?.[0] ?? "",
     };
@@ -173,18 +201,12 @@ export async function generateEmailSequencia(
         ];
 
   const total = instrucoes.length;
-
-  // Gera cada e-mail sequencialmente (evita rate limit)
   const emails: EmailData[] = [];
+
   for (let i = 0; i < instrucoes.length; i++) {
     const email = await generateSingleEmail(
-      brief,
-      nomeCampanha,
-      tipo,
-      i + 1,
-      total,
-      instrucoes[i],
-      textoRaw,
+      brief, nomeCampanha, tipo,
+      i + 1, total, instrucoes[i], textoRaw,
     );
     emails.push(email);
   }

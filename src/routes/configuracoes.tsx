@@ -13,11 +13,16 @@ import {
   type AIConfig,
   type AIModel,
   type AIProvider,
+  type DistribuidoraPerfil,
+  DEFAULT_DISTRIBUIDORA,
   MODEL_CATALOG,
   getModelProvider,
 } from "@/lib/aiConfig";
 import { useState, useEffect } from "react";
-import { Save, Eye, EyeOff, CheckCircle2, ExternalLink, KeyRound, Sparkles, Mic } from "lucide-react";
+import {
+  Save, Eye, EyeOff, CheckCircle2, ExternalLink,
+  KeyRound, Sparkles, Mic, Building2, Globe, Palette,
+} from "lucide-react";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/configuracoes")({
@@ -136,12 +141,10 @@ type KeyState = {
 
 type ShowState = Record<AIProvider, boolean>;
 
-// Modelos que suportam geração de TEXTO (excluir o Native Audio do seletor de texto)
 const TEXT_MODEL_IDS = (Object.keys(MODEL_CATALOG) as AIModel[]).filter(
   (id) => MODEL_CATALOG[id].badge !== "audio"
 );
 
-// Modelos que suportam ÁUDIO (Native Audio + Groq + OpenAI + Gemini TTS)
 const AUDIO_MODEL_IDS = (Object.keys(MODEL_CATALOG) as AIModel[]).filter((id) => {
   const provider = getModelProvider(id);
   return (
@@ -169,6 +172,7 @@ function Configuracoes() {
     audio: "gemini-2.5-flash-live",
   });
   const [prompts, setPrompts] = useState<Record<string, string>>({ ...DEFAULT_PROMPTS });
+  const [distribuidora, setDistribuidora] = useState<DistribuidoraPerfil>({ ...DEFAULT_DISTRIBUIDORA });
   const [wasSaved, setWasSaved] = useState(false);
   const [hydrated, setHydrated] = useState(false);
   const [onlyFree, setOnlyFree] = useState(true);
@@ -192,6 +196,7 @@ function Configuracoes() {
       ...(saved.modelPerModule ?? {}),
     });
     setPrompts({ ...DEFAULT_PROMPTS, ...saved.prompts });
+    setDistribuidora({ ...DEFAULT_DISTRIBUIDORA, ...(saved.distribuidora ?? {}) });
     setHydrated(true);
   }, []);
 
@@ -201,6 +206,10 @@ function Configuracoes() {
   const visibleModels = (Object.entries(MODEL_CATALOG) as [AIModel, typeof MODEL_CATALOG[AIModel]][]).filter(
     ([, meta]) => (!onlyFree || meta.badge !== "paid") && meta.badge !== "audio"
   );
+
+  function setDist<K extends keyof DistribuidoraPerfil>(field: K, value: DistribuidoraPerfil[K]) {
+    setDistribuidora((prev) => ({ ...prev, [field]: value }));
+  }
 
   function salvar() {
     const config: AIConfig = {
@@ -216,6 +225,7 @@ function Configuracoes() {
       drivePath,
       driveOutDir: outDir,
       prompts,
+      distribuidora,
     };
     saveAIConfig(config);
     setWasSaved(true);
@@ -245,12 +255,13 @@ function Configuracoes() {
   const providerOrder: AIProvider[] = ["gemini", "groq", "openai", "grok", "mistral", "anthropic"];
   const freeProviders: AIProvider[] = ["gemini", "groq"];
 
-  // providers that appear in the per-module selections (to always show their key cards)
   const usedProviders = new Set<AIProvider>(
     Object.values(modelPerModule)
       .filter(Boolean)
       .map((m) => getModelProvider(m as AIModel))
   );
+
+  const distPreenchida = !!(distribuidora.nome || distribuidora.siteUrl);
 
   return (
     <AppShell>
@@ -267,6 +278,148 @@ function Configuracoes() {
         />
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+          {/* ── 🏢 Perfil da Distribuidora ── */}
+          <Card className="lg:col-span-2 border-violet-200 dark:border-violet-800">
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <Building2 className="h-4 w-4 text-violet-500" />
+                <CardTitle className="text-base">Perfil da Distribuidora</CardTitle>
+                {distPreenchida && (
+                  <span className="ml-auto rounded-full bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400 text-xs font-medium px-2 py-0.5">
+                    ✅ Configurado
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                A empresa distribuidora é <strong>quem assina e envia</strong> os materiais.
+                A marca divulgada é o produto/fabricante informado no brief. A IA usará as informações
+                abaixo para adaptar design, tom e identidade visual de todos os materiais.
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-5">
+
+              {/* Identidade principal */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <Label className="flex items-center gap-1.5">
+                    <Building2 className="h-3.5 w-3.5 text-violet-500" />
+                    Nome da Distribuidora
+                  </Label>
+                  <Input
+                    placeholder="Ex: Forlab Distribuidora"
+                    value={distribuidora.nome}
+                    onChange={(e) => setDist("nome", e.target.value)}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="flex items-center gap-1.5">
+                    <Globe className="h-3.5 w-3.5 text-violet-500" />
+                    Site da Distribuidora
+                    <span className="ml-1 rounded-full bg-violet-100 text-violet-600 dark:bg-violet-900/30 dark:text-violet-400 text-xs px-1.5 py-0.5">
+                      IA analisa design
+                    </span>
+                  </Label>
+                  <Input
+                    placeholder="https://www.forlab.com.br"
+                    type="url"
+                    value={distribuidora.siteUrl}
+                    onChange={(e) => setDist("siteUrl", e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    A IA referencia este site para alinhar cores, tom e layout dos materiais à identidade da distribuidora.
+                  </p>
+                </div>
+              </div>
+
+              {/* Identidade visual */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <Label className="flex items-center gap-1.5">
+                    <Palette className="h-3.5 w-3.5 text-violet-500" />
+                    Cores da Marca
+                  </Label>
+                  <Input
+                    placeholder="Ex: #1A3C6E (azul principal), #F5A623 (laranja CTA)"
+                    value={distribuidora.coresMarca}
+                    onChange={(e) => setDist("coresMarca", e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">Informe os hex das cores principais para os e-mails HTML.</p>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Tom de Comunicação</Label>
+                  <Input
+                    placeholder="Ex: Técnico e consultivo, próximo e confiável"
+                    value={distribuidora.tom}
+                    onChange={(e) => setDist("tom", e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label>Slogan / Posicionamento</Label>
+                <Input
+                  placeholder="Ex: Soluções completas para laboratórios"
+                  value={distribuidora.slogan}
+                  onChange={(e) => setDist("slogan", e.target.value)}
+                />
+              </div>
+
+              {/* Dados para rodapé de e-mail */}
+              <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-3">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                  📧 Dados para Rodapé dos E-mails
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label>Razão Social / CNPJ</Label>
+                    <Input
+                      placeholder="Ex: Forlab Comércio LTDA — CNPJ 00.000.000/0001-00"
+                      value={distribuidora.razaoSocial}
+                      onChange={(e) => setDist("razaoSocial", e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Endereço</Label>
+                    <Input
+                      placeholder="Ex: Av. Exemplo, 123 — Rio de Janeiro, RJ"
+                      value={distribuidora.endereco}
+                      onChange={(e) => setDist("endereco", e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Telefone / WhatsApp</Label>
+                    <Input
+                      placeholder="Ex: (21) 99999-9999"
+                      value={distribuidora.contato}
+                      onChange={(e) => setDist("contato", e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>E-mail de Contato</Label>
+                    <Input
+                      placeholder="Ex: contato@forlab.com.br"
+                      type="email"
+                      value={distribuidora.emailContato}
+                      onChange={(e) => setDist("emailContato", e.target.value)}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {distPreenchida && (
+                <div className="rounded-md bg-violet-50 dark:bg-violet-950/20 border border-violet-200 dark:border-violet-800 px-4 py-3 text-xs text-violet-700 dark:text-violet-300 space-y-1">
+                  <p className="font-medium">✅ Contexto da distribuidora será injetado em todos os materiais gerados:</p>
+                  <p>• E-mails HTML usarão as cores e o rodapé da {distribuidora.nome || "distribuidora"}</p>
+                  <p>• A IA saberá que o remetente é a distribuidora — não o fabricante divulgado</p>
+                  {distribuidora.siteUrl && (
+                    <p>• Design referenciado em: <a href={distribuidora.siteUrl} target="_blank" rel="noopener noreferrer" className="underline">{distribuidora.siteUrl}</a></p>
+                  )}
+                </div>
+              )}
+
+            </CardContent>
+          </Card>
 
           {/* ── Modelo de IA Global ── */}
           <Card className="lg:col-span-2">
@@ -349,8 +502,6 @@ function Configuracoes() {
               <p className="text-xs text-muted-foreground mt-1">
                 Defina um modelo específico por tipo de material. Deixe em{" "}
                 <strong>— Global —</strong> para usar o modelo acima.
-                O módulo <strong>🎙️ Áudio / TTS</strong> usa por padrão o{" "}
-                <strong>Gemini 2.5 Flash Native Audio</strong> (RPM ilimitado · 1M tok/min).
               </p>
             </CardHeader>
             <CardContent>
@@ -404,14 +555,8 @@ function Configuracoes() {
                       </select>
 
                       {isAudio && currentVal === "gemini-2.5-flash-live" && (
-                        <p className="text-xs text-blue-600 dark:text-blue-400 flex items-center gap-1">
+                        <p className="text-xs text-blue-600 dark:text-blue-400">
                           ✅ RPM ilimitado · 1M tok/min · Voz: Aoede
-                        </p>
-                      )}
-
-                      {isAudio && !currentVal && (
-                        <p className="text-xs text-muted-foreground">
-                          Sem modelo específico — usará o modelo global (pode não ter TTS).
                         </p>
                       )}
                     </div>
@@ -420,8 +565,8 @@ function Configuracoes() {
               </div>
 
               <p className="mt-4 text-xs text-muted-foreground rounded-md border border-border bg-muted/40 px-3 py-2">
-                💡 <strong>Dica:</strong> Use <strong>Gemini 3.1 Flash Lite</strong> como global (500 req/dia) e{" "}
-                <strong>Gemma 3 27B</strong> para módulos de volume (14.400 req/dia).
+                💡 Use <strong>Gemini 3.1 Flash Lite</strong> como global e{" "}
+                <strong>Gemma 3 27B</strong> para módulos de volume.
               </p>
             </CardContent>
           </Card>
@@ -441,7 +586,6 @@ function Configuracoes() {
                   const isUsedByModule = usedProviders.has(provider);
                   const isVisible = show[provider];
 
-                  // Mostra sempre os gratuitos + o provider do modelo ativo + providers usados por módulos
                   if (!isFree && !isActive && !isUsedByModule) return null;
 
                   return (
