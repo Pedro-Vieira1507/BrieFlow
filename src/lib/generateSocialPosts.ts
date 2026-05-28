@@ -67,16 +67,38 @@ export interface VideoRoteiro {
 // ─── Helper: extrai JSON de string que pode ter markdown fence ───────────────
 
 function parseJson<T>(raw: string, label: string): T {
+  // 1. Remove markdown fences (```json ... ```)
   const cleaned = raw
     .replace(/^```(?:json)?\s*/i, "")
     .replace(/\s*```\s*$/, "")
     .trim();
-  const match = cleaned.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error(`IA não retornou JSON válido para ${label}. Tente novamente.`);
+
+  // 2. Tenta extrair o primeiro bloco JSON completo (objeto ou array)
+  const match = cleaned.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
+  if (!match) {
+    throw new Error(`IA não retornou JSON válido para ${label}. Tente novamente.`);
+  }
+
+  // 3. Tenta parse direto
   try {
     return JSON.parse(match[0]) as T;
   } catch {
-    throw new Error(`Erro ao interpretar JSON de ${label}. Tente novamente.`);
+    // 4. Fallback: sanitiza newlines literais e caracteres de controle dentro de strings
+    try {
+      const sanitized = match[0].replace(
+        /"(?:[^"\\]|\\.)*"/g,
+        (str) =>
+          str.replace(/[\x00-\x1F\x7F]/g, (c) => {
+            if (c === "\n") return "\\n";
+            if (c === "\t") return "\\t";
+            if (c === "\r") return "\\r";
+            return "";
+          }),
+      );
+      return JSON.parse(sanitized) as T;
+    } catch {
+      throw new Error(`Erro ao interpretar JSON de ${label}. Tente novamente.`);
+    }
   }
 }
 
