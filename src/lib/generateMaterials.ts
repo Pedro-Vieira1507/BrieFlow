@@ -44,108 +44,172 @@ async function withRetry<T>(fn: () => Promise<T>, retries = 2): Promise<T> {
 }
 
 
-// ─── JSON sanitizer (robusto) ─────────────────────────────────────────────────
+// ─── JSON sanitizer ───────────────────────────────────────────────────────────
 //
-// Problema: a IA às vezes retorna JSON com:
-//   1. Blocos markdown  ```json ... ```
-//   2. Texto antes/depois do JSON
-//   3. Aspas literais não-escapadas dentro de strings  → "valor com "aspas" aqui"
-//   4. Quebras de linha literais dentro de strings     → "linha1\nlinha2" sem escape
-//   5. Caracteres de controle (tabs, etc.) não-escapados
+// Estratégia em 4 camadas, da mais simples à mais agressiva:
 //
-// Esta função resolve os casos 1–5 de forma progressiva:
-//   Passo 1 – Remove fences markdown
-//   Passo 2 – Extrai o primeiro bloco JSON { ... } ou [ ... ]
-//   Passo 3 – Tenta JSON.parse() direto
-//   Passo 4 – Corrige strings multi-linha (quebras literais dentro de strings)
-//   Passo 5 – Corrige aspas internas não-escapadas dentro de valores de string
+//  1. Limpeza básica (markdown fences, texto antes/depois do JSON)
+//  2. JSON.parse() direto — caminho feliz
+//  3. repairControlChars() — escapa \n \r \t literais FORA de strings JSON válidas
+//  4. extractBriefFieldsManually() — extrai campo a campo via regex como último recurso
 //
+
 function sanitizeJsonResponse(raw: string): string {
-  // Passo 1: remove fences markdown
+  // Passo 1 — remove markdown fences e extrai o bloco { }
   let s = raw.trim();
   s = s.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
 
-  // Passo 2: extrai o bloco JSON principal (objeto ou array)
-  const objMatch = s.match(/\{[\s\S]*\}/);
-  const arrMatch = s.match(/\[[\s\S]*\]/);
-  if (objMatch) s = objMatch[0];
-  else if (arrMatch) s = arrMatch[0];
+  // Substitui aspas tipográficas por aspas simples/duplas ASCII
+  s = s
+    .replace(/[\u201C\u201D\u201E\u201F]/g, '"')   // " " „ ‟  → "
+    .replace(/[\u2018\u2019\u201A\u201B]/g, "'");   // ' ' ‚ ‛  → '
 
-  // Passo 3: tenta direto — se funcionar, retorna
-  try { JSON.parse(s); return s; } catch { /* segue para os passos de reparo */ }
+  // Extrai o primeiro bloco { ... }
+  const objStart = s.indexOf("{");
+  const objEnd = s.lastIndexOf("}");
+  if (objStart !== -1 && objEnd > objStart) s = s.slice(objStart, objEnd + 1);
 
-  // Passo 4: corrige quebras de linha literais dentro de strings JSON.
-  // Substitui \n literais (dentro de valores de string) por \\n escapado.
-  // Estratégia: percorre char a char controlando se está "dentro de uma string".
-  s = repairJsonStrings(s);
+  // Passo 2 — tenta direto
+  try { JSON.parse(s); return s; } catch { /* continua */ }
 
-  // Passo 5: segunda tentativa após reparo
-  try { JSON.parse(s); return s; } catch { /* retorna o que tiver — o catch em inferBriefFromTranscriptAI lida */ }
+  // Passo 3 — escapa caracteres de controle literais que estejam dentro de strings
+  const repaired = repairControlChars(s);
+  try { JSON.parse(repaired); return repaired; } catch { /* continua */ }
 
-  return s;
+  // Passo 4 — retorna o melhor esforço; inferBriefFromTranscriptAI tenta extractBriefFieldsManually
+  return repaired;
 }
 
 /**
- * Percorre o JSON caractere a caractere e corrige:
- *  - Quebras de linha literais dentro de strings  → \\n
- *  - Tabs literais dentro de strings              → \\t
- *  - Aspas duplas não-escapadas dentro de strings → \\"
- *    (heurística: aspas que não são abertura/fechamento de chave ou valor)
+ * Percorre o JSON char a char.
+ * Quando está DENTRO de uma string JSON (entre aspas), escapa:
+ *   - \n literal  →  \\n
+ *   - \r literal  →  \\r
+ *   - \t literal  →  \\t
+ *
+ * NÃO tenta corrigir aspas internas (isso é muito arriscado e quebra mais do que conserta).
+ * Para aspas internas usamos extractBriefFieldsManually como fallback.
  */
-function repairJsonStrings(input: string): string {
-  let result = "";
-  let inString = false;
+function repairControlChars(input: string): string {
+  let out = "";
+  let inStr = false;
   let i = 0;
 
   while (i < input.length) {
-    const ch = input[i];
+    const c = input[i];
 
-    if (!inString) {
-      if (ch === '"') {
-        inString = true;
-        result += ch;
-        i++;
-        continue;
-      }
-      result += ch;
+    if (!inStr) {
+      if (c === '"') inStr = true;
+      out += c;
       i++;
       continue;
     }
 
-    // Dentro de uma string JSON
-    if (ch === "\\") {
-      // sequência de escape já presente — copia os dois chars
-      result += ch;
+    // dentro de string
+    if (c === "\\") {
+      // sequência de escape — copia os 2 chars intactos
+      out += c;
       i++;
-      if (i < input.length) { result += input[i]; i++; }
+      if (i < input.length) { out += input[i]; i++; }
       continue;
     }
 
-    if (ch === '"') {
-      // Fecha a string — mas precisamos checar se é um fechamento real.
-      // Um fechamento real é seguido (ignorando espaços) por: , } ] : \n
-      // Se não for, é uma aspa interna mal-escapada.
-      let j = i + 1;
-      while (j < input.length && (input[j] === " " || input[j] === "\t")) j++;
-      const next = input[j] ?? "";
-      if (next === "," || next === "}" || next === "]" || next === ":" || next === "\n" || next === "\r" || j >= input.length) {
-        inString = false;
-        result += ch;
-        i++;
-      } else {
-        // Aspa interna não-escapada → escapa
-        result += '\\"';
-        i++;
-      }
+    if (c === '"') {
+      inStr = false;
+      out += c;
+      i++;
       continue;
     }
 
-    if (ch === "\n") { result += "\\n"; i++; continue; }
-    if (ch === "\r") { result += "\\r"; i++; continue; }
-    if (ch === "\t") { result += "\\t"; i++; continue; }
+    // caracteres de controle: escapa
+    if (c === "\n") { out += "\\n"; i++; continue; }
+    if (c === "\r") { out += "\\r"; i++; continue; }
+    if (c === "\t") { out += "\\t"; i++; continue; }
 
-    result += ch;
+    out += c;
     i++;
+  }
+
+  return out;
+}
+
+/**
+ * Último recurso: extrai cada campo do brief diretamente via regex,
+ * sem depender de JSON.parse(). Funciona mesmo que a IA coloque aspas
+ * internas, quebras de linha ou outros caracteres problemáticos nos valores.
+ *
+ * Retorna um objeto com os campos conhecidos do brief.
+ */
+function extractBriefFieldsManually(raw: string): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+
+  // Extrai campos de string simples: "chave": "valor"
+  const stringFields = [
+    "marca", "campanha", "publico_alvo", "proposta_comercial",
+    "oferta_promocional", "tom_comunicacao", "observacoes",
+  ];
+
+  for (const field of stringFields) {
+    // Captura tudo entre a abertura da string do campo e a próxima aspas seguida de vírgula/}
+    const re = new RegExp(`"${field}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"`, "s");
+    const m = raw.match(re);
+    if (m) {
+      // tenta desescapar; se falhar, usa o raw
+      try { result[field] = JSON.parse(`"${m[1]}"`); }
+      catch { result[field] = m[1].replace(/\\n/g, " ").replace(/\\t/g, " ").trim(); }
+    } else {
+      // fallback: captura até a próxima quebra de linha ou fim de linha JSON
+      const re2 = new RegExp(`"${field}"\\s*:\\s*"([^"\\n]{0,500})`);
+      const m2 = raw.match(re2);
+      result[field] = m2 ? m2[1].replace(/\\n/g, " ").trim() : "";
+    }
+  }
+
+  // Extrai campos de array de strings: "chave": ["a", "b", ...]
+  const arrayStringFields = [
+    "subcategorias", "diferenciais_tecnicos",
+    "beneficios_revendedor", "beneficios_cliente_final", "inferencias_ia",
+  ];
+
+  for (const field of arrayStringFields) {
+    const re = new RegExp(`"${field}"\\s*:\\s*(\\[[\\s\\S]*?\\])`, "m");
+    const m = raw.match(re);
+    if (m) {
+      try {
+        const fixed = repairControlChars(m[1]);
+        result[field] = JSON.parse(fixed);
+      } catch {
+        // extrai os itens entre aspas manualmente
+        const items: string[] = [];
+        const itemRe = /"((?:[^"\\]|\\.)*)"/g;
+        let im;
+        while ((im = itemRe.exec(m[1])) !== null) items.push(im[1]);
+        result[field] = items;
+      }
+    } else {
+      result[field] = [];
+    }
+  }
+
+  // Extrai objecoes_argumentos: array de objetos {objecao, argumento}
+  const objRe = /"objecoes_argumentos"\s*:\s*(\[[\s\S]*?\](?=\s*[,}]))/m;
+  const objM = raw.match(objRe);
+  if (objM) {
+    try {
+      const fixed = repairControlChars(objM[1]);
+      result["objecoes_argumentos"] = JSON.parse(fixed);
+    } catch {
+      // extrai pares {objecao, argumento} manualmente
+      const pairs: { objecao: string; argumento: string }[] = [];
+      const pairRe = /\{[^}]*"obje[cç][aã]o"\s*:\s*"([^"]*)"\s*,\s*"argumento"\s*:\s*"([^"]*)"/g;
+      let pm;
+      while ((pm = pairRe.exec(objM[1])) !== null) {
+        pairs.push({ objecao: pm[1], argumento: pm[2] });
+      }
+      result["objecoes_argumentos"] = pairs.length ? pairs : [];
+    }
+  } else {
+    result["objecoes_argumentos"] = [];
   }
 
   return result;
@@ -341,17 +405,11 @@ async function callAI(prompt: string, moduleKey?: string, systemRole?: string): 
     return withRetry(() => callAnthropic(prompt, model, config.anthropicKey));
   }
   // Gemini
-  void system; // system_instruction já é passado internamente em callGemini
+  void system;
   if (!config.geminiKey) throw new Error("Chave Gemini não configurada em Configurações.");
   return withRetry(() => callGemini(prompt, model, config.geminiKey));
 }
 
-/**
- * Alias público de callAI — usado por módulos externos (ex: generatePptx.ts, generateEmail.ts, generateSocialPosts.ts)
- * para chamar a LLM configurada sem depender de módulos internos.
- *
- * FIX: o parâmetro systemRole agora é repassado corretamente para callAI.
- */
 export async function callLLM(prompt: string, systemRole?: string): Promise<string> {
   return callAI(prompt, undefined, systemRole);
 }
@@ -520,7 +578,6 @@ export async function generatePodcastAudio(script: string): Promise<string> {
     return callGeminiTTS(config.geminiKey, inputText);
   }
 
-  // Fallback automático
   if (config.groqKey) { console.warn("[BriefFlow] TTS fallback → Groq"); return callGroqTTS(config.groqKey, inputText); }
   if (config.geminiKey) { console.warn("[BriefFlow] TTS fallback → Gemini TTS"); return callGeminiNativeAudioTTS(config.geminiKey, inputText); }
 
@@ -541,10 +598,12 @@ function buildBriefPrompt(nome: string, transcricao: string, customPrompt?: stri
       `  "beneficios_revendedor": [],\n  "beneficios_cliente_final": [],\n` +
       `  "objecoes_argumentos": [{"objecao": "", "argumento": ""}],\n` +
       `  "tom_comunicacao": "",\n  "observacoes": "",\n  "inferencias_ia": []\n}\n\n` +
-      `REGRAS:\n- Use SOMENTE informações da transcrição.\n` +
+      `REGRAS CRÍTICAS:\n` +
+      `- Use SOMENTE informações da transcrição.\n` +
       `- Se um campo não estiver claro, retorne [] ou "". NUNCA null.\n` +
-      `- Todos os valores de string devem ser texto puro, SEM quebras de linha ou aspas internas.\n` +
-      `- NÃO renomeie as chaves. Responda APENAS com JSON válido, SEM markdown.\n` +
+      `- NUNCA coloque quebras de linha dentro de valores de string. Use ponto e vírgula para separar ideias.\n` +
+      `- NUNCA use aspas duplas dentro de valores de string. Use aspas simples se necessário.\n` +
+      `- NÃO renomeie as chaves. Responda APENAS com JSON válido, SEM markdown, SEM texto antes ou depois.\n` +
       block
     );
   }
@@ -558,20 +617,36 @@ export async function inferBriefFromTranscriptAI(nome: string, transcricao: stri
   const config = loadAIConfig();
   const prompt = buildBriefPrompt(nome, transcricao, config.prompts["brief"]);
   const raw = await callAI(prompt, "brief");
+
+  // Camada 1: sanitize + reparo de chars de controle
   const cleaned = sanitizeJsonResponse(raw);
+
+  // Camada 2: tenta JSON.parse normal
   try {
     return JSON.stringify(normalizeBriefFields(JSON.parse(cleaned) as Record<string, unknown>));
-  } catch (err) {
-    // Última tentativa: extrai apenas o bloco JSON e tenta de novo
-    const fallbackMatch = cleaned.match(/\{[\s\S]*\}/);
-    if (fallbackMatch) {
-      try {
-        return JSON.stringify(normalizeBriefFields(JSON.parse(fallbackMatch[0]) as Record<string, unknown>));
-      } catch { /* ignora */ }
+  } catch { /* continua */ }
+
+  // Camada 3: extração manual campo a campo (prova de balas para respostas com aspas internas)
+  console.warn("[BriefFlow] JSON.parse falhou — usando extração manual de campos.");
+  try {
+    const manual = extractBriefFieldsManually(raw);
+    const hasContent = Object.values(manual).some((v) =>
+      typeof v === "string" ? v.length > 0 : Array.isArray(v) ? v.length > 0 : false
+    );
+    if (hasContent) {
+      return JSON.stringify(normalizeBriefFields(manual));
     }
-    console.error("[BriefFlow] Falha ao parsear JSON do brief:", (err as Error).message, "\nResposta raw:", raw.slice(0, 500));
-    throw new Error(`A IA retornou um JSON inválido. Tente novamente ou simplifique a transcrição.\nDetalhe: ${(err as Error).message}`);
-  }
+  } catch { /* continua */ }
+
+  // Camada 4: erro com log detalhado
+  console.error("[BriefFlow] Todas as camadas falharam. Raw (500 chars):", raw.slice(0, 500));
+  throw new Error(
+    `A IA retornou um formato que não conseguimos processar. Tente:\n` +
+    `1. Clicar em "Gerar Brief" novamente\n` +
+    `2. Encurtar a transcrição\n` +
+    `3. Trocar o modelo em ⚙️ Configurações\n\n` +
+    `Detalhe técnico: JSON inválido na posição ${raw.slice(0, 2000).length}`
+  );
 }
 
 
@@ -622,8 +697,6 @@ export async function generateAllMaterials(
     const prompt = PROMPTS[key](brief, customPrompt);
 
     try {
-      // FIX: passa o moduleKey (key) para que callAI use o modelo configurado
-      // para cada módulo individualmente, em vez de sempre usar o modelo global.
       results[key] = await callAI(prompt, key);
     } catch (err) {
       const msg = (err as Error).message;
