@@ -44,12 +44,111 @@ async function withRetry<T>(fn: () => Promise<T>, retries = 2): Promise<T> {
 }
 
 
-// ─── JSON sanitizer ───────────────────────────────────────────────────────────
-
+// ─── JSON sanitizer (robusto) ─────────────────────────────────────────────────
+//
+// Problema: a IA às vezes retorna JSON com:
+//   1. Blocos markdown  ```json ... ```
+//   2. Texto antes/depois do JSON
+//   3. Aspas literais não-escapadas dentro de strings  → "valor com "aspas" aqui"
+//   4. Quebras de linha literais dentro de strings     → "linha1\nlinha2" sem escape
+//   5. Caracteres de controle (tabs, etc.) não-escapados
+//
+// Esta função resolve os casos 1–5 de forma progressiva:
+//   Passo 1 – Remove fences markdown
+//   Passo 2 – Extrai o primeiro bloco JSON { ... } ou [ ... ]
+//   Passo 3 – Tenta JSON.parse() direto
+//   Passo 4 – Corrige strings multi-linha (quebras literais dentro de strings)
+//   Passo 5 – Corrige aspas internas não-escapadas dentro de valores de string
+//
 function sanitizeJsonResponse(raw: string): string {
+  // Passo 1: remove fences markdown
   let s = raw.trim();
-  s = s.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "");
-  return s.trim();
+  s = s.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
+
+  // Passo 2: extrai o bloco JSON principal (objeto ou array)
+  const objMatch = s.match(/\{[\s\S]*\}/);
+  const arrMatch = s.match(/\[[\s\S]*\]/);
+  if (objMatch) s = objMatch[0];
+  else if (arrMatch) s = arrMatch[0];
+
+  // Passo 3: tenta direto — se funcionar, retorna
+  try { JSON.parse(s); return s; } catch { /* segue para os passos de reparo */ }
+
+  // Passo 4: corrige quebras de linha literais dentro de strings JSON.
+  // Substitui \n literais (dentro de valores de string) por \\n escapado.
+  // Estratégia: percorre char a char controlando se está "dentro de uma string".
+  s = repairJsonStrings(s);
+
+  // Passo 5: segunda tentativa após reparo
+  try { JSON.parse(s); return s; } catch { /* retorna o que tiver — o catch em inferBriefFromTranscriptAI lida */ }
+
+  return s;
+}
+
+/**
+ * Percorre o JSON caractere a caractere e corrige:
+ *  - Quebras de linha literais dentro de strings  → \\n
+ *  - Tabs literais dentro de strings              → \\t
+ *  - Aspas duplas não-escapadas dentro de strings → \\"
+ *    (heurística: aspas que não são abertura/fechamento de chave ou valor)
+ */
+function repairJsonStrings(input: string): string {
+  let result = "";
+  let inString = false;
+  let i = 0;
+
+  while (i < input.length) {
+    const ch = input[i];
+
+    if (!inString) {
+      if (ch === '"') {
+        inString = true;
+        result += ch;
+        i++;
+        continue;
+      }
+      result += ch;
+      i++;
+      continue;
+    }
+
+    // Dentro de uma string JSON
+    if (ch === "\\") {
+      // sequência de escape já presente — copia os dois chars
+      result += ch;
+      i++;
+      if (i < input.length) { result += input[i]; i++; }
+      continue;
+    }
+
+    if (ch === '"') {
+      // Fecha a string — mas precisamos checar se é um fechamento real.
+      // Um fechamento real é seguido (ignorando espaços) por: , } ] : \n
+      // Se não for, é uma aspa interna mal-escapada.
+      let j = i + 1;
+      while (j < input.length && (input[j] === " " || input[j] === "\t")) j++;
+      const next = input[j] ?? "";
+      if (next === "," || next === "}" || next === "]" || next === ":" || next === "\n" || next === "\r" || j >= input.length) {
+        inString = false;
+        result += ch;
+        i++;
+      } else {
+        // Aspa interna não-escapada → escapa
+        result += '\\"';
+        i++;
+      }
+      continue;
+    }
+
+    if (ch === "\n") { result += "\\n"; i++; continue; }
+    if (ch === "\r") { result += "\\r"; i++; continue; }
+    if (ch === "\t") { result += "\\t"; i++; continue; }
+
+    result += ch;
+    i++;
+  }
+
+  return result;
 }
 
 
@@ -444,6 +543,7 @@ function buildBriefPrompt(nome: string, transcricao: string, customPrompt?: stri
       `  "tom_comunicacao": "",\n  "observacoes": "",\n  "inferencias_ia": []\n}\n\n` +
       `REGRAS:\n- Use SOMENTE informações da transcrição.\n` +
       `- Se um campo não estiver claro, retorne [] ou "". NUNCA null.\n` +
+      `- Todos os valores de string devem ser texto puro, SEM quebras de linha ou aspas internas.\n` +
       `- NÃO renomeie as chaves. Responda APENAS com JSON válido, SEM markdown.\n` +
       block
     );
@@ -461,7 +561,17 @@ export async function inferBriefFromTranscriptAI(nome: string, transcricao: stri
   const cleaned = sanitizeJsonResponse(raw);
   try {
     return JSON.stringify(normalizeBriefFields(JSON.parse(cleaned) as Record<string, unknown>));
-  } catch { return cleaned; }
+  } catch (err) {
+    // Última tentativa: extrai apenas o bloco JSON e tenta de novo
+    const fallbackMatch = cleaned.match(/\{[\s\S]*\}/);
+    if (fallbackMatch) {
+      try {
+        return JSON.stringify(normalizeBriefFields(JSON.parse(fallbackMatch[0]) as Record<string, unknown>));
+      } catch { /* ignora */ }
+    }
+    console.error("[BriefFlow] Falha ao parsear JSON do brief:", (err as Error).message, "\nResposta raw:", raw.slice(0, 500));
+    throw new Error(`A IA retornou um JSON inválido. Tente novamente ou simplifique a transcrição.\nDetalhe: ${(err as Error).message}`);
+  }
 }
 
 
