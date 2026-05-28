@@ -3,67 +3,91 @@ generate_assets.py — Pipeline principal de geração de assets de marketing.
 
 Fluxo:
   1. Lê .brief.json da pasta inbox/
-  2. Chama Gemini LLM para gerar: podcast, slides, ficha, emails
-  3. Converte slides em PPTX
-  4. (NOVO) Chama visual_ai.py para gerar versões visuais via:
-     - Gamma    → Slides visuais  (gratuito)
-     - Canva    → E-mails, Folhetos, Ficha (gratuito)
-     - Gemini Imagen / DALL-E / Pexels → Posts (gratuito/pago)
-  5. Salva manifest.json com todos os resultados
+  2. Chama Gemini LLM para gerar: podcast, slides, ficha, emails, folheto
+  3. Converte slides em PPTX (python-pptx)
+  4. Gera versões visuais via visual_ai.py:
+       - E-mails, Folheto, Ficha → HTML + PDF (Gemini formata + WeasyPrint renderiza)
+       - Posts → Gemini Imagen (fallback automático: Pexels)
+  5. Salva generation_manifest.json com todos os resultados
+
+Configurações relevantes no .env:
+  SKIP_VISUAL_AI=false            → true para pular toda etapa visual
+  VISUAL_AI_PROVIDER_POSTS=...    → gemini_imagen | pexels | skip
+  VISUAL_AI_PROVIDER_DOCS=...     → weasyprint | skip
 """
 
 from pathlib import Path
 import json
+import logging
 import os
 import random
 import time
 from typing import Optional, Tuple
 
-from dotenv import load_dotenv  # ← load_dotenv deve ser chamado ANTES de os.getenv()
+from dotenv import load_dotenv
 
-load_dotenv()  # ← CORRIGIDO: carregado no topo do módulo
+load_dotenv()  # sempre antes de qualquer os.getenv()
 
 from google import genai
 from google.genai import types
 from google.genai import errors as genai_errors
 
 from app.slides_ppt import slides_txt_to_ppt
-from app.visual_ai import run_visual_generation  # ← NOVO
+from app.visual_ai import run_visual_generation
+
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger(__name__)
 
 
-INBOX_DIR = Path("data/inbox")
+def log(message: str) -> None:
+    logger.info(message)
+
+
+# ---------------------------------------------------------------------------
+# Configurações via .env
+# ---------------------------------------------------------------------------
+INBOX_DIR    = Path("data/inbox")
 EXAMPLES_DIR = Path("data/examples")
-DEFAULT_TEMPLATE_PATH = Path("data/template slides/APRESENTAÇÃO - MODELO [todos copiar].pptx")  # ← typo corrigido
+DEFAULT_TEMPLATE_PATH = Path("data/template slides/APRESENTAÇÃO - MODELO [todos copiar].pptx")
 
-PRIMARY_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
-FALLBACK_MODELS = [
+PRIMARY_MODEL    = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+FALLBACK_MODELS  = [
     m.strip()
     for m in os.getenv("GEMINI_FALLBACK_MODELS", "gemini-2.5-flash").split(",")
     if m.strip()
 ]
 
-OFFLINE_MODE   = os.getenv("OFFLINE_MODE", "false").strip().lower() in {"1", "true", "yes", "on"}
-SKIP_EXISTING  = os.getenv("SKIP_EXISTING", "true").strip().lower() in {"1", "true", "yes", "on"}
-SKIP_VISUAL_AI = os.getenv("SKIP_VISUAL_AI", "false").strip().lower() in {"1", "true", "yes", "on"}
+OFFLINE_MODE    = os.getenv("OFFLINE_MODE",   "false").strip().lower() in {"1", "true", "yes", "on"}
+SKIP_EXISTING   = os.getenv("SKIP_EXISTING",  "true" ).strip().lower() in {"1", "true", "yes", "on"}
+SKIP_VISUAL_AI  = os.getenv("SKIP_VISUAL_AI", "false").strip().lower() in {"1", "true", "yes", "on"}
 
-DEFAULT_RETRIES = int(os.getenv("GEN_RETRIES", "5"))
-DEFAULT_TIMEOUT_BETWEEN_ASSETS = float(os.getenv("SLEEP_BETWEEN_ASSETS", "0.5"))
+# Controla qual provedor usa para gerar imagens de posts e PDFs de documentos
+# Esses valores são repassados para visual_ai.py via variáveis de ambiente
+VISUAL_AI_PROVIDER_POSTS = os.getenv("VISUAL_AI_PROVIDER_POSTS", "gemini_imagen").strip().lower()
+VISUAL_AI_PROVIDER_DOCS  = os.getenv("VISUAL_AI_PROVIDER_DOCS",  "weasyprint"   ).strip().lower()
+
+DEFAULT_RETRIES                  = int(  os.getenv("GEN_RETRIES",          "5"  ))
+DEFAULT_TIMEOUT_BETWEEN_ASSETS   = float(os.getenv("SLEEP_BETWEEN_ASSETS", "0.5"))
 
 
-def log(message: str) -> None:
-    print(message)
-
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 def get_client() -> Optional[genai.Client]:
-    # load_dotenv() já foi chamado no topo — não precisa chamar novamente
     if OFFLINE_MODE:
-        log("[INFO] OFFLINE_MODE ativo. A API não será chamada.")
+        log("OFFLINE_MODE ativo. A API não será chamada.")
         return None
-
     api_key = os.getenv("GEMINI_API_KEY", "").strip()
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY não definido no .env")
-
     try:
         return genai.Client(api_key=api_key)
     except Exception as e:
@@ -84,10 +108,11 @@ def write_text_file(path: Path, content: str) -> None:
 
 def load_example_text(asset_key: str) -> str:
     example_map = {
-        "podcast": EXAMPLES_DIR / "podcast_revendedores.txt",
-        "slides":  EXAMPLES_DIR / "slides_capacitacao_10.txt",
-        "ficha":   EXAMPLES_DIR / "ficha_tecnica_vendedores.txt",
-        "emails":  EXAMPLES_DIR / "emails_marketing_revendedores.txt",
+        "podcast":  EXAMPLES_DIR / "podcast_revendedores.txt",
+        "slides":   EXAMPLES_DIR / "slides_capacitacao_10.txt",
+        "ficha":    EXAMPLES_DIR / "ficha_tecnica_vendedores.txt",
+        "emails":   EXAMPLES_DIR / "emails_marketing_revendedores.txt",
+        "folheto":  EXAMPLES_DIR / "folheto_promocional.txt",
     }
     example_file = example_map.get(asset_key)
     if not example_file or not example_file.exists():
@@ -106,6 +131,10 @@ def build_models_list() -> list[str]:
             seen.add(model)
     return ordered
 
+
+# ---------------------------------------------------------------------------
+# LLM
+# ---------------------------------------------------------------------------
 
 def call_model(
     client: Optional[genai.Client],
@@ -128,7 +157,7 @@ def call_model(
         raise RuntimeError(f"Nenhum modelo configurado para asset '{asset_key}'.")
 
     for model in models:
-        log(f"[INFO] Chamando modelo para '{asset_key}': {model}")
+        log(f"Chamando modelo para '{asset_key}': {model}")
 
         for attempt in range(max_retries):
             try:
@@ -139,34 +168,39 @@ def call_model(
                 )
                 text = (response.text or "").strip()
                 if not text:
-                    raise RuntimeError(f"Resposta vazia do modelo {model} para asset '{asset_key}'")
+                    raise RuntimeError(
+                        f"Resposta vazia do modelo {model} para asset '{asset_key}'"
+                    )
                 return text, model
 
             except genai_errors.ServerError as e:
                 last_error = e
-                log(f"[ERRO] ServerError no asset '{asset_key}', modelo '{model}', tentativa {attempt + 1}/{max_retries}: {e}")
-                wait_seconds = (2 ** attempt) + random.uniform(0.2, 1.2)
+                wait = (2 ** attempt) + random.uniform(0.2, 1.2)
+                log(f"ServerError '{asset_key}' modelo '{model}' tentativa {attempt + 1}/{max_retries}: {e}")
                 if attempt < max_retries - 1:
-                    log(f"[INFO] Aguardando {wait_seconds:.1f}s para retry...")
-                    time.sleep(wait_seconds)
+                    log(f"Aguardando {wait:.1f}s para retry...")
+                    time.sleep(wait)
                 else:
-                    log(f"[WARN] Modelo '{model}' falhou após {max_retries} tentativas.")
+                    log(f"Modelo '{model}' falhou após {max_retries} tentativas.")
 
             except genai_errors.APIError as e:
                 last_error = e
-                log(f"[ERRO] APIError no asset '{asset_key}', modelo '{model}': {e}")
+                log(f"APIError '{asset_key}' modelo '{model}': {e}")
                 break
 
             except Exception as e:
                 last_error = e
-                log(f"[ERRO] Falha inesperada no asset '{asset_key}', modelo '{model}': {e}")
+                log(f"Falha inesperada '{asset_key}' modelo '{model}': {e}")
                 break
 
-    # CORRIGIDO: garante que sempre lança uma Exception válida
     raise last_error if isinstance(last_error, BaseException) else RuntimeError(
         f"Falha ao gerar asset '{asset_key}' com todos os modelos."
     )
 
+
+# ---------------------------------------------------------------------------
+# Prompts
+# ---------------------------------------------------------------------------
 
 def build_podcast_prompt(brief: dict) -> str:
     return f"""
@@ -266,7 +300,6 @@ Regras:
 
 
 def build_folheto_prompt(brief: dict) -> str:
-    """NOVO: prompt para geração de folheto."""
     return f"""
 Contexto estruturado (JSON)
 ---------------------------
@@ -289,6 +322,10 @@ Regras:
 """.strip()
 
 
+# ---------------------------------------------------------------------------
+# PPTX
+# ---------------------------------------------------------------------------
+
 def get_images_dir(out_dir: Path) -> Path:
     images_dir = out_dir / "images"
     images_dir.mkdir(parents=True, exist_ok=True)
@@ -305,7 +342,7 @@ def generate_one_asset(
     manifest: dict,
 ) -> None:
     if SKIP_EXISTING and output_path.exists():
-        log(f"[SKIP] Arquivo já existe: {output_path}")
+        log(f"[SKIP] Já existe: {output_path.name}")
         manifest["assets"][asset_key] = {
             "status": "skipped_existing",
             "output_file": str(output_path),
@@ -326,7 +363,7 @@ def generate_one_asset(
         "source": source_used,
         "temperature": temperature,
     }
-    log(f"[OK] Asset '{asset_key}' gerado com fonte/modelo: {source_used}")
+    log(f"[OK] Asset '{asset_key}' gerado via: {source_used}")
 
 
 def maybe_generate_pptx(
@@ -341,21 +378,21 @@ def maybe_generate_pptx(
     if not slides_txt.exists():
         manifest["assets"]["slides_pptx"] = {
             "status": "skipped_missing_source",
-            "reason": f"Arquivo fonte não encontrado: {slides_txt}",
+            "reason": str(slides_txt),
         }
-        log(f"[WARN] TXT de slides não encontrado, PPTX não será gerado: {slides_txt}")
+        log(f"[WARN] TXT de slides não encontrado, PPTX pulado.")
         return
 
     if not template_path.exists():
         manifest["assets"]["slides_pptx"] = {
             "status": "error",
-            "error": f"Template PPTX não encontrado: {template_path}",
+            "error": f"Template não encontrado: {template_path}",
         }
         log(f"[ERRO] Template PPTX não encontrado: {template_path}")
         return
 
     if SKIP_EXISTING and pptx_path.exists():
-        log(f"[SKIP] PPTX já existe: {pptx_path}")
+        log(f"[SKIP] PPTX já existe: {pptx_path.name}")
         manifest["assets"]["slides_pptx"] = {
             "status": "skipped_existing",
             "output_file": str(pptx_path),
@@ -363,22 +400,32 @@ def maybe_generate_pptx(
         return
 
     try:
-        slides_txt_to_ppt(slides_txt, template_path=template_path, images_dir=images_dir)
+        slides_txt_to_ppt(
+            slides_txt,
+            template_path=template_path,
+            images_dir=images_dir,
+        )
         manifest["assets"]["slides_pptx"] = {
             "status": "generated",
             "output_file": str(pptx_path),
         }
-        log(f"[OK] PPTX gerado: {pptx_path}")
+        log(f"[OK] PPTX gerado: {pptx_path.name}")
     except Exception as e:
         manifest["assets"]["slides_pptx"] = {"status": "error", "error": str(e)}
-        log(f"[ERRO] Falha ao converter slides para PPTX: {e}")
+        log(f"[ERRO] Falha ao gerar PPTX: {e}")
 
+
+# ---------------------------------------------------------------------------
+# Orquestrador principal
+# ---------------------------------------------------------------------------
 
 def generate_assets_for_brief(brief_path: Path) -> None:
     brief     = load_brief(brief_path)
     base_name = brief_path.stem.replace(".brief", "")
     out_dir   = brief_path.parent / f"{base_name}_assets"
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    log(f"=== Brief: {brief_path.name} | Output: {out_dir} ===")
 
     try:
         client = get_client()
@@ -391,16 +438,18 @@ def generate_assets_for_brief(brief_path: Path) -> None:
     images_dir = get_images_dir(out_dir)
 
     manifest = {
-        "brief_file":      str(brief_path),
-        "output_dir":      str(out_dir),
-        "offline_mode":    OFFLINE_MODE,
-        "skip_visual_ai":  SKIP_VISUAL_AI,
-        "primary_model":   PRIMARY_MODEL,
-        "fallback_models": FALLBACK_MODELS,
-        "template_path":   str(DEFAULT_TEMPLATE_PATH),
-        "images_dir":      str(images_dir),
-        "assets":          {},
-        "visual_ai":       {},
+        "brief_file":                str(brief_path),
+        "output_dir":                str(out_dir),
+        "offline_mode":              OFFLINE_MODE,
+        "skip_visual_ai":            SKIP_VISUAL_AI,
+        "visual_ai_provider_posts":  VISUAL_AI_PROVIDER_POSTS,
+        "visual_ai_provider_docs":   VISUAL_AI_PROVIDER_DOCS,
+        "primary_model":             PRIMARY_MODEL,
+        "fallback_models":           FALLBACK_MODELS,
+        "template_path":             str(DEFAULT_TEMPLATE_PATH),
+        "images_dir":                str(images_dir),
+        "assets":                    {},
+        "visual_ai":                 {},
     }
 
     # Caminhos de output de texto
@@ -408,9 +457,13 @@ def generate_assets_for_brief(brief_path: Path) -> None:
     slides_txt  = out_dir / "slides_capacitacao_10.txt"
     ficha_txt   = out_dir / "ficha_tecnica_vendedores.txt"
     emails_txt  = out_dir / "emails_marketing_revendedores.txt"
-    folheto_txt = out_dir / "folheto_promocional.txt"  # NOVO
+    folheto_txt = out_dir / "folheto_promocional.txt"
 
-    # --- Geração de texto via LLM ---
+    # ----------------------------------------------------------------
+    # Etapa 1: Geração de texto via LLM
+    # ----------------------------------------------------------------
+    log("--- Etapa 1/3: Geração de texto (Gemini) ---")
+
     generate_one_asset(
         client=client, asset_key="podcast",
         prompt=build_podcast_prompt(brief),
@@ -445,16 +498,23 @@ def generate_assets_for_brief(brief_path: Path) -> None:
         output_path=folheto_txt, temperature=0.6, manifest=manifest,
     )
 
-    # --- PPTX ---
+    # ----------------------------------------------------------------
+    # Etapa 2: Geração de PPTX
+    # ----------------------------------------------------------------
+    log("--- Etapa 2/3: Conversão de slides para PPTX ---")
     maybe_generate_pptx(
         slides_txt, manifest,
         template_path=DEFAULT_TEMPLATE_PATH,
         images_dir=images_dir,
     )
 
-    # --- NOVO: Geração visual via IA ---
-    if not SKIP_VISUAL_AI:
-        log("[INFO] Iniciando etapa de geração visual (visual_ai)...")
+    # ----------------------------------------------------------------
+    # Etapa 3: Geração visual (HTML/PDF + imagens de posts)
+    # ----------------------------------------------------------------
+    if SKIP_VISUAL_AI:
+        log("--- Etapa 3/3: SKIP_VISUAL_AI=true, etapa visual ignorada. ---")
+    else:
+        log(f"--- Etapa 3/3: Geração visual | docs={VISUAL_AI_PROVIDER_DOCS} | posts={VISUAL_AI_PROVIDER_POSTS} ---")
         try:
             visual_results = run_visual_generation(
                 brief=brief,
@@ -466,17 +526,18 @@ def generate_assets_for_brief(brief_path: Path) -> None:
                 post_text=emails_txt.read_text(encoding="utf-8") if emails_txt.exists() else None,
             )
             manifest["visual_ai"] = visual_results
-            log(f"[OK] Geração visual concluída: {visual_results}")
+            gerados = [k for k, v in visual_results.items() if v]
+            log(f"[OK] Visual AI concluída. Arquivos gerados: {gerados}")
         except Exception as e:
             manifest["visual_ai"]["error"] = str(e)
-            log(f"[ERRO] Falha na etapa visual_ai: {e}")
-    else:
-        log("[INFO] SKIP_VISUAL_AI=true, etapa visual ignorada.")
+            log(f"[ERRO] Falha na etapa visual: {e}")
 
-    # --- Manifest ---
+    # ----------------------------------------------------------------
+    # Manifest final
+    # ----------------------------------------------------------------
     manifest_path = out_dir / "generation_manifest.json"
     write_text_file(manifest_path, json.dumps(manifest, ensure_ascii=False, indent=2))
-    log(f"[OK] Assets gerados em: {out_dir}")
+    log(f"=== Concluído. Todos os assets em: {out_dir} ===")
 
 
 def generate_assets_for_inbox() -> None:
@@ -486,15 +547,15 @@ def generate_assets_for_inbox() -> None:
 
     briefs = sorted(INBOX_DIR.glob("*.brief.json"))
     if not briefs:
-        log(f"[WARN] Nenhum arquivo .brief.json encontrado em {INBOX_DIR}")
+        log(f"[WARN] Nenhum .brief.json encontrado em {INBOX_DIR}")
         return
 
     for brief_path in briefs:
-        log(f"[INFO] Processando brief: {brief_path}")
+        log(f"Processando brief: {brief_path.name}")
         try:
             generate_assets_for_brief(brief_path)
         except Exception as e:
-            log(f"[ERRO] Falha ao processar {brief_path}: {e}")
+            log(f"[ERRO] Falha ao processar {brief_path.name}: {e}")
 
 
 if __name__ == "__main__":

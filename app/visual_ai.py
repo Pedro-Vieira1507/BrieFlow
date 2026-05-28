@@ -2,34 +2,29 @@
 visual_ai.py — Geração visual do pipeline BriefFlow.
 
 Funciona 100% com as chaves gratuitas já disponíveis:
-  - GEMINI_API_KEY  → Já usado no pipeline (Google AI Studio — gratuito)
-  - PEXELS_API_KEY  → Imagens de stock gratuitas (https://www.pexels.com/api)
+  GEMINI_API_KEY  → Google AI Studio (gratuito) — https://aistudio.google.com/app/apikey
+  PEXELS_API_KEY  → Pexels stock gratuito       — https://www.pexels.com/api
 
-O que cada função faz:
-  - Slides     → Gerado localmente via python-pptx (template existente do projeto)
-  - E-mails    → HTML estático gerado pelo Gemini + renderizado em PDF com WeasyPrint
-  - Folhetos   → HTML estático gerado pelo Gemini + renderizado em PDF com WeasyPrint
-  - Ficha Téc. → HTML estático gerado pelo Gemini + renderizado em PDF com WeasyPrint
-  - Posts      → Gemini Imagen (gratuito) com fallback automático para Pexels
+O que cada função gera:
+  E-mails    → HTML formatado + PDF (via WeasyPrint, local)
+  Folheto    → HTML A4 + PDF
+  Ficha Téc. → HTML A4 + PDF
+  Posts      → PNG via Gemini Imagen OU JPG via Pexels (fallback automático)
 
-NOTA sobre Gamma e Canva:
-  - Gamma não possui API pública disponível (apenas plano Enterprise / waitlist).
-  - Canva API requer conta Enterprise. Nenhuma delas tem plano gratuito via API.
-  - Por isso, usamos soluções locais equivalentes que não precisam de chave.
+Configurações no .env que controlam esta etapa:
+  SKIP_VISUAL_AI=false            → true para pular tudo
+  VISUAL_AI_PROVIDER_POSTS=...    → gemini_imagen | pexels | skip
+  VISUAL_AI_PROVIDER_DOCS=...     → weasyprint | skip
 
-Dependencias novas (adicionar ao requirements.txt):
-  weasyprint>=61.0
-  # python-pptx já está no projeto
-  # google-genai já está no projeto
-  # requests já está no projeto
+Dependencias novas:
+  pip install weasyprint
+  # google-genai e requests já estão no projeto
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import os
-import textwrap
 from pathlib import Path
 from typing import Optional
 
@@ -43,59 +38,61 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Configurações via .env
 # ---------------------------------------------------------------------------
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
-GEMINI_MODEL   = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
-PEXELS_API_KEY = os.getenv("PEXELS_API_KEY", "").strip()
-
-PROVIDER_POSTS = os.getenv("VISUAL_AI_PROVIDER_POSTS", "gemini_imagen").strip().lower()
-# gemini_imagen → tenta Gemini Imagen, fallback Pexels
-# pexels        → usa Pexels direto (sem geração de imagem)
-# skip          → não gera imagem de post
+GEMINI_API_KEY           = os.getenv("GEMINI_API_KEY",           "").strip()
+GEMINI_MODEL             = os.getenv("GEMINI_MODEL",             "gemini-2.0-flash")
+PEXELS_API_KEY           = os.getenv("PEXELS_API_KEY",           "").strip()
+PROVIDER_POSTS           = os.getenv("VISUAL_AI_PROVIDER_POSTS", "gemini_imagen").strip().lower()
+PROVIDER_DOCS            = os.getenv("VISUAL_AI_PROVIDER_DOCS",  "weasyprint"   ).strip().lower()
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Helpers internos
 # ---------------------------------------------------------------------------
 
 def _save_bytes(path: Path, data: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(data)
-    logger.info("[visual_ai] Salvo: %s", path)
+    logger.info("[visual_ai] Salvo: %s", path.name)
 
 
 def _save_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text.strip() + "\n", encoding="utf-8")
-    logger.info("[visual_ai] Salvo: %s", path)
+    logger.info("[visual_ai] Salvo: %s", path.name)
 
 
 def _gemini_client():
-    """Retorna cliente Gemini reutilizando a chave já configurada no pipeline."""
     if not GEMINI_API_KEY:
         raise RuntimeError(
-            "GEMINI_API_KEY não definido. Configure em https://aistudio.google.com/app/apikey"
+            "GEMINI_API_KEY não definido. Obtenha gratuitamente em: "
+            "https://aistudio.google.com/app/apikey"
         )
     from google import genai
     return genai.Client(api_key=GEMINI_API_KEY)
 
 
 # ---------------------------------------------------------------------------
-# HTML → PDF via WeasyPrint (geração local, sem API)
+# HTML → PDF via WeasyPrint (local, sem API, sem custo)
 # ---------------------------------------------------------------------------
 
 def _html_to_pdf(html: str, output_path: Path) -> Optional[Path]:
     """
-    Converte HTML em PDF usando WeasyPrint (local, sem API, sem custo).
-    Retorna o caminho do PDF gerado ou None em caso de erro.
+    Renderiza HTML como PDF localmente usando WeasyPrint.
+    VISUAL_AI_PROVIDER_DOCS=skip pula esta etapa.
     """
+    if PROVIDER_DOCS == "skip":
+        logger.info("[visual_ai] VISUAL_AI_PROVIDER_DOCS=skip, PDF ignorado.")
+        return None
+
     try:
         from weasyprint import HTML as WeasyprintHTML
         WeasyprintHTML(string=html).write_pdf(str(output_path))
-        logger.info("[visual_ai] PDF gerado: %s", output_path)
+        logger.info("[visual_ai] PDF gerado: %s", output_path.name)
         return output_path
     except ImportError:
         logger.error(
-            "[visual_ai] WeasyPrint não instalado. Execute: pip install weasyprint"
+            "[visual_ai] WeasyPrint não instalado. "
+            "Execute: pip install weasyprint"
         )
     except Exception as e:
         logger.error("[visual_ai] Falha ao gerar PDF '%s': %s", output_path.name, e)
@@ -103,67 +100,69 @@ def _html_to_pdf(html: str, output_path: Path) -> Optional[Path]:
 
 
 # ---------------------------------------------------------------------------
-# PROMPT AUXILIAR: pede ao Gemini para gerar HTML formatado
+# Gemini formata texto → HTML bonito
 # ---------------------------------------------------------------------------
 
-def _generate_html_via_gemini(content_text: str, asset_type: str, campaign_name: str) -> Optional[str]:
-    """
-    Usa o Gemini (chave já disponível) para converter o texto do asset
-    em um HTML bonito e formatado, pronto para impressão.
-    """
-    style_map = {
-        "email": """
-            body { font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 32px; color: #222; }
-            h1 { color: #005B96; font-size: 22px; border-bottom: 2px solid #005B96; padding-bottom: 8px; }
-            h2 { color: #005B96; font-size: 16px; margin-top: 24px; }
-            p { line-height: 1.7; font-size: 14px; }
-            .cta { background: #005B96; color: white; padding: 12px 24px; border-radius: 4px; display: inline-block; margin-top: 16px; text-decoration: none; font-weight: bold; }
-            .footer { margin-top: 32px; font-size: 11px; color: #888; border-top: 1px solid #ddd; padding-top: 12px; }
-        """,
-        "folheto": """
-            @page { size: A4; margin: 15mm; }
-            body { font-family: Arial, sans-serif; color: #222; font-size: 13px; }
-            h1 { background: #005B96; color: white; padding: 12px 16px; font-size: 20px; margin: 0 0 16px; }
-            h2 { color: #005B96; font-size: 15px; margin-top: 20px; border-left: 4px solid #005B96; padding-left: 8px; }
-            ul { padding-left: 20px; }
-            li { line-height: 1.8; }
-            .cta-box { background: #f0f7ff; border: 2px solid #005B96; padding: 16px; margin-top: 24px; border-radius: 4px; }
-        """,
-        "ficha": """
-            @page { size: A4; margin: 15mm; }
-            body { font-family: Arial, sans-serif; color: #222; font-size: 12px; }
-            h1 { color: #005B96; font-size: 18px; border-bottom: 3px solid #005B96; padding-bottom: 6px; }
-            h2 { background: #e8f4fd; color: #005B96; padding: 6px 10px; font-size: 13px; margin-top: 16px; }
-            ul { padding-left: 18px; }
-            li { line-height: 1.7; }
-            table { width: 100%; border-collapse: collapse; margin-top: 12px; }
-            th { background: #005B96; color: white; padding: 8px; text-align: left; }
-            td { border: 1px solid #ddd; padding: 6px 8px; }
-        """,
-    }
+_CSS_MAP = {
+    "email": """
+        body{font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:32px;color:#222}
+        h1{color:#005B96;font-size:22px;border-bottom:2px solid #005B96;padding-bottom:8px}
+        h2{color:#005B96;font-size:16px;margin-top:24px}
+        p{line-height:1.7;font-size:14px}
+        .cta{background:#005B96;color:#fff;padding:12px 24px;border-radius:4px;
+             display:inline-block;margin-top:16px;text-decoration:none;font-weight:bold}
+        .footer{margin-top:32px;font-size:11px;color:#888;border-top:1px solid #ddd;padding-top:12px}
+    """,
+    "folheto": """
+        @page{size:A4;margin:15mm}
+        body{font-family:Arial,sans-serif;color:#222;font-size:13px}
+        h1{background:#005B96;color:#fff;padding:12px 16px;font-size:20px;margin:0 0 16px}
+        h2{color:#005B96;font-size:15px;margin-top:20px;border-left:4px solid #005B96;padding-left:8px}
+        ul{padding-left:20px} li{line-height:1.8}
+        .cta-box{background:#f0f7ff;border:2px solid #005B96;padding:16px;margin-top:24px;border-radius:4px}
+    """,
+    "ficha": """
+        @page{size:A4;margin:15mm}
+        body{font-family:Arial,sans-serif;color:#222;font-size:12px}
+        h1{color:#005B96;font-size:18px;border-bottom:3px solid #005B96;padding-bottom:6px}
+        h2{background:#e8f4fd;color:#005B96;padding:6px 10px;font-size:13px;margin-top:16px}
+        ul{padding-left:18px} li{line-height:1.7}
+        table{width:100%;border-collapse:collapse;margin-top:12px}
+        th{background:#005B96;color:#fff;padding:8px;text-align:left}
+        td{border:1px solid #ddd;padding:6px 8px}
+    """,
+}
 
-    css = style_map.get(asset_type, style_map["folheto"])
-    asset_label = {"email": "E-mail de Marketing", "folheto": "Folheto Promocional", "ficha": "Ficha Técnica"}.get(asset_type, asset_type)
+_LABEL_MAP = {
+    "email":   "E-mail de Marketing",
+    "folheto": "Folheto Promocional",
+    "ficha":   "Ficha Técnica",
+}
 
-    prompt = f"""Você é um designer HTML. Converta o texto abaixo em um HTML completo e bem formatado para impressão.
 
-Tipo: {asset_label}
-Campanha: {campaign_name}
+def _generate_html_via_gemini(
+    content_text: str, asset_type: str, campaign_name: str
+) -> Optional[str]:
+    """Pede ao Gemini para formatar o texto já gerado como HTML bonito."""
+    if PROVIDER_DOCS == "skip":
+        logger.info("[visual_ai] VISUAL_AI_PROVIDER_DOCS=skip, HTML ignorado.")
+        return None
 
-Texto de conteúdo:
----
-{content_text}
----
+    css   = _CSS_MAP.get(asset_type, _CSS_MAP["folheto"])
+    label = _LABEL_MAP.get(asset_type, asset_type)
 
-Regras:
-- Retorne APENAS o código HTML, sem explicações, sem markdown, sem ```html.
-- Use esta CSS embutida exatamente:
-<style>{css}</style>
-- Estruture semanticamente com <h1>, <h2>, <p>, <ul>, <li>.
-- Adicione um rodapé sutil com o nome da campanha.
-- Use cores corporativas azul #005B96.
-- O HTML deve ser autocontido (nenhum arquivo externo).
-"""
+    prompt = (
+        f"Você é um designer HTML. Converta o texto abaixo em HTML completo "
+        f"para impressão.\n"
+        f"Tipo: {label}\nCampanha: {campaign_name}\n\n"
+        f"Texto:\n---\n{content_text}\n---\n\n"
+        f"Regras:\n"
+        f"- Retorne APENAS o código HTML, sem explicações nem ```html.\n"
+        f"- Use esta CSS embutida:\n<style>{css}</style>\n"
+        f"- Estruture com <h1>, <h2>, <p>, <ul>, <li>.\n"
+        f"- Adicione rodapé com o nome da campanha.\n"
+        f"- HTML autocontido, sem arquivos externos."
+    )
 
     try:
         from google.genai import types as gtypes
@@ -174,120 +173,85 @@ Regras:
             config=gtypes.GenerateContentConfig(temperature=0.3),
         )
         html = (response.text or "").strip()
-        # Remove possível bloco markdown que o modelo possa retornar
+        # Remove bloco markdown caso o modelo retorne ```html ... ```
         if html.startswith("```"):
             html = html.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
         return html
     except Exception as e:
-        logger.error("[visual_ai] Gemini falhou ao gerar HTML para '%s': %s", asset_type, e)
+        logger.error("[visual_ai] Gemini falhou ao formatar HTML '%s': %s", asset_type, e)
         return None
 
 
 # ---------------------------------------------------------------------------
-# E-MAILS → HTML + PDF (Gemini gera HTML, WeasyPrint renderiza PDF)
+# Geradores de documentos (email / folheto / ficha)
 # ---------------------------------------------------------------------------
+
+def _generate_doc_visual(
+    content_text: str,
+    campaign_name: str,
+    asset_type: str,
+    html_filename: str,
+    pdf_filename: str,
+    out_dir: Path,
+) -> dict:
+    results: dict = {}
+    logger.info("[visual_ai] Gerando %s visual...", _LABEL_MAP.get(asset_type, asset_type))
+
+    html = _generate_html_via_gemini(content_text, asset_type, campaign_name)
+    if not html:
+        return results
+
+    html_path = out_dir / html_filename
+    _save_text(html_path, html)
+    results[f"{asset_type}_html"] = str(html_path)
+
+    pdf_path = out_dir / pdf_filename
+    pdf = _html_to_pdf(html, pdf_path)
+    if pdf:
+        results[f"{asset_type}_pdf"] = str(pdf)
+
+    return results
+
 
 def generate_email_visual(content_text: str, campaign_name: str, out_dir: Path) -> dict:
-    """
-    Gera e-mail em HTML formatado (para disparar) e PDF (para impressão / aprovação).
-    Usa Gemini para formatar + WeasyPrint para renderizar. Sem API externa paga.
-    """
-    results: dict = {}
-    logger.info("[visual_ai] Gerando e-mail visual (Gemini + WeasyPrint)...")
+    return _generate_doc_visual(
+        content_text, campaign_name, "email",
+        "email_formatado.html", "email_formatado.pdf", out_dir,
+    )
 
-    html = _generate_html_via_gemini(content_text, "email", campaign_name)
-    if not html:
-        logger.warning("[visual_ai] HTML de e-mail não foi gerado.")
-        return results
-
-    html_path = out_dir / "email_formatado.html"
-    _save_text(html_path, html)
-    results["email_html"] = str(html_path)
-
-    pdf_path = out_dir / "email_formatado.pdf"
-    pdf = _html_to_pdf(html, pdf_path)
-    if pdf:
-        results["email_pdf"] = str(pdf)
-
-    return results
-
-
-# ---------------------------------------------------------------------------
-# FOLHETO → HTML + PDF
-# ---------------------------------------------------------------------------
 
 def generate_folheto_visual(content_text: str, campaign_name: str, out_dir: Path) -> dict:
-    """Gera folheto A4 em HTML + PDF via Gemini + WeasyPrint."""
-    results: dict = {}
-    logger.info("[visual_ai] Gerando folheto visual (Gemini + WeasyPrint)...")
+    return _generate_doc_visual(
+        content_text, campaign_name, "folheto",
+        "folheto_formatado.html", "folheto_formatado.pdf", out_dir,
+    )
 
-    html = _generate_html_via_gemini(content_text, "folheto", campaign_name)
-    if not html:
-        logger.warning("[visual_ai] HTML de folheto não foi gerado.")
-        return results
-
-    html_path = out_dir / "folheto_formatado.html"
-    _save_text(html_path, html)
-    results["folheto_html"] = str(html_path)
-
-    pdf_path = out_dir / "folheto_formatado.pdf"
-    pdf = _html_to_pdf(html, pdf_path)
-    if pdf:
-        results["folheto_pdf"] = str(pdf)
-
-    return results
-
-
-# ---------------------------------------------------------------------------
-# FICHA TÉCNICA → HTML + PDF
-# ---------------------------------------------------------------------------
 
 def generate_ficha_visual(content_text: str, campaign_name: str, out_dir: Path) -> dict:
-    """Gera ficha técnica formatada em HTML + PDF via Gemini + WeasyPrint."""
-    results: dict = {}
-    logger.info("[visual_ai] Gerando ficha técnica visual (Gemini + WeasyPrint)...")
-
-    html = _generate_html_via_gemini(content_text, "ficha", campaign_name)
-    if not html:
-        logger.warning("[visual_ai] HTML de ficha técnica não foi gerado.")
-        return results
-
-    html_path = out_dir / "ficha_formatada.html"
-    _save_text(html_path, html)
-    results["ficha_html"] = str(html_path)
-
-    pdf_path = out_dir / "ficha_formatada.pdf"
-    pdf = _html_to_pdf(html, pdf_path)
-    if pdf:
-        results["ficha_pdf"] = str(pdf)
-
-    return results
+    return _generate_doc_visual(
+        content_text, campaign_name, "ficha",
+        "ficha_formatada.html", "ficha_formatada.pdf", out_dir,
+    )
 
 
 # ---------------------------------------------------------------------------
-# POSTS → Gemini Imagen (gratuito) com fallback Pexels (gratuito)
+# Gerador de imagens para posts
 # ---------------------------------------------------------------------------
 
-def generate_post_image_gemini(content_text: str, asset_key: str, out_dir: Path) -> Optional[Path]:
-    """
-    Gera imagem para post usando Gemini Imagen.
-    Gratuito via Google AI Studio até a cota mensal.
-    Modelo: imagen-3.0-generate-002
-    """
+def _generate_post_gemini_imagen(content_text: str, asset_key: str, out_dir: Path) -> Optional[Path]:
+    """Gera imagem via Gemini Imagen (gratuito via Google AI Studio)."""
     if not GEMINI_API_KEY:
-        logger.warning("[visual_ai] GEMINI_API_KEY não definido. Imagem não será gerada.")
+        logger.warning("[visual_ai] GEMINI_API_KEY não definido.")
         return None
-
     try:
         from google import genai
         from google.genai import types as gtypes
-
         client = genai.Client(api_key=GEMINI_API_KEY)
         image_prompt = (
             f"Imagem profissional para post de marketing B2B corporativo. "
-            f"Tema: {content_text[:250].replace(chr(10), ' ')}. "
-            f"Estilo: fotografia editorial limpa, cores azul corporativo e branco, "
-            f"ambiente laboratorial ou técnico. Sem texto na imagem."
+            f"Tema: {content_text[:200].replace(chr(10), ' ')}. "
+            f"Estilo: fotografia editorial, cores azul corporativo e branco, "
+            f"ambiente laboratorial. Sem texto."
         )
         logger.info("[visual_ai] Gerando imagem via Gemini Imagen para '%s'...", asset_key)
         response = client.models.generate_images(
@@ -300,80 +264,78 @@ def generate_post_image_gemini(content_text: str, asset_key: str, out_dir: Path)
             output_path = out_dir / f"{asset_key}_post.png"
             _save_bytes(output_path, img_bytes)
             return output_path
-        logger.warning("[visual_ai] Gemini Imagen: nenhuma imagem retornada para '%s'.", asset_key)
+        logger.warning("[visual_ai] Gemini Imagen: nenhuma imagem retornada.")
     except Exception as e:
-        logger.error("[visual_ai] Gemini Imagen erro ('%s'): %s", asset_key, e)
+        logger.error("[visual_ai] Gemini Imagen erro: %s", e)
     return None
 
 
-def fetch_pexels_image(query: str, asset_key: str, out_dir: Path) -> Optional[Path]:
-    """
-    Busca imagem relevante no Pexels (100% gratuito).
-    Usado como fallback quando Gemini Imagen não está disponível.
-    Registro gratuito: https://www.pexels.com/api
-    """
+def _fetch_pexels_image(query: str, asset_key: str, out_dir: Path) -> Optional[Path]:
+    """Busca imagem no Pexels (100%% gratuito). Usado como fallback."""
     if not PEXELS_API_KEY:
         logger.warning(
             "[visual_ai] PEXELS_API_KEY não definido. "
             "Registre-se gratuitamente em https://www.pexels.com/api"
         )
         return None
-
     try:
-        url = "https://api.pexels.com/v1/search"
-        params = {"query": query[:80], "per_page": 1, "orientation": "landscape"}
-        headers = {"Authorization": PEXELS_API_KEY}
-
-        logger.info("[visual_ai] Buscando imagem Pexels para '%s'...", asset_key)
-        response = requests.get(url, params=params, headers=headers, timeout=20)
+        response = requests.get(
+            "https://api.pexels.com/v1/search",
+            params={"query": query[:80], "per_page": 1, "orientation": "landscape"},
+            headers={"Authorization": PEXELS_API_KEY},
+            timeout=20,
+        )
         response.raise_for_status()
-        data = response.json()
-
-        photos = data.get("photos", [])
+        photos = response.json().get("photos", [])
         if not photos:
-            logger.warning("[visual_ai] Pexels: nenhuma foto para query '%s'.", query)
+            logger.warning("[visual_ai] Pexels: nenhuma foto para '%s'.", query)
             return None
-
-        photo_url = photos[0]["src"]["large2x"]
-        img_resp = requests.get(photo_url, timeout=30)
+        img_resp = requests.get(photos[0]["src"]["large2x"], timeout=30)
         img_resp.raise_for_status()
-
         output_path = out_dir / f"{asset_key}_post_pexels.jpg"
         _save_bytes(output_path, img_resp.content)
         return output_path
     except Exception as e:
-        logger.error("[visual_ai] Pexels erro ('%s'): %s", asset_key, e)
+        logger.error("[visual_ai] Pexels erro: %s", e)
     return None
 
 
-def generate_post_image(content_text: str, asset_key: str, out_dir: Path) -> Optional[Path]:
+def generate_post_image(
+    content_text: str, asset_key: str, out_dir: Path
+) -> Optional[Path]:
     """
     Gera imagem de post com fallback automático:
-      1. Gemini Imagen (gratuito, cota mensal)
-      2. Pexels (100% gratuito, sem limite)
-    Configurado por VISUAL_AI_PROVIDER_POSTS no .env.
+      VISUAL_AI_PROVIDER_POSTS=gemini_imagen → Gemini Imagen → Pexels (fallback)
+      VISUAL_AI_PROVIDER_POSTS=pexels        → Pexels direto
+      VISUAL_AI_PROVIDER_POSTS=skip          → não gera imagem
     """
     if PROVIDER_POSTS == "skip":
+        logger.info("[visual_ai] VISUAL_AI_PROVIDER_POSTS=skip, imagem de post ignorada.")
         return None
 
     keyword = content_text[:150].replace("\n", " ").strip()
 
     if PROVIDER_POSTS in ("gemini_imagen", "gemini"):
-        result = generate_post_image_gemini(content_text, asset_key, out_dir)
+        logger.info("[visual_ai] Provider de posts: Gemini Imagen (fallback: Pexels)")
+        result = _generate_post_gemini_imagen(content_text, asset_key, out_dir)
         if result:
             return result
-        logger.info("[visual_ai] Gemini Imagen falhou — usando Pexels como fallback...")
-        return fetch_pexels_image(keyword, asset_key, out_dir)
+        logger.info("[visual_ai] Gemini Imagen não disponivel — usando Pexels como fallback...")
+        return _fetch_pexels_image(keyword, asset_key, out_dir)
 
     if PROVIDER_POSTS == "pexels":
-        return fetch_pexels_image(keyword, asset_key, out_dir)
+        logger.info("[visual_ai] Provider de posts: Pexels direto")
+        return _fetch_pexels_image(keyword, asset_key, out_dir)
 
-    logger.warning("[visual_ai] PROVIDER_POSTS='%s' inválido. Use: gemini_imagen, pexels ou skip.", PROVIDER_POSTS)
+    logger.warning(
+        "[visual_ai] VISUAL_AI_PROVIDER_POSTS='%s' inválido. "
+        "Use: gemini_imagen, pexels ou skip.", PROVIDER_POSTS
+    )
     return None
 
 
 # ---------------------------------------------------------------------------
-# Interface pública: orquestrador principal
+# Interface pública: orquestrador desta etapa
 # ---------------------------------------------------------------------------
 
 def run_visual_generation(
@@ -387,29 +349,31 @@ def run_visual_generation(
 ) -> dict:
     """
     Orquestra toda a geração visual para um brief.
-    Retorna dicionário com os caminhos de todos os arquivos gerados.
+    Retorna dicionário com caminhos de todos os arquivos gerados.
 
-    Nota: Slides visuais já são gerados pelo módulo slides_ppt.py (PPTX).
-    Este módulo complementa com: PDFs (emails, folheto, ficha) + imagens de post.
+    Controlado pelas variáveis:
+      VISUAL_AI_PROVIDER_DOCS=weasyprint|skip
+      VISUAL_AI_PROVIDER_POSTS=gemini_imagen|pexels|skip
     """
-    campaign_name = brief.get("campanha", brief.get("titulo", brief.get("nome", "Campanha")))
+    campaign = brief.get("campanha") or brief.get("titulo") or brief.get("nome", "Campanha")
     results: dict = {}
 
-    # E-mails → HTML + PDF
+    logger.info(
+        "[visual_ai] Iniciando geração visual | docs=%s | posts=%s",
+        PROVIDER_DOCS, PROVIDER_POSTS,
+    )
+
     if emails_text:
-        results.update(generate_email_visual(emails_text, campaign_name, out_dir))
+        results.update(generate_email_visual(emails_text, campaign, out_dir))
 
-    # Folheto → HTML + PDF
     if folheto_text:
-        results.update(generate_folheto_visual(folheto_text, campaign_name, out_dir))
+        results.update(generate_folheto_visual(folheto_text, campaign, out_dir))
 
-    # Ficha Técnica → HTML + PDF
     if ficha_text:
-        results.update(generate_ficha_visual(ficha_text, campaign_name, out_dir))
+        results.update(generate_ficha_visual(ficha_text, campaign, out_dir))
 
-    # Posts → Gemini Imagen (fallback: Pexels)
     if post_text:
-        post_keyword = brief.get("produto", brief.get("linha", campaign_name))
+        post_keyword = brief.get("produto") or brief.get("linha") or campaign
         post_img = generate_post_image(
             content_text=f"{post_keyword} {post_text[:100]}",
             asset_key="post_instagram",
