@@ -4,7 +4,7 @@ briefflow_chat.py - BriefFlow: Assistente conversacional de marketing B2B.
 Tecnologia:
   - Strands Agents como orquestrador
   - Fallback REAL entre providers: Gemini -> Claude -> OpenAI
-  - Se um provider falhar (rate limit, auth, timeout), tenta o proximo automaticamente
+  - Se um provider falhar (rate limit, auth, timeout, saldo), tenta o proximo automaticamente
   - O agente reconstroi com o proximo provider e repete a mensagem do usuario
 
 Setup:
@@ -103,16 +103,35 @@ def _criar_model(model_id: str, client_args: dict) -> LiteLLMModel:
 
 def _e_erro_recuperavel(e: Exception) -> bool:
     """
-    Retorna True para erros que justificam tentar o próximo provider:
-    rate limit, autenticação inválida, token expirado, modelo indisponível.
+    Retorna True para erros que justificam tentar o próximo provider.
+
+    Cobertos:
+    - Rate limit / cota esgotada (429, quota, too many requests)
+    - Autenticação inválida (401, 403, invalid key, unauthorized)
+    - Saldo insuficiente (credit balance, billing, insufficient_quota, payment)
+    - Modelo indisponível (overloaded, service unavailable, 503, model not found)
+    - Erros de streaming no meio da resposta (midstream, mid-stream)
+    - Erros genéricos de bad request causados por billing (bad request + credit/balance)
     """
     msg = str(e).lower()
+
     gatilhos = (
-        "429", "rate limit", "too many requests", "quota",
-        "401", "403", "authentication", "invalid key",
-        "unauthorized", "permission", "security token",
-        "unrecognized", "model not found", "does not exist",
-        "overloaded", "service unavailable", "503",
+        # Rate limit
+        "429", "rate limit", "too many requests", "quota", "ratelimit",
+        # Autenticação
+        "401", "403", "authentication", "invalid key", "invalid api key",
+        "unauthorized", "permission denied", "security token",
+        "unrecognized", "forbidden",
+        # Saldo / billing
+        "credit balance", "credit balance is too low", "balance is too low",
+        "insufficient_quota", "insufficient quota", "billing",
+        "payment required", "402", "upgrade or purchase",
+        # Modelo indisponível
+        "model not found", "does not exist", "overloaded",
+        "service unavailable", "503", "502",
+        # Erros de streaming (gemini mid-stream)
+        "midstream", "mid-stream", "midstreamfallback",
+        "stream", "incomplete stream",
     )
     return any(g in msg for g in gatilhos)
 
@@ -485,7 +504,10 @@ def _chamar_com_fallback(user_input: str) -> str:
         except Exception as e:
             ultimo_erro = e
             if _e_erro_recuperavel(e):
-                logger.warning("Provider %s falhou (%s), tentando proximo...", label, type(e).__name__)
+                logger.warning(
+                    "Provider %s falhou (%s), tentando proximo...",
+                    label, type(e).__name__,
+                )
                 continue
             # Erro não recuperável (ex: bug de código) — não tenta outro provider
             raise
@@ -528,8 +550,11 @@ def _msg_erro_final(e: Exception) -> str:
     if "todos os" in msg and "providers falharam" in msg:
         return (
             "[TODOS OS PROVIDERS FALHARAM]\n"
-            "Possiveis causas: todas as chaves atingiram o limite ou estao invalidas.\n"
-            "Aguarde alguns minutos e tente novamente, ou verifique as chaves no .env."
+            "Possíveis causas:\n"
+            "  - Gemini: limite de requisições atingido (aguarde alguns minutos)\n"
+            "  - Claude: saldo insuficiente → console.anthropic.com/settings/billing\n"
+            "  - OpenAI: saldo insuficiente → platform.openai.com/settings/billing\n"
+            "Verifique saldos e chaves no .env e tente novamente."
         )
     if any(k in msg for k in ("timeout", "connection", "network")):
         return "[ERRO DE CONEXAO] Verifique sua conexao com a internet."
