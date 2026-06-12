@@ -4,21 +4,25 @@ briefflow_chat.py - BriefFlow: Assistente conversacional de marketing B2B.
 Tecnologia:
   - Strands Agents como orquestrador
   - Fallback REAL entre providers: Gemini -> Claude -> OpenAI
-  - Se um provider falhar (rate limit, auth, timeout, saldo), tenta o proximo automaticamente
-  - O agente reconstroi com o proximo provider e repete a mensagem do usuario
+  - Hook BeforeToolCallEvent para logging e validacao de cada tool call
+  - Suporte opcional a servidores MCP (filesystem, web search, etc.)
+  - Se um provider falhar (rate limit, auth, timeout, saldo), tenta o proximo
 
 Setup:
   1. pip install -r requirements.txt
   2. Copie .env.example para .env
   3. Preencha ao menos UMA das chaves:
-       GEMINI_API_KEY   -> https://aistudio.google.com/apikey       (gratuito)
-       ANTHROPIC_API_KEY -> https://console.anthropic.com            (credito gratis no cadastro)
-       OPENAI_API_KEY   -> https://platform.openai.com/api-keys     (pay-as-you-go)
-  4. python briefflow_chat.py
+       GEMINI_API_KEY    -> https://aistudio.google.com/apikey  (gratuito)
+       ANTHROPIC_API_KEY -> https://console.anthropic.com
+       OPENAI_API_KEY    -> https://platform.openai.com/api-keys
+  4. (Opcional) Para habilitar MCP, defina MCP_FILESYSTEM_PATH no .env
+     apontando para a pasta raiz que o servidor MCP pode acessar.
+  5. python briefflow_chat.py
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from datetime import datetime
@@ -51,37 +55,37 @@ GEMINI_MODEL    = os.getenv("GEMINI_MODEL",    "gemini-2.0-flash")
 ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5")
 OPENAI_MODEL    = os.getenv("OPENAI_MODEL",    "gpt-4o-mini")
 
+# MCP: caminho raiz opcional para o servidor filesystem MCP
+# Defina no .env: MCP_FILESYSTEM_PATH=/caminho/para/pasta
+MCP_FILESYSTEM_PATH = os.getenv("MCP_FILESYSTEM_PATH", "").strip()
+
 # ---------------------------------------------------------------------------
-# Lista de providers disponíveis (com chave configurada)
+# Imports Strands
 # ---------------------------------------------------------------------------
 from strands import Agent, tool
 from strands.models.litellm import LiteLLMModel
+from strands.hooks.events import BeforeToolCallEvent, AfterToolCallEvent
 
+# ---------------------------------------------------------------------------
+# MCP: importacao condicional
+# ---------------------------------------------------------------------------
+try:
+    from strands.tools.mcp import MCPClient
+    _MCP_DISPONIVEL = True
+except ImportError:
+    _MCP_DISPONIVEL = False
+    logger.warning("strands[mcp] nao instalado. Servidores MCP desabilitados.")
+
+
+# ---------------------------------------------------------------------------
+# Providers
+# ---------------------------------------------------------------------------
 
 def _montar_lista_providers() -> list[tuple[str, str, dict]]:
-    """
-    Retorna apenas os providers que têm chave configurada, na ordem de preferência.
-    Cada item: (nome_legivel, model_id_litellm, client_args)
-    """
     candidatos = [
-        (
-            "Google Gemini",
-            f"gemini/{GEMINI_MODEL}",
-            {"api_key": GEMINI_API_KEY},
-            GEMINI_API_KEY,
-        ),
-        (
-            "Anthropic Claude",
-            f"anthropic/{ANTHROPIC_MODEL}",
-            {"api_key": ANTHROPIC_API_KEY},
-            ANTHROPIC_API_KEY,
-        ),
-        (
-            "OpenAI",
-            f"openai/{OPENAI_MODEL}",
-            {"api_key": OPENAI_API_KEY},
-            OPENAI_API_KEY,
-        ),
+        ("Google Gemini",    f"gemini/{GEMINI_MODEL}",       {"api_key": GEMINI_API_KEY},    GEMINI_API_KEY),
+        ("Anthropic Claude", f"anthropic/{ANTHROPIC_MODEL}", {"api_key": ANTHROPIC_API_KEY}, ANTHROPIC_API_KEY),
+        ("OpenAI",           f"openai/{OPENAI_MODEL}",       {"api_key": OPENAI_API_KEY},    OPENAI_API_KEY),
     ]
     return [
         (nome, model_id, client_args)
@@ -94,62 +98,40 @@ def _criar_model(model_id: str, client_args: dict) -> LiteLLMModel:
     return LiteLLMModel(
         client_args=client_args,
         model_id=model_id,
-        params={
-            "max_tokens": MAX_TOKENS,
-            "temperature": TEMPERATURE,
-        },
+        params={"max_tokens": MAX_TOKENS, "temperature": TEMPERATURE},
     )
 
 
 def _e_erro_recuperavel(e: Exception) -> bool:
-    """
-    Retorna True para erros que justificam tentar o próximo provider.
-
-    Cobertos:
-    - Rate limit / cota esgotada (429, quota, too many requests)
-    - Autenticação inválida (401, 403, invalid key, unauthorized)
-    - Saldo insuficiente (credit balance, billing, insufficient_quota, payment)
-    - Modelo indisponível (overloaded, service unavailable, 503, model not found)
-    - Erros de streaming no meio da resposta (midstream, mid-stream)
-    - Erros genéricos de bad request causados por billing (bad request + credit/balance)
-    """
     msg = str(e).lower()
-
     gatilhos = (
-        # Rate limit
         "429", "rate limit", "too many requests", "quota", "ratelimit",
-        # Autenticação
         "401", "403", "authentication", "invalid key", "invalid api key",
         "unauthorized", "permission denied", "security token",
         "unrecognized", "forbidden",
-        # Saldo / billing
         "credit balance", "credit balance is too low", "balance is too low",
         "insufficient_quota", "insufficient quota", "billing",
         "payment required", "402", "upgrade or purchase",
-        # Modelo indisponível
         "model not found", "does not exist", "overloaded",
         "service unavailable", "503", "502",
-        # Erros de streaming (gemini mid-stream)
         "midstream", "mid-stream", "midstreamfallback",
         "stream", "incomplete stream",
     )
     return any(g in msg for g in gatilhos)
 
 
-# Inicializa lista de providers disponíveis
 _providers = _montar_lista_providers()
 
 if not _providers:
     print(
         "\n[ERRO] Nenhuma chave de API encontrada no .env\n\n"
-        "Configure ao menos UMA das opções abaixo:\n\n"
+        "Configure ao menos UMA das opcoes abaixo:\n\n"
         "  GEMINI_API_KEY=...     -> https://aistudio.google.com/apikey  (GRATUITO)\n"
         "  ANTHROPIC_API_KEY=...  -> https://console.anthropic.com\n"
         "  OPENAI_API_KEY=...     -> https://platform.openai.com/api-keys\n"
     )
     raise SystemExit(1)
 
-# Provider atual (índice na lista _providers)
 _provider_idx: int = 0
 
 
@@ -160,13 +142,99 @@ def _provider_atual() -> tuple[str, LiteLLMModel]:
 
 
 # ---------------------------------------------------------------------------
-# Estado em memória
+# Estado em memoria
 # ---------------------------------------------------------------------------
 _ultimo_material: dict = {"conteudo": "", "tipo": "", "descricao": ""}
 
 
 # ---------------------------------------------------------------------------
-# TOOLS
+# HOOKS
+# ---------------------------------------------------------------------------
+
+def hook_antes_tool(event: BeforeToolCallEvent) -> None:
+    """
+    Executado ANTES de cada tool call.
+    - Loga qual tool esta sendo chamada e com quais argumentos.
+    - Cancela salvar_material se o conteudo estiver vazio.
+    """
+    nome = event.tool_use.get("name", "")
+    inp  = event.tool_use.get("input", {})
+    logger.info("[TOOL CALL] %s | args: %s", nome, json.dumps(inp, ensure_ascii=False)[:200])
+
+    # Guardrail: impede salvar material sem conteudo
+    if nome == "salvar_material":
+        conteudo = inp.get("conteudo", "") if isinstance(inp, dict) else ""
+        if not conteudo or not str(conteudo).strip():
+            event.cancel_tool = "[BriefFlow] Nenhum conteudo para salvar. Gere o material primeiro."
+            logger.warning("[HOOK] salvar_material cancelado: conteudo vazio.")
+
+
+def hook_apos_tool(event: AfterToolCallEvent) -> None:
+    """
+    Executado APOS cada tool call.
+    - Loga o resultado resumido para auditoria.
+    """
+    nome      = event.tool_use.get("name", "")
+    resultado = str(getattr(event, "tool_result", "") or "")[:120]
+    logger.info("[TOOL RESULT] %s | resultado: %s", nome, resultado)
+
+
+# ---------------------------------------------------------------------------
+# MCP: construcao condicional dos clientes
+# ---------------------------------------------------------------------------
+
+def _montar_mcp_clients() -> list:
+    """
+    Cria MCPClients para os servidores MCP configurados no .env.
+    Retorna lista vazia se MCP nao estiver disponivel ou configurado.
+
+    Servidores suportados:
+      - Filesystem MCP (stdio): habilitado via MCP_FILESYSTEM_PATH no .env
+        Requer: npx @modelcontextprotocol/server-filesystem
+
+    Para adicionar novos servidores MCP, inclua novos blocos abaixo
+    seguindo o padrao MCPClient(StdioTransport(...)) ou MCPClient(HttpTransport(...)).
+    """
+    if not _MCP_DISPONIVEL:
+        return []
+
+    from strands.tools.mcp.mcp_client import StdioClientTransport
+
+    clientes = []
+
+    # --- Servidor MCP: Filesystem (stdio) ---
+    # Permite ao agente ler/listar arquivos da pasta configurada.
+    # Habilite definindo MCP_FILESYSTEM_PATH=/sua/pasta no .env
+    if MCP_FILESYSTEM_PATH:
+        try:
+            fs_transport = StdioClientTransport(
+                command="npx",
+                args=["-y", "@modelcontextprotocol/server-filesystem", MCP_FILESYSTEM_PATH],
+            )
+            clientes.append(MCPClient(lambda t=fs_transport: t))
+            logger.info("[MCP] Servidor filesystem habilitado: %s", MCP_FILESYSTEM_PATH)
+            print(f"[MCP] Filesystem ativo: {MCP_FILESYSTEM_PATH}")
+        except Exception as e:
+            logger.warning("[MCP] Falha ao inicializar servidor filesystem: %s", e)
+
+    # --- Exemplo: Servidor MCP via HTTP (Streamable HTTP) ---
+    # Para habilitar um servidor MCP remoto, descomente e configure:
+    #
+    # MCP_HTTP_URL = os.getenv("MCP_HTTP_URL", "").strip()
+    # if MCP_HTTP_URL and _MCP_DISPONIVEL:
+    #     from strands.tools.mcp.mcp_client import StreamableHttpClientTransport
+    #     http_transport = StreamableHttpClientTransport(url=MCP_HTTP_URL)
+    #     clientes.append(MCPClient(lambda t=http_transport: t))
+    #     print(f"[MCP] Servidor HTTP ativo: {MCP_HTTP_URL}")
+
+    return clientes
+
+
+_mcp_clients = _montar_mcp_clients()
+
+
+# ---------------------------------------------------------------------------
+# TOOLS locais
 # ---------------------------------------------------------------------------
 
 @tool
@@ -411,8 +479,13 @@ def tipos_de_material_disponiveis() -> str:
 
 
 # ---------------------------------------------------------------------------
-# Construção do agente com fallback real
+# System Prompt
 # ---------------------------------------------------------------------------
+
+_mcp_descricao = (
+    "\n  [MCP] Ferramentas externas via MCP estao disponiveis (ex: leitura de arquivos)"
+    if _mcp_clients else ""
+)
 
 SYSTEM_PROMPT = f"""\
 Voce e o BriefFlow, assistente de IA especializado em criar materiais de
@@ -428,7 +501,7 @@ FERRAMENTAS DISPONIVEIS:
   salvar_material              -> salva conteudo em data/output/
   listar_materiais_salvos      -> lista arquivos ja salvos
   ler_material_salvo           -> le um arquivo salvo
-  tipos_de_material_disponiveis -> mostra o que pode ser criado
+  tipos_de_material_disponiveis -> mostra o que pode ser criado{_mcp_descricao}
 
 REGRAS DE COMPORTAMENTO:
 1. Ao receber um pedido de material:
@@ -446,7 +519,7 @@ REGRAS DE COMPORTAMENTO:
 7. Nunca mencione providers, modelos ou detalhes tecnicos ao usuario.
 """
 
-_TOOLS = [
+_TOOLS_LOCAIS = [
     gerar_material_de_marketing,
     salvar_material,
     listar_materiais_salvos,
@@ -455,42 +528,51 @@ _TOOLS = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# Construcao do agente
+# ---------------------------------------------------------------------------
+
 def _criar_agente(model: LiteLLMModel) -> Agent:
-    return Agent(
+    """
+    Cria o agente com tools locais + clientes MCP (se configurados).
+    Os hooks de logging/validacao sao registrados apos a criacao.
+    """
+    # Combina tools locais com MCPClients (ToolProviders)
+    todas_tools = _TOOLS_LOCAIS + _mcp_clients
+
+    agente = Agent(
         model=model,
         system_prompt=SYSTEM_PROMPT,
-        tools=_TOOLS,
+        tools=todas_tools,
     )
 
+    # Registra hooks de ciclo de vida
+    agente.add_hook(BeforeToolCallEvent, hook_antes_tool)
+    agente.add_hook(AfterToolCallEvent,  hook_apos_tool)
 
-# Cria o agente com o primeiro provider disponível
+    return agente
+
+
+# Cria o agente inicial
 _provider_label, _model_atual = _provider_atual()
 agent = _criar_agente(_model_atual)
 
 
 # ---------------------------------------------------------------------------
-# Função de chamada com fallback automático
+# Fallback entre providers
 # ---------------------------------------------------------------------------
 
 def _chamar_com_fallback(user_input: str) -> str:
-    """
-    Tenta chamar o agente. Se o provider atual falhar com erro recuperável,
-    troca automaticamente para o próximo provider e tenta novamente.
-    Repete até esgotar todos os providers disponíveis.
-    """
     global _provider_idx, _provider_label, _model_atual, agent
 
-    tentativas = list(range(len(_providers)))  # índices a tentar
-
-    # Começa a partir do provider atual
-    indices = tentativas[_provider_idx:] + tentativas[:_provider_idx]
+    indices = list(range(len(_providers)))
+    indices = indices[_provider_idx:] + indices[:_provider_idx]
 
     ultimo_erro = None
     for idx in indices:
         nome, model_id, client_args = _providers[idx]
         label = f"{nome} ({model_id.split('/')[1]})"
 
-        # Reconstrói o agente se trocou de provider
         if idx != _provider_idx:
             print(f"\n[BriefFlow] Trocando para {label}...", flush=True)
             _provider_idx   = idx
@@ -504,15 +586,10 @@ def _chamar_com_fallback(user_input: str) -> str:
         except Exception as e:
             ultimo_erro = e
             if _e_erro_recuperavel(e):
-                logger.warning(
-                    "Provider %s falhou (%s), tentando proximo...",
-                    label, type(e).__name__,
-                )
+                logger.warning("Provider %s falhou (%s), tentando proximo...", label, type(e).__name__)
                 continue
-            # Erro não recuperável (ex: bug de código) — não tenta outro provider
             raise
 
-    # Todos os providers falharam
     raise RuntimeError(
         f"Todos os {len(_providers)} providers falharam.\n"
         f"Ultimo erro: {ultimo_erro}"
@@ -524,12 +601,14 @@ def _chamar_com_fallback(user_input: str) -> str:
 # ---------------------------------------------------------------------------
 
 def _fmt_banner() -> str:
-    nomes = " → ".join(n for n, _, _ in _providers)
+    nomes = " -> ".join(n for n, _, _ in _providers)
+    mcp_status = f"MCP: filesystem ({MCP_FILESYSTEM_PATH})" if _mcp_clients else "MCP: desabilitado"
     lines = [
         "+" + "=" * 57 + "+",
         "|{:^57}|".format("BriefFlow - Assistente de Marketing"),
         "|{:^57}|".format(f"Providers: {nomes}"),
         "|{:^57}|".format(f"Ativo: {_provider_label}"),
+        "|{:^57}|".format(mcp_status),
         "|{:^57}|".format(f"Limite: {MAX_TOKENS} tokens por resposta"),
         "+" + "=" * 57 + "+",
         "",
@@ -550,10 +629,10 @@ def _msg_erro_final(e: Exception) -> str:
     if "todos os" in msg and "providers falharam" in msg:
         return (
             "[TODOS OS PROVIDERS FALHARAM]\n"
-            "Possíveis causas:\n"
-            "  - Gemini: limite de requisições atingido (aguarde alguns minutos)\n"
-            "  - Claude: saldo insuficiente → console.anthropic.com/settings/billing\n"
-            "  - OpenAI: saldo insuficiente → platform.openai.com/settings/billing\n"
+            "Possiveis causas:\n"
+            "  - Gemini: limite de requisicoes atingido (aguarde alguns minutos)\n"
+            "  - Claude: saldo insuficiente -> console.anthropic.com/settings/billing\n"
+            "  - OpenAI: saldo insuficiente -> platform.openai.com/settings/billing\n"
             "Verifique saldos e chaves no .env e tente novamente."
         )
     if any(k in msg for k in ("timeout", "connection", "network")):
