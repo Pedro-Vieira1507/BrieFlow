@@ -18,35 +18,38 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
-from google import genai
-from google.genai import types
-from google.genai import errors as genai_errors
 
-# ── Configurações (lidas APÓS load_dotenv) ──────────────────────────────────
+from strands import Agent, tool
+from strands.models import BedrockModel
+
+# ── Configurações ────────────────────────────────────────────────────────────
 SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
 DRIVE_FOLDER_ID = os.getenv("GOOGLE_DRIVE_FOLDER_ID", "").strip()
 OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", "data/output"))
 INPUT_DIR = Path(os.getenv("INPUT_DIR", "data/inbox"))
 
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 SYSTEM_PROMPT_PATH = Path(os.getenv("SYSTEM_PROMPT_PATH", "prompts/system_prompt.txt"))
-
-MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "5"))
 TOTAL_MATERIALS = int(os.getenv("TOTAL_MATERIALS", "8"))
+
+# Strands / Bedrock
+BEDROCK_MODEL_ID = os.getenv("BEDROCK_MODEL_ID", "us.anthropic.claude-3-7-sonnet-20250219-v1:0")
+BEDROCK_REGION = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
 
 # ── Logger ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s",
 )
+logging.getLogger("strands").setLevel(logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 
-# ── Google Drive ─────────────────────────────────────────────────────────────
+# ────────────────────────────────────────────────────────────────────────────
+# Google Drive helpers (sem alteração de lógica)
+# ────────────────────────────────────────────────────────────────────────────
 
 def get_drive_service():
-    """Autentica no Google Drive e retorna o service. Inclui try/except robusto."""
+    """Autentica no Google Drive e retorna o service."""
     creds = None
     token_path = Path("credentials/token.json")
     creds_path = Path("credentials/credentials.json")
@@ -76,151 +79,144 @@ def get_drive_service():
         raise RuntimeError(f"Erro de autenticação no Google Drive: {e}")
 
 
-def get_drive_files(service, folder_id: str) -> List[Dict]:
-    """Lista TODOS os arquivos da pasta, implementando paginação com nextPageToken.
+# ────────────────────────────────────────────────────────────────────────────
+# TOOLS do Strands Agents
+# ────────────────────────────────────────────────────────────────────────────
 
-    BUG CORRIGIDO: a versão anterior usava pageSize=100 sem paginação,
-    silenciosamente ignorando arquivos além do limite.
+@tool
+def listar_arquivos_drive(folder_id: str) -> List[Dict]:
+    """
+    Lista todos os arquivos de texto/docx em uma pasta do Google Drive.
+
+    Args:
+        folder_id (str): ID da pasta no Google Drive.
+
+    Returns:
+        List[Dict]: Lista de dicts com 'id', 'name', 'mimeType' de cada arquivo.
     """
     if not folder_id:
         raise ValueError("GOOGLE_DRIVE_FOLDER_ID não definido no .env")
 
+    service = get_drive_service()
     query = f"'{folder_id}' in parents and trashed = false"
-    fields = "nextPageToken, files(id,name,mimeType,createdTime,webViewLink,capabilities(canDownload))"
-    all_files = []
+    fields = "nextPageToken, files(id,name,mimeType)"
+    all_files: List[Dict] = []
     page_token = None
 
-    try:
-        while True:
-            params = dict(
-                q=query,
-                fields=fields,
-                pageSize=100,
-                includeItemsFromAllDrives=True,
-                supportsAllDrives=True,
-            )
-            if page_token:
-                params["pageToken"] = page_token
+    while True:
+        params = dict(
+            q=query,
+            fields=fields,
+            pageSize=100,
+            includeItemsFromAllDrives=True,
+            supportsAllDrives=True,
+        )
+        if page_token:
+            params["pageToken"] = page_token
 
-            result = service.files().list(**params).execute()
-            batch = result.get("files", [])
-            all_files.extend(batch)
+        result = service.files().list(**params).execute()
+        all_files.extend(result.get("files", []))
+        page_token = result.get("nextPageToken")
+        if not page_token:
+            break
 
-            page_token = result.get("nextPageToken")
-            if not page_token:
-                break
+    processable_mimes = {"text/plain", "application/vnd.google-apps.document"}
+    processable_exts = (".txt", ".docx")
+    targets = [
+        f for f in all_files
+        if f["mimeType"] in processable_mimes
+        or f["name"].lower().endswith(processable_exts)
+    ]
 
-        logger.info("Encontrados %s arquivo(s) no Drive (todas as páginas).", len(all_files))
-        return all_files
-
-    except Exception as e:
-        logger.exception("Falha ao listar arquivos do Drive")
-        raise RuntimeError(f"Erro ao listar arquivos do Drive: {e}")
+    logger.info("Drive: %d arquivo(s) elegíveis encontrados.", len(targets))
+    return targets
 
 
-def download_drive_file(service, file_id: str, file_name: str, mime_type: str) -> Path:
-    """Baixa ou exporta um arquivo do Drive para INPUT_DIR."""
+@tool
+def baixar_arquivo_drive(file_id: str, file_name: str, mime_type: str) -> str:
+    """
+    Baixa ou exporta um arquivo do Google Drive para o diretório local de entrada.
+
+    Args:
+        file_id (str): ID do arquivo no Google Drive.
+        file_name (str): Nome original do arquivo.
+        mime_type (str): MIME type do arquivo.
+
+    Returns:
+        str: Caminho absoluto do arquivo baixado localmente.
+    """
     INPUT_DIR.mkdir(parents=True, exist_ok=True)
+    service = get_drive_service()
     safe_name = re.sub(r'[<>:"/\\|?*]', "_", file_name).strip()
 
-    try:
-        if mime_type == "application/vnd.google-apps.document":
-            request = service.files().export_media(fileId=file_id, mimeType="text/plain")
-            out_path = INPUT_DIR / f"{Path(safe_name).stem}.txt"
-        else:
-            request = service.files().get_media(fileId=file_id, supportsAllDrives=True)
-            out_path = INPUT_DIR / safe_name
+    if mime_type == "application/vnd.google-apps.document":
+        request = service.files().export_media(fileId=file_id, mimeType="text/plain")
+        out_path = INPUT_DIR / f"{Path(safe_name).stem}.txt"
+    else:
+        request = service.files().get_media(fileId=file_id, supportsAllDrives=True)
+        out_path = INPUT_DIR / safe_name
 
-        with io.FileIO(str(out_path), "wb") as fh:
-            downloader = MediaIoBaseDownload(fh, request)
-            done = False
-            while not done:
-                status, done = downloader.next_chunk()
-                if status:
-                    logger.info("Download %s: %.0f%%", safe_name, status.progress() * 100)
+    with io.FileIO(str(out_path), "wb") as fh:
+        downloader = MediaIoBaseDownload(fh, request)
+        done = False
+        while not done:
+            status, done = downloader.next_chunk()
+            if status:
+                logger.info("Download %s: %.0f%%", safe_name, status.progress() * 100)
 
-        logger.info("Arquivo salvo em: %s", out_path)
-        return out_path
-
-    except Exception as e:
-        logger.exception("Falha ao baixar/exportar arquivo '%s'", file_name)
-        raise RuntimeError(f"Erro ao baixar/exportar arquivo: {e}")
+    logger.info("Arquivo salvo em: %s", out_path)
+    return str(out_path)
 
 
-# ── LLM (Gemini) ─────────────────────────────────────────────────────────────
+@tool
+def ler_transcricao(file_path: str) -> str:
+    """
+    Lê o conteúdo de texto de um arquivo local (transcrição).
 
-def load_system_prompt() -> str:
-    """Carrega o system prompt do arquivo configurado via SYSTEM_PROMPT_PATH."""
+    Args:
+        file_path (str): Caminho do arquivo local.
+
+    Returns:
+        str: Conteúdo completo do arquivo como string.
+    """
+    path = Path(file_path)
+    if not path.exists():
+        raise FileNotFoundError(f"Arquivo não encontrado: {file_path}")
+
+    content = path.read_text(encoding="utf-8")
+    if not content.strip():
+        logger.warning("Arquivo '%s' está vazio.", file_path)
+    return content
+
+
+@tool
+def carregar_system_prompt() -> str:
+    """
+    Carrega o system prompt do arquivo configurado via SYSTEM_PROMPT_PATH.
+
+    Returns:
+        str: Conteúdo do system prompt.
+    """
     if SYSTEM_PROMPT_PATH.exists():
         return SYSTEM_PROMPT_PATH.read_text(encoding="utf-8").strip()
     logger.warning("System prompt não encontrado em '%s'. Usando prompt padrão.", SYSTEM_PROMPT_PATH)
     return "Você é um assistente especializado em marketing e conteúdo."
 
 
-def call_llm_api(transcription_text: str, system_prompt: str) -> str:
-    """Chama a API Gemini com retry + backoff exponencial para erros de servidor.
-
-    BUG CORRIGIDO: GEMINI_API_KEY agora validada antes de instanciar o client.
-    MELHORIA: retry com backoff exponencial para ServerError (5xx).
+@tool
+def parsear_materiais(raw_text: str) -> Dict[str, str]:
     """
-    if not GEMINI_API_KEY:
-        raise ValueError(
-            "GEMINI_API_KEY não definido no .env. "
-            "Adicione a chave antes de executar o pipeline."
-        )
+    Fatia o texto retornado pelo LLM em materiais individuais separados por marcadores
+    no formato 'MATERIAL N' (onde N vai de 1 até TOTAL_MATERIALS).
 
-    client = genai.Client(api_key=GEMINI_API_KEY)
+    Args:
+        raw_text (str): Texto bruto retornado pelo LLM.
 
-    prompt = f"{system_prompt}\n\nTRANSCRIÇÃO:\n{transcription_text}".strip()
-    last_error: Optional[Exception] = None
-
-    for attempt in range(MAX_RETRIES):
-        try:
-            response = client.models.generate_content(
-                model=GEMINI_MODEL,
-                contents=types.Part.from_text(text=prompt),
-                config=types.GenerateContentConfig(temperature=0.4),
-            )
-
-            text = (response.text or "").strip()
-            if not text:
-                raise RuntimeError("A API do LLM retornou resposta vazia.")
-
-            logger.info("Resposta do LLM recebida com sucesso (tentativa %d).", attempt + 1)
-            return text
-
-        except genai_errors.ServerError as e:
-            last_error = e
-            wait = (2 ** attempt) + random.uniform(0.2, 1.2)
-            logger.warning(
-                "ServerError na tentativa %d/%d. Aguardando %.1fs...",
-                attempt + 1, MAX_RETRIES, wait,
-            )
-            if attempt < MAX_RETRIES - 1:
-                time.sleep(wait)
-
-        except genai_errors.APIError as e:
-            logger.exception("APIError não recuperável ao chamar LLM")
-            raise RuntimeError(f"Erro na chamada ao LLM: {e}")
-
-        except Exception as e:
-            logger.exception("Falha inesperada ao chamar LLM")
-            raise RuntimeError(f"Erro inesperado ao chamar LLM: {e}")
-
-    raise RuntimeError(
-        f"LLM falhou após {MAX_RETRIES} tentativas. Último erro: {last_error}"
-    )
-
-
-# ── Parsing ───────────────────────────────────────────────────────────────────
-
-def parse_content(raw_text: str) -> Dict[str, str]:
-    """Fatia o texto retornado pelo LLM em materiais separados.
-
-    MELHORIA: usa loop dinâmico em vez de 8 padrões duplicados.
-    Loga aviso quando um material não é encontrado no texto.
+    Returns:
+        Dict[str, str]: Dicionário com chaves 'material_1' ... 'material_N'
+                        e o conteúdo correspondente de cada material.
     """
-    materials = {}
+    materials: Dict[str, str] = {}
 
     for i in range(1, TOTAL_MATERIALS + 1):
         next_marker = f"MATERIAL\\s*{i + 1}" if i < TOTAL_MATERIALS else None
@@ -239,111 +235,110 @@ def parse_content(raw_text: str) -> Dict[str, str]:
     return materials
 
 
-# ── Output ────────────────────────────────────────────────────────────────────
-
-def save_to_output(materials: Dict[str, str], source_name: str) -> Path:
-    """Salva cada material como arquivo .txt e gera um manifest.json.
-
-    MELHORIA: materiais vazios recebem conteúdo indicativo em vez de
-    arquivo em branco silencioso.
+@tool
+def salvar_materiais(materials_json: str, source_name: str) -> str:
     """
+    Salva cada material como arquivo .txt em OUTPUT_DIR/<source_name>/
+    e gera um manifest.json com o resumo do processamento.
+
+    Args:
+        materials_json (str): JSON serializado do dicionário de materiais
+                              (chaves 'material_1' ... 'material_N').
+        source_name (str): Nome do arquivo fonte (usado como nome do subdiretório).
+
+    Returns:
+        str: Caminho absoluto do diretório de saída criado.
+    """
+    materials: Dict[str, str] = json.loads(materials_json)
     output_dir = OUTPUT_DIR / Path(source_name).stem
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    try:
-        saved = []
-        for key, content in materials.items():
-            file_path = output_dir / f"{key}.txt"
-            body = content.strip() if content.strip() else f"[{key} não gerado pelo LLM]"
-            file_path.write_text(body + "\n", encoding="utf-8")
-            saved.append(key)
+    saved = []
+    for key, content in materials.items():
+        file_path = output_dir / f"{key}.txt"
+        body = content.strip() if content.strip() else f"[{key} não gerado pelo LLM]"
+        file_path.write_text(body + "\n", encoding="utf-8")
+        saved.append(key)
 
-        manifest = {
-            "source": source_name,
-            "materials": saved,
-            "total_generated": sum(1 for v in materials.values() if v.strip()),
-        }
-        manifest_path = output_dir / "manifest.json"
-        manifest_path.write_text(
-            json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+    manifest = {
+        "source": source_name,
+        "materials": saved,
+        "total_generated": sum(1 for v in materials.values() if v.strip()),
+    }
+    manifest_path = output_dir / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
-        logger.info("Materiais salvos em: %s", output_dir)
-        return output_dir
-
-    except OSError as e:
-        logger.exception("Falha de I/O ao salvar materiais")
-        raise RuntimeError(f"Erro ao salvar materiais em disco: {e}")
+    logger.info("Materiais salvos em: %s", output_dir)
+    return str(output_dir)
 
 
-# ── Orquestração ──────────────────────────────────────────────────────────────
+# ────────────────────────────────────────────────────────────────────────────
+# Agente Strands
+# ────────────────────────────────────────────────────────────────────────────
 
-def process_file(service, file_info: Dict) -> None:
-    """Orquestra o fluxo completo para um único arquivo: download → LLM → parse → save."""
-    name = file_info["name"]
-    file_id = file_info["id"]
-    mime_type = file_info["mimeType"]
+SYSTEM_PROMPT = """Você é um pipeline de automação de conteúdo de marketing especializado.
+Sua missão é processar transcrições de reuniões armazenadas no Google Drive e gerar
+materiais de marketing estruturados.
 
-    logger.info("── Iniciando processamento: %s ──", name)
+Fluxo obrigatório para CADA arquivo:
+1. Use 'listar_arquivos_drive' com o folder_id fornecido para obter a lista de arquivos.
+2. Para cada arquivo da lista:
+   a. Use 'baixar_arquivo_drive' passando id, name e mimeType do arquivo.
+   b. Use 'ler_transcricao' com o caminho retornado para obter o texto.
+   c. Se o texto estiver vazio, pule este arquivo e vá ao próximo.
+   d. Use 'carregar_system_prompt' para obter as instruções de geração de materiais.
+   e. Combine o system prompt + transcrição e gere os 8 materiais de marketing diretamente,
+      usando os marcadores 'MATERIAL 1', 'MATERIAL 2', ..., 'MATERIAL 8' para separar cada um.
+   f. Use 'parsear_materiais' com o texto gerado para extrair os materiais individuais.
+   g. Serialize o dicionário retornado para JSON e use 'salvar_materiais' para persistir
+      os arquivos no disco, passando o JSON e o nome do arquivo fonte.
+3. Ao final, reporte: quantos arquivos foram processados, quantos materiais foram gerados
+   no total e os caminhos dos diretórios de saída criados.
 
-    logger.info("[1/4] Baixando arquivo do Drive...")
-    local_path = download_drive_file(service, file_id, name, mime_type)
+Regras de robustez:
+- Se um arquivo falhar em qualquer etapa, registre o erro e continue com o próximo.
+- Nunca interrompa o pipeline por falha em um único arquivo.
+"""
 
-    logger.info("[2/4] Lendo transcrição...")
-    transcription_text = local_path.read_text(encoding="utf-8")
-    if not transcription_text.strip():
-        logger.warning("Arquivo '%s' está vazio. Pulando.", name)
-        return
+bedrock_model = BedrockModel(
+    model_id=BEDROCK_MODEL_ID,
+    region_name=BEDROCK_REGION,
+    temperature=0.4,
+)
 
-    logger.info("[3/4] Chamando LLM...")
-    system_prompt = load_system_prompt()
-    raw_output = call_llm_api(transcription_text, system_prompt)
-
-    logger.info("[4/4] Parseando e salvando materiais...")
-    materials = parse_content(raw_output)
-    save_to_output(materials, name)
-
-    logger.info("── Concluído: %s ──", name)
+agent = Agent(
+    model=bedrock_model,
+    system_prompt=SYSTEM_PROMPT,
+    tools=[
+        listar_arquivos_drive,
+        baixar_arquivo_drive,
+        ler_transcricao,
+        carregar_system_prompt,
+        parsear_materiais,
+        salvar_materiais,
+    ],
+)
 
 
 def main() -> None:
     """Ponto de entrada principal do pipeline."""
-    # load_dotenv() já foi chamado no topo do módulo; chamada aqui é no-op seguro
     load_dotenv()
 
     if not DRIVE_FOLDER_ID:
         logger.error("GOOGLE_DRIVE_FOLDER_ID não está definido no .env. Abortando.")
         return
 
-    logger.info("Conectando ao Google Drive...")
-    service = get_drive_service()
+    logger.info("Iniciando BriefFlow Pipeline (Strands Agents)...")
 
-    logger.info("Listando arquivos da pasta: %s", DRIVE_FOLDER_ID)
-    files = get_drive_files(service, DRIVE_FOLDER_ID)
+    result = agent(
+        f"Processe todos os arquivos de transcrição da pasta do Google Drive com ID: '{DRIVE_FOLDER_ID}'. "
+        f"Siga o fluxo completo: listar → baixar → ler → gerar materiais → parsear → salvar. "
+        f"Ao final, me dê um resumo do que foi processado."
+    )
 
-    processable_mimes = {
-        "text/plain",
-        "application/vnd.google-apps.document",
-    }
-    processable_exts = (".txt", ".docx")
-
-    targets = [
-        f for f in files
-        if f["mimeType"] in processable_mimes
-        or f["name"].lower().endswith(processable_exts)
-    ]
-
-    if not targets:
-        logger.warning("Nenhum arquivo processável encontrado na pasta.")
-        return
-
-    logger.info("%d arquivo(s) elegível(is) para processamento.", len(targets))
-
-    for file_info in targets:
-        try:
-            process_file(service, file_info)
-        except Exception as e:
-            logger.error("Falha ao processar '%s': %s", file_info["name"], e)
+    print(result.message)
 
 
 if __name__ == "__main__":

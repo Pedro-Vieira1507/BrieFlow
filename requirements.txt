@@ -1,0 +1,12 @@
+# Google
+google-auth>=2.28.0
+google-auth-oauthlib>=1.2.0
+google-auth-httplib2>=0.2.0
+google-api-python-client>=2.120.0
+
+# Strands Agents
+strands-agents>=0.1.0
+strands-agents-tools>=0.1.0
+
+# Utils
+python-dotenv>=1.0.0
