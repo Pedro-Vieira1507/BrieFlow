@@ -1,459 +1,409 @@
 """
-briefflow_chat.py — Interface conversacional do BriefFlow.
+briefflow_chat.py — BriefFlow: Assistente conversacional de marketing B2B.
+
+Tecnologia:
+  - Strands Agents como orquestrador
+  - Modelo GRATUITO: amazon.titan-text-lite-v1 (Amazon Bedrock — sem custo)
+  - Limite de tokens configuravel via .env (MAX_TOKENS, padrao 800)
+  - Raciocina a partir da conversa — sem necessidade de briefs em disco
 
 Uso:
-    python briefflow_chat.py
+  python briefflow_chat.py
 
-O agente responde em linguagem natural e executa as tools automaticamente
-com base no que você pede. Exemplos de comandos:
-
-    "Gere o podcast da campanha Compre 3 Leve 4"
-    "Crie os slides de capacitação do brief DLAB.brief.json"
-    "Gere todos os materiais do brief que está na inbox"
-    "Liste os briefs disponíveis"
-    "Mostre o conteúdo do podcast gerado"
+Exemplos de conversa:
+  "Crie um podcast para lancar a linha de lubrificantes DLAB"
+  "Gere um email marketing para revendedores sobre a campanha Compre 3 Leve 4"
+  "Escreva 3 posts de Instagram para divulgar hidraulicos industriais"
+  "Salve o ultimo material gerado como podcast_dlab.txt"
+  "Liste o que ja foi salvo"
 """
 
-import io
-import json
+from __future__ import annotations
+
 import logging
 import os
-import random
 import re
-import time
+from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
 
 from dotenv import load_dotenv
 load_dotenv()
-
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseDownload
 
 from strands import Agent, tool
 from strands.models import BedrockModel
 
 # ---------------------------------------------------------------------------
-# Logging
+# Logging — silencia Strands para deixar o chat limpo
 # ---------------------------------------------------------------------------
-logging.basicConfig(
-    format="%(asctime)s | %(levelname)s | %(message)s",
-    level=logging.INFO,
-)
-logging.getLogger("strands").setLevel(logging.WARNING)  # menos verboso no chat
+logging.basicConfig(format="%(asctime)s | %(levelname)s | %(message)s", level=logging.WARNING)
 logger = logging.getLogger("briefflow")
 
 # ---------------------------------------------------------------------------
 # Config via .env
 # ---------------------------------------------------------------------------
-INBOX_DIR   = Path(os.getenv("INPUT_DIR",   "data/inbox"))
 OUTPUT_DIR  = Path(os.getenv("OUTPUT_DIR",  "data/output"))
-DRIVE_FOLDER_ID = os.getenv("GOOGLE_DRIVE_FOLDER_ID", "").strip()
 
-TOTAL_MATERIALS   = int(os.getenv("TOTAL_MATERIALS", "8"))
-BEDROCK_MODEL_ID  = os.getenv("BEDROCK_MODEL_ID", "us.anthropic.claude-3-7-sonnet-20250219-v1:0")
-BEDROCK_REGION    = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
+# Modelo GRATUITO no Amazon Bedrock
+# amazon.titan-text-lite-v1 — sem custo, ideal para textos estruturados
+BEDROCK_MODEL_ID = os.getenv(
+    "BEDROCK_MODEL_ID",
+    "amazon.titan-text-lite-v1",          # <-- gratuito
+)
+BEDROCK_REGION = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
 
-GOOGLE_SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
+# Limite de tokens para nao gastar indevidamente
+# Titan Lite: max 4096. Padrao conservador: 800 tokens por resposta.
+MAX_TOKENS  = int(os.getenv("MAX_TOKENS",  "800"))
+TEMPERATURE = float(os.getenv("TEMPERATURE", "0.6"))
 
 # ---------------------------------------------------------------------------
-# Helpers internos (não são @tool — são chamados pelas tools)
+# Estado em memoria — guarda o ultimo material gerado para salvar depois
 # ---------------------------------------------------------------------------
-
-def _get_drive_service():
-    creds = None
-    token_path = Path("credentials/token.json")
-    creds_path = Path("credentials/credentials.json")
-    if token_path.exists():
-        creds = Credentials.from_authorized_user_file(str(token_path), GOOGLE_SCOPES)
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            if not creds_path.exists():
-                raise FileNotFoundError(f"Credenciais não encontradas: {creds_path}")
-            flow = InstalledAppFlow.from_client_secrets_file(str(creds_path), GOOGLE_SCOPES)
-            creds = flow.run_local_server(port=0)
-        token_path.parent.mkdir(parents=True, exist_ok=True)
-        token_path.write_text(creds.to_json(), encoding="utf-8")
-    return build("drive", "v3", credentials=creds)
-
-
-def _parse_materials(raw_text: str) -> Dict[str, str]:
-    """Fatia o texto do LLM nos marcadores MATERIAL 1 ... MATERIAL N."""
-    materials: Dict[str, str] = {}
-    for i in range(1, TOTAL_MATERIALS + 1):
-        next_marker = f"MATERIAL\\s*{i + 1}" if i < TOTAL_MATERIALS else None
-        lookahead = f"(?=\\n{next_marker}|\\Z)" if next_marker else "(?=\\Z)"
-        pattern = rf"(MATERIAL\s*{i}.*?){lookahead}"
-        match = re.search(pattern, raw_text, flags=re.IGNORECASE | re.DOTALL)
-        materials[f"material_{i}"] = match.group(1).strip() if match else ""
-    return materials
+_ultimo_material: dict = {"conteudo": "", "tipo": "", "descricao": ""}
 
 
 # ---------------------------------------------------------------------------
-# TOOLS do agente
+# TOOLS — acoes que o agente pode executar
 # ---------------------------------------------------------------------------
 
 @tool
-def listar_briefs() -> str:
-    """
-    Lista todos os arquivos .brief.json disponíveis na pasta inbox local.
-
-    Returns:
-        str: Lista formatada dos briefs encontrados com seus caminhos.
-    """
-    briefs = sorted(INBOX_DIR.glob("*.brief.json")) if INBOX_DIR.exists() else []
-    if not briefs:
-        return f"Nenhum brief encontrado em '{INBOX_DIR}'. Faça o upload de um .brief.json ou use 'baixar_brief_do_drive' para importar do Drive."
-    linhas = [f"📄 {b.name}  →  {b}" for b in briefs]
-    return f"Briefs disponíveis ({len(briefs)}):\n" + "\n".join(linhas)
-
-
-@tool
-def ler_brief(nome_arquivo: str) -> str:
-    """
-    Lê o conteúdo de um arquivo .brief.json da pasta inbox.
-
-    Args:
-        nome_arquivo (str): Nome do arquivo .brief.json (ex: 'campanha_dlab.brief.json').
-                            Pode ser também o caminho completo.
-
-    Returns:
-        str: Conteúdo JSON do brief formatado.
-    """
-    path = Path(nome_arquivo)
-    if not path.exists():
-        path = INBOX_DIR / nome_arquivo
-    if not path.exists():
-        return f"❌ Arquivo não encontrado: {nome_arquivo}"
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return json.dumps(data, ensure_ascii=False, indent=2)
-    except Exception as e:
-        return f"❌ Erro ao ler brief: {e}"
-
-
-@tool
-def baixar_brief_do_drive(folder_id: str = "") -> str:
-    """
-    Busca arquivos .brief.json ou transcrições .txt/.docx na pasta do Google Drive
-    e os baixa para a inbox local.
-
-    Args:
-        folder_id (str): ID da pasta no Google Drive. Se vazio, usa GOOGLE_DRIVE_FOLDER_ID do .env.
-
-    Returns:
-        str: Resumo dos arquivos baixados.
-    """
-    fid = folder_id.strip() or DRIVE_FOLDER_ID
-    if not fid:
-        return "❌ folder_id não informado e GOOGLE_DRIVE_FOLDER_ID não está no .env."
-
-    try:
-        service = _get_drive_service()
-    except Exception as e:
-        return f"❌ Falha de autenticação com Google Drive: {e}"
-
-    query = f"'{fid}' in parents and trashed = false"
-    fields = "nextPageToken, files(id,name,mimeType)"
-    all_files, page_token = [], None
-
-    while True:
-        params = dict(q=query, fields=fields, pageSize=100,
-                      includeItemsFromAllDrives=True, supportsAllDrives=True)
-        if page_token:
-            params["pageToken"] = page_token
-        result = service.files().list(**params).execute()
-        all_files.extend(result.get("files", []))
-        page_token = result.get("nextPageToken")
-        if not page_token:
-            break
-
-    processable = [
-        f for f in all_files
-        if f["mimeType"] in {"text/plain", "application/vnd.google-apps.document"}
-        or f["name"].lower().endswith((".txt", ".docx", ".json"))
-    ]
-
-    if not processable:
-        return f"Nenhum arquivo processável encontrado na pasta '{fid}'."
-
-    INBOX_DIR.mkdir(parents=True, exist_ok=True)
-    baixados = []
-
-    for f in processable:
-        safe = re.sub(r'[<>:"/\\|?*]', "_", f["name"]).strip()
-        try:
-            if f["mimeType"] == "application/vnd.google-apps.document":
-                req = service.files().export_media(fileId=f["id"], mimeType="text/plain")
-                out = INBOX_DIR / f"{Path(safe).stem}.txt"
-            else:
-                req = service.files().get_media(fileId=f["id"], supportsAllDrives=True)
-                out = INBOX_DIR / safe
-
-            with io.FileIO(str(out), "wb") as fh:
-                dl = MediaIoBaseDownload(fh, req)
-                done = False
-                while not done:
-                    _, done = dl.next_chunk()
-            baixados.append(out.name)
-        except Exception as e:
-            baixados.append(f"{f['name']} (ERRO: {e})")
-
-    return f"✅ {len(baixados)} arquivo(s) baixados para '{INBOX_DIR}':\n" + "\n".join(f"  • {n}" for n in baixados)
-
-
-@tool
-def gerar_material(
+def gerar_material_de_marketing(
     tipo: str,
-    brief_json: str,
-    instrucoes_extras: str = "",
+    descricao: str,
+    publico_alvo: str = "revendedores",
+    tom: str = "comercial e direto",
+    detalhes_extras: str = "",
 ) -> str:
     """
-    Gera um único material de marketing com base no brief e no tipo solicitado.
+    Gera um material de marketing B2B a partir de uma descricao livre em linguagem natural.
+    Nao precisa de arquivo de brief — o proprio agente extrai as informacoes da conversa.
 
     Args:
-        tipo (str): Tipo do material. Valores aceitos:
-                    'podcast', 'slides', 'ficha', 'email', 'folheto',
-                    'post_instagram', 'post_linkedin', 'roteiro_video'.
-        brief_json (str): Conteúdo do brief como string JSON.
-        instrucoes_extras (str): Instruções adicionais do usuário para personalizar
-                                 o material (ex: 'tom mais descontraído', 'foco em preço').
+        tipo (str): Tipo do material. Opcoes:
+                    'podcast', 'slides', 'ficha_tecnica', 'email',
+                    'folheto', 'post_instagram', 'post_linkedin', 'roteiro_video'.
+        descricao (str): Descricao completa do produto/campanha/contexto extraida da conversa.
+                         Ex: 'Linha de lubrificantes DLAB, campanha Compre 3 Leve 4,
+                              foco em revendedores do setor industrial'
+        publico_alvo (str): Para quem o material sera direcionado. Padrao: 'revendedores'.
+        tom (str): Tom de comunicacao desejado. Padrao: 'comercial e direto'.
+        detalhes_extras (str): Informacoes adicionais que o usuario mencionou na conversa.
 
     Returns:
-        str: Texto do material gerado.
+        str: Prompt estruturado para o agente gerar o material via LLM.
     """
-    try:
-        brief = json.loads(brief_json)
-    except Exception:
-        brief = {"contexto": brief_json}
+    global _ultimo_material
 
-    PROMPTS = {
-        "podcast": """Crie um ROTEIRO DE PODCAST de até 5 minutos voltado para REVENDEDORES sobre
-        a linha de produtos do contexto. Blocos: Introdução, Desenvolvimento, Encerramento.
-        Destaque 2-3 vantagens chave e termine com chamada forte. Português pt-BR.""",
+    TEMPLATES = {
+        "podcast": """Crie um ROTEIRO DE PODCAST de ate 5 minutos.
+Estrutura obrigatoria:
+- INTRODUCAO (30s): gancho e apresentacao
+- DESENVOLVIMENTO (3min): 3 beneficios principais, dados ou argumentos
+- ENCERRAMENTO (1min): recapitulacao e chamada para acao
+Texto em formato de fala natural, portugues pt-BR.""",
 
-        "slides": """Monte uma ESTRUTURA DE 10 SLIDES para capacitação técnica de REVENDEDORES.
-        Use EXATAMENTE o formato:\nSlide 1 - Título:\n- ...\nSlide 2 - Assunto:\n- ...\nPortuguês pt-BR.""",
+        "slides": """Crie uma ESTRUTURA DE 10 SLIDES para apresentacao de capacitacao.
+Use EXATAMENTE este formato para cada slide:
+Slide N - [Titulo do Slide]:
+- Ponto 1
+- Ponto 2
+- Ponto 3
+Portugues pt-BR.""",
 
-        "ficha": """Crie uma FICHA TÉCNICA textual para vendedores com 2-3 diferenciais práticos
-        por subcategoria. Foco em argumentação contra concorrentes. Português pt-BR.""",
+        "ficha_tecnica": """Crie uma FICHA TECNICA para equipe de vendas.
+Formato:
+PRODUTO/SUBCATEGORIA: [nome]
+- Diferencial 1: [descricao objetiva]
+- Diferencial 2: [argumento contra concorrente]
+- Diferencial 3: [beneficio pratico para o cliente final]
+Portugues pt-BR.""",
 
-        "email": """Crie 2 EMAILS DE MARKETING para REVENDEDORES:\nEMAIL 1 — Apresentação e posicionamento.\n
-        EMAIL 2 — Oferta e urgência. Cada um com: Assunto, Pré-header, Corpo. Português pt-BR.""",
+        "email": """Crie 2 EMAILS DE MARKETING:
+EMAIL 1 — Apresentacao e posicionamento de marca
+Assunto: [linha de assunto]
+Pre-header: [texto do pre-header]
+Corpo: [corpo do email, paragrafos curtos]
 
-        "folheto": """Crie o TEXTO DE UM FOLHETO PROMOCIONAL formato A4 dobrado (3 painéis):\n
-        Capa (título + subtítulo), Painel 2 (produtos + benefícios em bullets),
-        Painel 3 (oferta + CTA + contato). Máx 150 palavras por painel. Português pt-BR.""",
+EMAIL 2 — Oferta com urgencia
+Assunto: [linha de assunto]
+Pre-header: [texto do pre-header]
+Corpo: [corpo do email com CTA claro]
+Portugues pt-BR.""",
 
-        "post_instagram": """Crie 3 POSTS PARA INSTAGRAM voltados para revendedores:\n
-        Cada post com: legenda (máx 150 palavras), hashtags e sugestão de imagem. Português pt-BR.""",
+        "folheto": """Crie o TEXTO DE UM FOLHETO PROMOCIONAL (formato A4 dobrado, 3 paineis):
+CAPA:
+[titulo impactante]
+[subtitulo]
 
-        "post_linkedin": """Crie 2 POSTS PARA LINKEDIN voltados para revendedores B2B:\n
-        Tom profissional, com gancho, desenvolvimento e CTA. Máx 200 palavras cada. Português pt-BR.""",
+PAINEL 2 — Produtos e Beneficios:
+[bullets dos principais produtos/beneficios, max 150 palavras]
 
-        "roteiro_video": """Crie um ROTEIRO DE VÍDEO CURTO (60-90s) para REVENDEDORES:\n
-        Blocos: Hook (5s), Problema (10s), Solução (30s), Prova (15s), CTA (10s). Português pt-BR.""",
+PAINEL 3 — Oferta e CTA:
+[oferta especial + chamada para acao + contato]
+Portugues pt-BR.""",
+
+        "post_instagram": """Crie 3 POSTS PARA INSTAGRAM:
+POST 1:
+Legenda: [max 150 palavras, engajamento emocional]
+Hashtags: [10 hashtags relevantes]
+Sugestao de imagem: [descricao da imagem ideal]
+
+POST 2:
+Legenda: [foco em beneficio ou oferta]
+Hashtags: [10 hashtags]
+Sugestao de imagem: [descricao]
+
+POST 3:
+Legenda: [prova social ou depoimento ficticio]
+Hashtags: [10 hashtags]
+Sugestao de imagem: [descricao]
+Portugues pt-BR.""",
+
+        "post_linkedin": """Crie 2 POSTS PARA LINKEDIN (B2B, tom profissional):
+POST 1:
+[gancho forte na primeira linha]
+[desenvolvimento em paragrafos curtos]
+[CTA claro]
+[3-5 hashtags profissionais]
+
+POST 2:
+[dado ou insight de mercado como gancho]
+[argumentacao com beneficios para o negocio]
+[CTA]
+[hashtags]
+Max 200 palavras cada. Portugues pt-BR.""",
+
+        "roteiro_video": """Crie um ROTEIRO DE VIDEO CURTO (60-90 segundos):
+HOOK (0-5s): [frase de abertura impactante]
+PROBLEMA (5-15s): [dor ou desafio do publico]
+SOLUCAO (15-45s): [como o produto resolve]
+PROVA (45-60s): [resultado ou beneficio concreto]
+CTA (60-75s): [chamada para acao clara]
+Portugues pt-BR.""",
     }
 
-    instrucao_base = PROMPTS.get(tipo.lower().strip())
-    if not instrucao_base:
-        tipos_validos = ", ".join(PROMPTS.keys())
-        return f"❌ Tipo '{tipo}' não reconhecido. Tipos válidos: {tipos_validos}"
+    tipo_norm = tipo.lower().strip().replace(" ", "_")
+    template = TEMPLATES.get(tipo_norm)
+    if not template:
+        tipos_validos = "\n".join(f"  - {t}" for t in TEMPLATES)
+        return f"Tipo '{tipo}' nao reconhecido. Tipos disponiveis:\n{tipos_validos}"
 
-    extra = f"\n\nINSTRUÇÕES ADICIONAIS DO USUÁRIO:\n{instrucoes_extras}" if instrucoes_extras.strip() else ""
+    extras = f"\n\nDetalhes adicionais mencionados:\n{detalhes_extras}" if detalhes_extras.strip() else ""
 
-    prompt = f"""
-Contexto do brief (JSON):
-{json.dumps(brief, ensure_ascii=False, indent=2)}
+    prompt = f"""Voce e um redator senior de marketing B2B especializado em conteudo para revendedores.
 
-Tarefa:
-{instrucao_base}{extra}
-""".strip()
+CONTEXTO DA CAMPANHA/PRODUTO:
+{descricao}
 
-    # Retorna o prompt para o agente gerar — o próprio LLM do agente processa
-    return f"__GERAR_COM_LLM__{prompt}"
+PUBLICO-ALVO: {publico_alvo}
+TOM DE COMUNICACAO: {tom}{extras}
+
+TAREFA:
+{template}
+
+IMPORTANTE:
+- Seja especifico ao contexto fornecido (nao use exemplos genericos)
+- Mantenha o tom {tom}
+- Conteudo pronto para uso, sem explicacoes adicionais
+"""
+    # Registra para possivel salvamento posterior
+    _ultimo_material["tipo"] = tipo_norm
+    _ultimo_material["descricao"] = descricao[:80]
+
+    return prompt
 
 
 @tool
-def gerar_todos_materiais(nome_brief: str, instrucoes_extras: str = "") -> str:
+def salvar_material(conteudo: str, nome_arquivo: str = "", subpasta: str = "") -> str:
     """
-    Gera todos os materiais de marketing (podcast, slides, ficha, email, folheto)
-    para um brief e salva em data/output/<nome_brief>/.
+    Salva um material de marketing gerado em um arquivo .txt em data/output/.
 
     Args:
-        nome_brief (str): Nome do arquivo .brief.json na inbox (ex: 'campanha.brief.json').
-        instrucoes_extras (str): Instruções adicionais para personalizar todos os materiais.
+        conteudo (str): Texto completo do material a salvar.
+        nome_arquivo (str): Nome do arquivo (ex: 'podcast_dlab.txt').
+                            Se vazio, gera automaticamente com timestamp.
+        subpasta (str): Subpasta em data/output/ para organizar por campanha (opcional).
 
     Returns:
-        str: Resumo do que foi gerado e onde foi salvo.
+        str: Confirmacao com o caminho completo do arquivo salvo.
     """
-    path = Path(nome_brief)
-    if not path.exists():
-        path = INBOX_DIR / nome_brief
-    if not path.exists():
-        return f"❌ Brief não encontrado: {nome_brief}"
+    if not conteudo or not conteudo.strip():
+        return "Nenhum conteudo fornecido para salvar."
 
-    try:
-        brief = json.loads(path.read_text(encoding="utf-8"))
-    except Exception as e:
-        return f"❌ Erro ao ler brief: {e}"
-
-    base = path.stem.replace(".brief", "")
-    out_dir = OUTPUT_DIR / base
+    out_dir = OUTPUT_DIR / subpasta if subpasta.strip() else OUTPUT_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    extra = f"\n\nINSTRUÇÕES ADICIONAIS:\n{instrucoes_extras}" if instrucoes_extras.strip() else ""
-    brief_str = json.dumps(brief, ensure_ascii=False, indent=2)
+    if not nome_arquivo.strip():
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        tipo = _ultimo_material.get("tipo", "material") or "material"
+        nome_arquivo = f"{tipo}_{ts}.txt"
 
-    TIPOS = {
-        "podcast":  ("podcast_revendedores.txt",    0.5),
-        "slides":   ("slides_capacitacao_10.txt",   0.4),
-        "ficha":    ("ficha_tecnica_vendedores.txt", 0.4),
-        "email":    ("emails_marketing.txt",        0.6),
-        "folheto":  ("folheto_promocional.txt",     0.6),
-    }
+    if not nome_arquivo.endswith(".txt"):
+        nome_arquivo += ".txt"
 
-    return (
-        f"__GERAR_TODOS__{base}\n"
-        f"__BRIEF_JSON__{brief_str}\n"
-        f"__OUT_DIR__{out_dir}\n"
-        f"__EXTRA__{extra}"
-    )
-
-
-@tool
-def salvar_material(conteudo: str, nome_arquivo: str, subpasta: str = "") -> str:
-    """
-    Salva o conteúdo de um material gerado em um arquivo .txt em data/output/.
-
-    Args:
-        conteudo (str): Texto do material a ser salvo.
-        nome_arquivo (str): Nome do arquivo de saída (ex: 'podcast_campanha.txt').
-        subpasta (str): Subpasta dentro de data/output/ (ex: 'campanha_dlab').
-
-    Returns:
-        str: Caminho completo do arquivo salvo.
-    """
-    out_dir = OUTPUT_DIR / subpasta if subpasta else OUTPUT_DIR
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / nome_arquivo
+    path = out_dir / nome_arquivo
     try:
-        out_path.write_text(conteudo.strip() + "\n", encoding="utf-8")
-        return f"✅ Material salvo em: {out_path}"
+        path.write_text(conteudo.strip() + "\n", encoding="utf-8")
+        _ultimo_material["conteudo"] = conteudo
+        return f"Material salvo com sucesso em: {path}"
     except OSError as e:
-        return f"❌ Erro ao salvar: {e}"
+        return f"Erro ao salvar arquivo: {e}"
 
 
 @tool
-def listar_materiais_gerados(subpasta: str = "") -> str:
+def listar_materiais_salvos(subpasta: str = "") -> str:
     """
-    Lista todos os materiais já gerados em data/output/.
+    Lista todos os materiais ja salvos em data/output/.
 
     Args:
-        subpasta (str): Subpasta específica para listar (opcional).
+        subpasta (str): Filtra por subpasta especifica (opcional).
 
     Returns:
-        str: Lista dos arquivos gerados com seus tamanhos.
+        str: Lista formatada dos arquivos com data de criacao e tamanho.
     """
-    base = OUTPUT_DIR / subpasta if subpasta else OUTPUT_DIR
+    base = OUTPUT_DIR / subpasta if subpasta.strip() else OUTPUT_DIR
     if not base.exists():
-        return f"Nenhum material gerado ainda em '{base}'."
+        return f"Nenhum material salvo ainda em '{base}'."
 
-    arquivos = sorted(base.rglob("*.txt")) + sorted(base.rglob("*.json")) + sorted(base.rglob("*.pptx"))
+    arquivos = sorted(base.rglob("*.txt")) + sorted(base.rglob("*.pptx"))
     if not arquivos:
         return f"Nenhum arquivo encontrado em '{base}'."
 
-    linhas = [f"  📄 {a.relative_to(OUTPUT_DIR)}  ({a.stat().st_size // 1024} KB)" for a in arquivos]
-    return f"Materiais gerados ({len(arquivos)}):\n" + "\n".join(linhas)
+    linhas = []
+    for a in arquivos:
+        stat = a.stat()
+        data = datetime.fromtimestamp(stat.st_mtime).strftime("%d/%m %H:%M")
+        kb = max(1, stat.st_size // 1024)
+        linhas.append(f"  {a.relative_to(OUTPUT_DIR)}  ({kb}KB, {data})")
+
+    return f"Materiais salvos ({len(arquivos)}):\n" + "\n".join(linhas)
 
 
 @tool
-def ler_material_gerado(nome_arquivo: str, subpasta: str = "") -> str:
+def ler_material_salvo(nome_arquivo: str, subpasta: str = "") -> str:
     """
-    Lê e exibe o conteúdo de um material já gerado.
+    Le e exibe o conteudo de um material ja salvo.
 
     Args:
-        nome_arquivo (str): Nome do arquivo (ex: 'podcast_revendedores.txt').
-        subpasta (str): Subpasta dentro de data/output/ (opcional).
+        nome_arquivo (str): Nome do arquivo (ex: 'podcast_dlab.txt').
+        subpasta (str): Subpasta onde o arquivo esta (opcional).
 
     Returns:
-        str: Conteúdo completo do arquivo.
+        str: Conteudo completo do arquivo.
     """
-    base = OUTPUT_DIR / subpasta if subpasta else OUTPUT_DIR
+    base = OUTPUT_DIR / subpasta if subpasta.strip() else OUTPUT_DIR
     path = base / nome_arquivo
+
     if not path.exists():
-        # tenta buscar recursivamente
-        found = list(OUTPUT_DIR.rglob(nome_arquivo))
-        if found:
-            path = found[0]
+        encontrados = list(OUTPUT_DIR.rglob(nome_arquivo))
+        if encontrados:
+            path = encontrados[0]
         else:
-            return f"❌ Arquivo não encontrado: {nome_arquivo}"
+            return f"Arquivo '{nome_arquivo}' nao encontrado em '{base}'."
+
     return path.read_text(encoding="utf-8")
 
 
+@tool
+def tipos_de_material_disponiveis() -> str:
+    """
+    Mostra todos os tipos de materiais de marketing que o BriefFlow consegue gerar
+    e exemplos de como solicitar cada um.
+
+    Returns:
+        str: Lista de tipos com descricao e exemplos de uso.
+    """
+    return """Tipos de materiais que posso gerar para voce:
+
+  podcast          - Roteiro de podcast de ate 5 minutos para revendedores
+                     Ex: "Crie um podcast sobre a linha de hidraulicos DLAB"
+
+  slides           - Estrutura de 10 slides para capacitacao tecnica
+                     Ex: "Monte slides de treinamento sobre lubrificantes industriais"
+
+  ficha_tecnica    - Ficha com diferenciais por subcategoria para vendedores
+                     Ex: "Faca uma ficha tecnica dos produtos da campanha Compre 3 Leve 4"
+
+  email            - 2 emails de marketing (apresentacao + oferta/urgencia)
+                     Ex: "Escreva emails para revendedores sobre o lancamento DLAB"
+
+  folheto          - Texto de folheto A4 dobrado em 3 paineis
+                     Ex: "Crie um folheto promocional para distribuidores"
+
+  post_instagram   - 3 posts para Instagram com legenda, hashtags e sugestao de imagem
+                     Ex: "Gere posts de Instagram para a campanha de setembro"
+
+  post_linkedin    - 2 posts para LinkedIn com tom profissional B2B
+                     Ex: "Crie posts de LinkedIn sobre os novos hidraulicos"
+
+  roteiro_video    - Roteiro de video curto de 60-90 segundos
+                     Ex: "Escreva um roteiro de video para o lancamento da linha DLAB"
+
+Para qualquer tipo, basta descrever o produto/campanha diretamente na conversa!"""
+
+
 # ---------------------------------------------------------------------------
-# Agente
+# Modelo e Agente
 # ---------------------------------------------------------------------------
-
-SYSTEM_PROMPT = """Você é o BriefFlow, um assistente especializado em criação de materiais
-de marketing B2B para revendedores, integrado ao Google Drive.
-
-Você tem acesso às seguintes ferramentas:
-
-• listar_briefs           → mostra os briefs disponíveis na inbox local
-• ler_brief               → lê o conteúdo de um brief específico
-• baixar_brief_do_drive   → importa arquivos do Google Drive para a inbox
-• gerar_material          → gera um material específico (podcast, slides, ficha, email, folheto, post_instagram, post_linkedin, roteiro_video)
-• gerar_todos_materiais   → gera todos os materiais de uma vez para um brief
-• salvar_material         → salva um material gerado em disco
-• listar_materiais_gerados → lista o que já foi gerado
-• ler_material_gerado     → lê um material já salvo
-
-Regras de comportamento:
-1. Seja proativo: quando o usuário pedir um material, chame a tool correta imediatamente.
-2. Quando gerar_material ou gerar_todos_materiais retornar texto começando com '__GERAR_COM_LLM__',
-   use o prompt que vem depois para gerar o conteúdo você mesmo, depois salve automaticamente
-   com salvar_material.
-3. Quando gerar_todos_materiais retornar '__GERAR_TODOS__', gere cada material individualmente
-   (podcast, slides, ficha, email, folheto) e salve cada um automaticamente.
-4. Sempre confirme o que foi gerado e onde foi salvo.
-5. Se o usuário não especificar qual brief usar e houver mais de um, pergunte qual.
-6. Se o usuário pedir ajustes em um material já gerado, leia o material, ajuste e salve novamente.
-7. Responda sempre em português pt-BR, de forma direta e amigável.
-8. Quando listar arquivos ou materiais, use formatação clara com emojis.
-
-Exemplos do que você pode fazer:
-- "Gere o podcast da campanha DLAB"
-- "Crie todos os materiais do brief campanha_q3.brief.json"
-- "Baixe os arquivos do Drive"
-- "Quais materiais já foram gerados?"
-- "Refaça o folheto com tom mais direto e foco em preço"
-- "Mostre o conteúdo do email gerado"
-"""
 
 bedrock_model = BedrockModel(
     model_id=BEDROCK_MODEL_ID,
     region_name=BEDROCK_REGION,
-    temperature=0.5,
+    # Limita tokens para controlar custos
+    max_tokens=MAX_TOKENS,
+    temperature=TEMPERATURE,
 )
+
+SYSTEM_PROMPT = f"""\
+Voce e o BriefFlow, um assistente de IA especializado em criar materiais
+de marketing B2B para revendedores e distribuidores.
+
+Como voce funciona:
+- Voce RACIOCINA a partir do que o usuario ESCREVE na conversa.
+- Nao precisa de arquivos de brief, JSON ou documentos externos.
+- O usuario descreve o produto, campanha ou contexto em linguagem natural,
+  e voce extrai as informacoes necessarias automaticamente.
+
+Ferramentas disponiveis:
+  gerar_material_de_marketing  -> extrai contexto da mensagem e gera o prompt do material
+  salvar_material              -> salva o conteudo gerado em disco
+  listar_materiais_salvos      -> lista arquivos ja gerados
+  ler_material_salvo           -> le um material salvo
+  tipos_de_material_disponiveis -> mostra o que voce pode criar
+
+Regras de comportamento:
+1. Quando o usuario pedir um material, use gerar_material_de_marketing para obter o prompt
+   estruturado, depois use ESSE PROMPT para gerar o texto completo voce mesmo com sua LLM.
+2. Apos gerar o conteudo, SEMPRE pergunte se o usuario quer salvar.
+3. Se o usuario disser "salva", "salve" ou "pode salvar", use salvar_material automaticamente.
+4. Se nao souber o produto/campanha, faca UMA pergunta objetiva para clarificar.
+5. Limite de tokens por resposta: {MAX_TOKENS}. Para materiais longos, divida em partes
+   se necessario e avise o usuario.
+6. Responda SEMPRE em portugues pt-BR, de forma direta e amigavel.
+7. Quando gerar um material, entregue o conteudo completo e formatado na resposta.
+8. Se o usuario pedir ajustes, peca apenas o que precisa mudar (nao regenere tudo sem necessidade).
+
+Exemplos de como voce age:
+  Usuario: "Crie um podcast sobre lubrificantes DLAB para revendedores"
+  Voce: [chama gerar_material_de_marketing com tipo=podcast, descricao=lubrificantes DLAB]
+        [gera o roteiro completo]
+        [pergunta se quer salvar]
+
+  Usuario: "Faca emails para a campanha Compre 3 Leve 4 com foco em preco"
+  Voce: [chama gerar_material_de_marketing com tipo=email, descricao=campanha Compre 3 Leve 4, detalhes=foco em preco]
+        [gera os 2 emails]
+        [pergunta se quer salvar]
+"""
 
 agent = Agent(
     model=bedrock_model,
     system_prompt=SYSTEM_PROMPT,
     tools=[
-        listar_briefs,
-        ler_brief,
-        baixar_brief_do_drive,
-        gerar_material,
-        gerar_todos_materiais,
+        gerar_material_de_marketing,
         salvar_material,
-        listar_materiais_gerados,
-        ler_material_gerado,
+        listar_materiais_salvos,
+        ler_material_salvo,
+        tipos_de_material_disponiveis,
     ],
 )
 
@@ -463,18 +413,24 @@ agent = Agent(
 # ---------------------------------------------------------------------------
 
 BANNER = """
-╔══════════════════════════════════════════════════════╗
-║          BriefFlow — Assistente de Marketing         ║
-║  Digite sua solicitação ou 'sair' para encerrar.     ║
-╚══════════════════════════════════════════════════════╝
++=======================================================+
+|          BriefFlow — Assistente de Marketing          |
+|  Modelo: {modelo:<38}|
+|  Max tokens por resposta: {tokens:<28}|
++=======================================================+
 
-Exemplos:
-  • Gere o podcast da campanha DLAB
-  • Crie todos os materiais do brief disponível
-  • Baixe os arquivos do Drive
-  • Quais materiais já foram gerados?
-  • Refaça o email com tom mais urgente
-"""
+So me diga o que precisa criar. Exemplos:
+  > Crie um podcast para lancar a linha de hidraulicos DLAB
+  > Escreva emails para revendedores sobre a campanha Compre 3 Leve 4
+  > Gere 3 posts de Instagram com foco nos lubrificantes industriais
+  > Que tipos de material voce consegue criar?
+  > Liste o que ja foi salvo
+
+Digite 'sair' para encerrar.
+""".format(
+    modelo=BEDROCK_MODEL_ID,
+    tokens=str(MAX_TOKENS) + " tokens",
+)
 
 
 def main() -> None:
@@ -482,16 +438,16 @@ def main() -> None:
 
     while True:
         try:
-            user_input = input("\nVocê: ").strip()
+            user_input = input("Voce: ").strip()
         except (EOFError, KeyboardInterrupt):
-            print("\n\nEncerrando o BriefFlow. Até mais!")
+            print("\nEncerrando. Ate mais!")
             break
 
         if not user_input:
             continue
 
         if user_input.lower() in {"sair", "exit", "quit", "q"}:
-            print("\nEncerrando o BriefFlow. Até mais!")
+            print("\nEncerrando o BriefFlow. Ate mais!")
             break
 
         print("\nBriefFlow: ", end="", flush=True)
@@ -499,8 +455,10 @@ def main() -> None:
             result = agent(user_input)
             print(result.message)
         except Exception as e:
-            print(f"\n❌ Erro ao processar: {e}")
+            print(f"\nErro ao processar: {e}")
             logger.exception("Erro no agente")
+
+        print()
 
 
 if __name__ == "__main__":
