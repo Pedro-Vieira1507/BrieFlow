@@ -35,20 +35,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger("briefflow")
 
-# ---------------------------------------------------------------------------
-# Config
-# ---------------------------------------------------------------------------
 OUTPUT_DIR      = Path(os.getenv("OUTPUT_DIR",   "data/output"))
 MAX_TOKENS      = int(os.getenv("MAX_TOKENS",     "1200"))
-MAX_TOKENS_HTML = int(os.getenv("MAX_TOKENS_HTML", "3000"))
-TEMPERATURE     = float(os.getenv("TEMPERATURE",  "0.7"))
+MAX_TOKENS_HTML = int(os.getenv("MAX_TOKENS_HTML", "4200"))
+TEMPERATURE     = float(os.getenv("TEMPERATURE",  "0.65"))
 OLLAMA_MODEL    = os.getenv("OLLAMA_MODEL",        "gemma3:4b").strip()
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL",     "http://localhost:11434").strip().rstrip("/")
 OLLAMA_TIMEOUT  = int(os.getenv("OLLAMA_TIMEOUT",  "300"))
 
-# ---------------------------------------------------------------------------
-# System prompts
-# ---------------------------------------------------------------------------
 SYSTEM_PROMPT = f"""Voce e o BriefFlow, assistente especializado em criar materiais de marketing B2B \
 para revendedores e distribuidores de produtos tecnicos (laboratorio, industrial, hidraulica, etc).
 
@@ -75,21 +69,71 @@ REGRAS:
 - Responda SEMPRE em portugues pt-BR, de forma direta e amigavel.
 - Limite por resposta: {MAX_TOKENS} tokens."""
 
+SYSTEM_PROMPT_HTML = """Voce e um diretor de arte senior, designer de interface premium e especialista em materiais graficos B2B modernos.
+Sua tarefa e gerar um arquivo HTML completo e autocontido com CSS embutido, com aparencia PROFISSIONAL, MODERNA, SOFISTICADA e visual de agencia especialista.
 
-SYSTEM_PROMPT_HTML = """Voce e um designer front-end especializado em materiais graficos de marketing B2B.
-Sua tarefa e gerar um arquivo HTML completo e autocontido com CSS embutido.
+OBJETIVO VISUAL:
+- O material deve parecer criado por um designer senior, nao por iniciante.
+- O layout deve ter acabamento premium, visual limpo, elegante, moderno e comercialmente forte.
+- Pense como uma mistura de design corporativo premium + marketing de alta conversao.
 
 REGRAS OBRIGATORIAS:
-1. Retorne SOMENTE o codigo HTML, sem explicacoes, sem markdown, sem texto antes ou depois.
+1. Retorne SOMENTE o codigo HTML, sem explicacoes, sem markdown e sem comentarios fora do HTML.
 2. O HTML deve comecar com <!DOCTYPE html> e terminar com </html>.
-3. Use apenas CSS inline ou <style> embutido - sem dependencias externas.
-4. Use fontes seguras: Arial, Helvetica, Georgia ou sans-serif.
-5. Cores profissionais: prefira azul escuro (#1a3a5c), branco, cinza claro, laranja (#e8700a) como acento.
-6. O layout deve ser visualmente atraente, com hierarquia clara de informacoes.
-7. Inclua todos os textos fornecidos no briefing.
-8. Responda SEMPRE em portugues pt-BR."""
+3. Use apenas HTML + CSS em <style>, sem bibliotecas externas.
+4. O layout deve ficar visualmente pronto para apresentar ao cliente.
+5. Todo o texto deve estar em portugues pt-BR.
+6. O design precisa usar hierarquia forte, composicao profissional e acabamento refinado.
 
-# Dimensoes por tipo de material visual
+DIRECAO DE ARTE OBRIGATORIA:
+- Fundo sofisticado com degradês suaves, blocos bem definidos ou composicao corporativa premium.
+- Tipografia elegante com hierarquia clara: titulo muito forte, subtitulo refinado, blocos bem organizados.
+- Use espacamento generoso, grid limpo e alinhamento consistente.
+- Crie profundidade com sombras suaves, bordas leves, cards premium e contrastes equilibrados.
+- Destaque visual forte para oferta, CTA, diferenciais e beneficios.
+- O material deve ter cara de campanha profissional e nao de documento simples.
+- Evite visual escolar, basico, quadrado ou apenas texto em caixas simples.
+- Use selo, faixa promocional, bloco de destaque, callout visual ou box de autoridade quando fizer sentido.
+
+IDENTIDADE VISUAL PADRAO:
+- Azul profundo: #163a63
+- Azul secundario: #214f86
+- Laranja destaque: #f28c28
+- Branco: #ffffff
+- Cinza claro sofisticado: #f4f7fb
+- Texto escuro: #102030
+
+ELEMENTOS VISUAIS QUE DEVEM SER PRIORIZADOS:
+- Hero principal impactante
+- Cards ou blocos com acabamento premium
+- CTA forte e bem desenhado
+- Bloco de oferta com grande destaque visual
+- Lista de beneficios com icones simples em CSS ou bullets estilizados
+- Rodape elegante quando fizer sentido
+
+REGRAS DE QUALIDADE:
+- Nao entregar HTML minimalista demais.
+- Nao usar apenas uma coluna de texto seco.
+- Nao deixar tudo centralizado sem criterio.
+- Nao gerar cara de template amador.
+- Nao usar bordas pesadas e feias.
+- Nao usar combinacoes pobres de cores.
+- Nao deixar o layout vazio.
+- Se o briefing tiver poucos dados, valorize o visual e a composicao.
+
+ESTRUTURA TECNICA:
+- Centralize o material na pagina com fundo externo neutro.
+- Crie um container principal com dimensao exata do material.
+- Use border-radius moderno e sombra profissional.
+- Pode usar pseudo-elementos visuais via CSS, gradientes, overlays, linhas suaves e pads elegantes.
+- Garanta boa legibilidade.
+
+IMPORTANTE:
+Se houver oferta, ela deve parecer campanha promocional premium.
+Se houver produto tecnico, o layout deve equilibrar sofisticacao visual + clareza comercial.
+Se houver marca, valorize a marca como elemento de confianca.
+"""
+
 DIMENSOES_HTML = {
     "post_visual":  {"width": "1080px", "height": "1080px", "desc": "Post Redes Sociais 1:1"},
     "flyer_html":   {"width": "794px",  "height": "1123px", "desc": "Flyer A4 Vertical"},
@@ -97,15 +141,11 @@ DIMENSOES_HTML = {
     "banner_html":  {"width": "1200px", "height": "400px",  "desc": "Banner Horizontal"},
 }
 
-# ---------------------------------------------------------------------------
-# Historico
-# ---------------------------------------------------------------------------
-_historico: list[tuple[str, str]] = []  # lista de (usuario, assistente)
+_historico: list[tuple[str, str]] = []
 _ultimo_material: dict = {"conteudo": "", "tipo": "", "html": False}
 
 
 def _montar_prompt(entrada: str) -> str:
-    """Monta prompt completo com historico."""
     partes = [SYSTEM_PROMPT, ""]
     for user_msg, assistant_msg in _historico[-6:]:
         partes.append(f"Usuario: {user_msg}")
@@ -117,43 +157,35 @@ def _montar_prompt(entrada: str) -> str:
 
 
 def _montar_prompt_html(tipo: str, briefing: str) -> str:
-    """Monta prompt especializado para geracao de HTML visual."""
     dim = DIMENSOES_HTML.get(tipo, DIMENSOES_HTML["flyer_html"])
     return (
         f"{SYSTEM_PROMPT_HTML}\n\n"
         f"TIPO DE MATERIAL: {dim['desc']}\n"
-        f"DIMENSOES: {dim['width']} x {dim['height']}\n"
+        f"DIMENSOES EXATAS DO CANVAS: {dim['width']} x {dim['height']}\n"
         f"BRIEFING DO USUARIO:\n{briefing}\n\n"
-        f"Gere agora o HTML completo para este material. Comece com <!DOCTYPE html>:"
+        "INSTRUCOES FINAIS DE EXECUCAO:\n"
+        "- Gere um layout visualmente rico, moderno e com acabamento premium.\n"
+        "- Crie composicao de alto nivel, com contraste, destaque e senso de direcao de arte.\n"
+        "- Organize o conteudo com cara de peca publicitaria profissional.\n"
+        "- Entregue o HTML completo agora.\n"
     )
 
 
-# ---------------------------------------------------------------------------
-# Deteccao de intenção grafica
-# ---------------------------------------------------------------------------
-
 _GATILHOS_VISUAIS = {
-    "post_visual":  ["post visual", "post grafico", "post para instagram", "post para redes",
-                     "imagem de post", "arte para", "crie um post", "gere um post"],
-    "flyer_html":   ["flyer", "panfleto", "folheto visual", "flyer html", "crie um flyer",
-                     "gere um flyer", "material grafico", "layout grafico"],
+    "post_visual":  ["post visual", "post grafico", "post para instagram", "post para redes", "imagem de post", "arte para", "crie um post", "gere um post"],
+    "flyer_html":   ["flyer", "panfleto", "folheto visual", "flyer html", "crie um flyer", "gere um flyer", "material grafico", "layout grafico"],
     "card_html":    ["card de produto", "card html", "cartao de produto", "crie um card"],
     "banner_html":  ["banner", "banner html", "crie um banner", "gere um banner"],
 }
 
 
 def _detectar_tipo_visual(texto: str) -> str | None:
-    """Retorna o tipo de material visual se detectado, ou None."""
     t = texto.lower()
     for tipo, gatilhos in _GATILHOS_VISUAIS.items():
         if any(g in t for g in gatilhos):
             return tipo
     return None
 
-
-# ---------------------------------------------------------------------------
-# Verificacao
-# ---------------------------------------------------------------------------
 
 def _verificar_ollama() -> None:
     try:
@@ -180,13 +212,9 @@ def _verificar_ollama() -> None:
         raise SystemExit(1)
 
 
-# ---------------------------------------------------------------------------
-# Chamada ao Ollama via /api/generate
-# ---------------------------------------------------------------------------
-
 def _chamar_ollama(prompt: str, max_tokens: int | None = None) -> str:
     payload = {
-        "model":  OLLAMA_MODEL,
+        "model": OLLAMA_MODEL,
         "prompt": prompt,
         "stream": False,
         "options": {
@@ -214,7 +242,7 @@ def _chamar_ollama(prompt: str, max_tokens: int | None = None) -> str:
         )
     except requests.exceptions.HTTPError as e:
         status = e.response.status_code if e.response is not None else "?"
-        corpo  = e.response.text[:300] if e.response is not None else ""
+        corpo = e.response.text[:300] if e.response is not None else ""
         raise RuntimeError(
             f"Erro {status} do Ollama.\nDetalhe: {corpo}\n"
             f"Verifique se o modelo '{OLLAMA_MODEL}' esta instalado: ollama list"
@@ -226,7 +254,6 @@ def _chamar_ollama(prompt: str, max_tokens: int | None = None) -> str:
 
 
 def _chamar_ollama_texto(entrada: str) -> str:
-    """Chamada padrao para materiais de texto."""
     prompt = _montar_prompt(entrada)
     conteudo = _chamar_ollama(prompt, MAX_TOKENS)
     _historico.append((entrada, conteudo))
@@ -240,13 +267,9 @@ def _chamar_ollama_texto(entrada: str) -> str:
 
 
 def _chamar_ollama_html(tipo: str, briefing: str) -> str:
-    """Chamada especializada para geracao de HTML visual."""
     prompt = _montar_prompt_html(tipo, briefing)
     raw = _chamar_ollama(prompt, MAX_TOKENS_HTML)
-
-    # Extrai apenas o bloco HTML da resposta
     html = _extrair_html(raw)
-
     _ultimo_material["conteudo"] = html
     _ultimo_material["tipo"] = tipo
     _ultimo_material["html"] = True
@@ -254,34 +277,22 @@ def _chamar_ollama_html(tipo: str, briefing: str) -> str:
 
 
 def _extrair_html(texto: str) -> str:
-    """Extrai o bloco HTML da resposta do modelo."""
-    # Tenta extrair bloco de codigo markdown ```html ... ```
     m = re.search(r"```(?:html)?\s*([\s\S]+?)```", texto, re.IGNORECASE)
     if m:
         return m.group(1).strip()
-
-    # Tenta extrair diretamente entre <!DOCTYPE ou <html e </html>
     m = re.search(r"(<!DOCTYPE[\s\S]+</html>)", texto, re.IGNORECASE)
     if m:
         return m.group(1).strip()
-
-    # Retorna o texto bruto se nao encontrar marcadores
     return texto.strip()
 
-
-# ---------------------------------------------------------------------------
-# Salvar material
-# ---------------------------------------------------------------------------
 
 def _salvar_material(conteudo: str, nome_arquivo: str = "") -> str:
     if not conteudo or not conteudo.strip():
         return "[ERRO] Nenhum conteudo para salvar."
-
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    ts   = datetime.now().strftime("%Y%m%d_%H%M%S")
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     tipo = _ultimo_material.get("tipo") or "material"
     eh_html = _ultimo_material.get("html", False)
-
     if not nome_arquivo.strip():
         ext = ".html" if eh_html else ".txt"
         nome_arquivo = f"{tipo}_{ts}{ext}"
@@ -290,13 +301,12 @@ def _salvar_material(conteudo: str, nome_arquivo: str = "") -> str:
             nome_arquivo = nome_arquivo.rstrip(".txt") + ".html"
         elif not eh_html and not nome_arquivo.endswith(".txt"):
             nome_arquivo += ".txt"
-
     path = OUTPUT_DIR / nome_arquivo
     try:
         path.write_text(conteudo.strip() + "\n", encoding="utf-8")
         resultado = f"[OK] Salvo em: {path}"
         if eh_html:
-            resultado += f"\n[HTML] Abrindo no navegador..."
+            resultado += "\n[HTML] Abrindo no navegador..."
             webbrowser.open(path.resolve().as_uri())
         return resultado
     except OSError as e:
@@ -314,7 +324,7 @@ def _listar_materiais() -> str:
     for a in arquivos:
         stat = a.stat()
         data = datetime.fromtimestamp(stat.st_mtime).strftime("%d/%m %H:%M")
-        kb   = max(1, stat.st_size // 1024)
+        kb = max(1, stat.st_size // 1024)
         icone = "🌐" if a.suffix == ".html" else "📄"
         linhas.append(f"  {icone} {a.relative_to(OUTPUT_DIR)}  ({kb} KB | {data})")
     return f"Materiais salvos ({len(arquivos)}):\n" + "\n".join(linhas)
@@ -323,14 +333,14 @@ def _listar_materiais() -> str:
 def _detectar_tipo_texto(texto: str) -> str:
     texto = texto.lower()
     mapa = {
-        "podcast":        ["podcast"],
-        "slides":         ["slide", "apresentacao", "capacitacao"],
-        "ficha_tecnica":  ["ficha", "especificacao"],
-        "email":          ["email", "e-mail"],
-        "folheto":        ["folheto"],
+        "podcast": ["podcast"],
+        "slides": ["slide", "apresentacao", "capacitacao"],
+        "ficha_tecnica": ["ficha", "especificacao"],
+        "email": ["email", "e-mail"],
+        "folheto": ["folheto"],
         "post_instagram": ["instagram"],
-        "post_linkedin":  ["linkedin"],
-        "roteiro_video":  ["video", "reels"],
+        "post_linkedin": ["linkedin"],
+        "roteiro_video": ["video", "reels"],
     }
     for tipo, palavras in mapa.items():
         if any(p in texto for p in palavras):
@@ -349,10 +359,6 @@ def _extrair_nome_arquivo(entrada: str) -> str:
     return ""
 
 
-# ---------------------------------------------------------------------------
-# Banner
-# ---------------------------------------------------------------------------
-
 def _banner() -> str:
     linhas = [
         "+" + "=" * 57 + "+",
@@ -367,10 +373,10 @@ def _banner() -> str:
         "  > 3 posts de Instagram sobre pipetas sorologicas",
         "",
         "Exemplos de materiais VISUAIS (HTML):",
-        "  > Crie um flyer sobre o auxiliar de pipetagem Kasvi",
-        "  > Gere um post visual da campanha Compre 3 Leve 4",
-        "  > Crie um card de produto para a micropipeta DLAB",
-        "  > Gere um banner da Forlab para o site",
+        "  > Crie um flyer premium sobre o auxiliar de pipetagem Kasvi",
+        "  > Gere um post visual moderno da campanha Compre 3 Leve 4",
+        "  > Crie um card de produto sofisticado para a micropipeta DLAB",
+        "  > Gere um banner profissional da Forlab para o site",
         "",
         "  > Liste os materiais ja salvos",
         "",
@@ -379,36 +385,24 @@ def _banner() -> str:
     return "\n".join(linhas)
 
 
-# ---------------------------------------------------------------------------
-# Loop principal
-# ---------------------------------------------------------------------------
-
 def main() -> None:
     _verificar_ollama()
     print(_banner())
-
     aguardando_salvamento = False
-
     while True:
         try:
             entrada = input("\nVoce: ").strip()
         except (EOFError, KeyboardInterrupt):
             print("\nEncerrando. Ate mais!")
             break
-
         if not entrada:
             continue
-
         if entrada.lower() in {"sair", "exit", "quit", "q"}:
             print("\nEncerrando o BriefFlow. Ate mais!")
             break
-
-        # Listagem de materiais
         if any(k in entrada.lower() for k in ("liste", "listar materiais", "o que foi salvo")):
             print(f"\nBriefFlow: {_listar_materiais()}")
             continue
-
-        # Resposta ao pedido de salvamento
         if aguardando_salvamento and _usuario_quer_salvar(entrada):
             nome = _extrair_nome_arquivo(entrada)
             conteudo = _ultimo_material.get("conteudo", "")
@@ -419,27 +413,20 @@ def main() -> None:
                 print("\nBriefFlow: Nao ha material recente para salvar. Gere um primeiro.")
             aguardando_salvamento = False
             continue
-
-        # Detecta se e pedido de material visual
         tipo_visual = _detectar_tipo_visual(entrada)
-
         print("\nBriefFlow: ", end="", flush=True)
         try:
             if tipo_visual:
-                # Gera HTML visual
                 dim = DIMENSOES_HTML[tipo_visual]
-                print(f"Gerando {dim['desc']} em HTML... (pode levar 30-60s)")
+                print(f"Gerando {dim['desc']} em HTML premium... (pode levar 30-90s)")
                 html = _chamar_ollama_html(tipo_visual, entrada)
-
-                # Salva e abre automaticamente no navegador
                 ts = datetime.now().strftime("%Y%m%d_%H%M%S")
                 nome_html = f"{tipo_visual}_{ts}.html"
                 resultado = _salvar_material(html, nome_html)
                 print(resultado)
-                print("\nO layout abriu no seu navegador. Deseja ajustar algo? (ou diga 'salvar' para confirmar)")
-                aguardando_salvamento = False  # ja foi salvo automaticamente
+                print("\nO layout premium abriu no navegador. Descreva agora os ajustes desejados para refinar a arte.")
+                aguardando_salvamento = False
             else:
-                # Gera material de texto
                 resposta = _chamar_ollama_texto(entrada)
                 print(resposta)
                 aguardando_salvamento = any(
