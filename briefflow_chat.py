@@ -58,7 +58,7 @@ OPENAI_API_KEY    = os.getenv("OPENAI_API_KEY",    "").strip()
 
 # --- Modelos ---
 OLLAMA_MODEL    = os.getenv("OLLAMA_MODEL",    "").strip()   # ex: llama3, mistral, gemma3
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").strip()
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").strip().rstrip("/")
 
 GEMINI_MODEL    = os.getenv("GEMINI_MODEL",    "gemini-2.5-flash")
 ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-3-5-haiku-20241022")
@@ -105,12 +105,21 @@ def _montar_lista_providers() -> list[tuple[str, str, dict]]:
     candidatos = []
 
     # 1. Ollama (local, 100% gratuito, sem API key)
+    # LiteLLM exige que api_base termine em /v1 para o Ollama
     if OLLAMA_MODEL:
         if _verificar_ollama_rodando():
+            api_base_v1 = (
+                OLLAMA_BASE_URL
+                if OLLAMA_BASE_URL.endswith("/v1")
+                else f"{OLLAMA_BASE_URL}/v1"
+            )
             candidatos.append((
                 "Ollama (local)",
-                f"ollama/{OLLAMA_MODEL}",
-                {"api_base": OLLAMA_BASE_URL},
+                f"openai/{OLLAMA_MODEL}",   # LiteLLM trata Ollama como OpenAI-compatible
+                {
+                    "api_base": api_base_v1,
+                    "api_key": "ollama",    # valor dummy obrigatorio pelo LiteLLM
+                },
             ))
         else:
             logger.warning(
@@ -120,8 +129,8 @@ def _montar_lista_providers() -> list[tuple[str, str, dict]]:
             )
             print(
                 f"[AVISO] Ollama configurado mas nao esta rodando em {OLLAMA_BASE_URL}.\n"
-                "  -> Execute: ollama serve\n"
-                "  -> E em outro terminal: ollama pull " + OLLAMA_MODEL
+                "  -> Execute em outro terminal: ollama serve\n"
+                "  -> Modelo instalado? Execute: ollama pull " + OLLAMA_MODEL
             )
 
     # 2. Google Gemini (gratuito com limite)
@@ -153,9 +162,8 @@ def _montar_lista_providers() -> list[tuple[str, str, dict]]:
 
 def _criar_model(model_id: str, client_args: dict) -> LiteLLMModel:
     params: dict = {"temperature": TEMPERATURE}
-    # Ollama nao usa max_tokens da mesma forma — evitar enviar para nao dar erro
-    if not model_id.startswith("ollama/"):
-        params["max_tokens"] = MAX_TOKENS
+    # Ollama via OpenAI-compat: max_tokens e suportado normalmente
+    params["max_tokens"] = MAX_TOKENS
     return LiteLLMModel(
         client_args=client_args,
         model_id=model_id,
@@ -164,20 +172,32 @@ def _criar_model(model_id: str, client_args: dict) -> LiteLLMModel:
 
 
 def _e_erro_recuperavel(e: Exception) -> bool:
+    """Retorna True para erros que justificam tentar o proximo provider."""
     msg = str(e).lower()
     gatilhos = (
+        # Rate limit / quota
         "429", "rate limit", "too many requests", "quota", "ratelimit",
+        # Auth
         "401", "403", "authentication", "invalid key", "invalid api key",
         "unauthorized", "permission denied", "security token",
         "unrecognized", "forbidden",
+        # Saldo
         "credit balance", "credit balance is too low", "balance is too low",
         "insufficient_quota", "insufficient quota", "billing",
         "payment required", "402", "upgrade or purchase",
+        # Modelo / disponibilidade
         "model not found", "does not exist", "overloaded",
         "service unavailable", "503", "502",
+        # Stream
         "midstream", "mid-stream", "midstreamfallback",
         "stream", "incomplete stream",
-        "connection refused", "cannot connect",
+        # Conexao (Ollama offline ou rede)
+        "connection refused", "cannot connect", "connection error",
+        "connectionerror", "connect timeout", "timed out", "timeout",
+        "network", "name or service not known", "failed to establish",
+        "remotedisconnected", "broken pipe",
+        # Bad request (modelo errado, parametro invalido)
+        "badrequest", "bad request", "400",
     )
     return any(g in msg for g in gatilhos)
 
@@ -203,7 +223,9 @@ _provider_idx: int = 0
 
 def _provider_atual() -> tuple[str, LiteLLMModel]:
     nome, model_id, client_args = _providers[_provider_idx]
-    label = f"{nome} ({model_id.split('/')[1]})"
+    # Para Ollama (openai/modelname), exibe so o nome do modelo
+    modelo_display = model_id.split("/")[1]
+    label = f"{nome} ({modelo_display})"
     return label, _criar_model(model_id, client_args)
 
 
@@ -598,7 +620,8 @@ def _chamar_com_fallback(user_input: str) -> str:
     ultimo_erro = None
     for idx in indices:
         nome, model_id, client_args = _providers[idx]
-        label = f"{nome} ({model_id.split('/')[1]})"
+        modelo_display = model_id.split("/")[1]
+        label = f"{nome} ({modelo_display})"
 
         if idx != _provider_idx:
             print(f"\n[BriefFlow] Trocando para {label}...", flush=True)
@@ -659,7 +682,7 @@ def _msg_erro_final(e: Exception) -> str:
             "Possiveis causas e solucoes:",
         ]
         if OLLAMA_MODEL:
-            linhas.append(f"  - Ollama: servidor nao esta rodando -> execute 'ollama serve'")
+            linhas.append("  - Ollama: servidor nao esta rodando -> execute 'ollama serve'")
         linhas += [
             "  - Gemini: limite de requisicoes atingido (aguarde alguns minutos)",
             "  - Claude: saldo insuficiente -> console.anthropic.com/settings/billing",
@@ -671,7 +694,7 @@ def _msg_erro_final(e: Exception) -> str:
             "  3. No .env: OLLAMA_MODEL=llama3",
         ]
         return "\n".join(linhas)
-    if any(k in msg for k in ("timeout", "connection", "network")):
+    if any(k in msg for k in ("timeout", "network")):
         return "[ERRO DE CONEXAO] Verifique sua conexao com a internet."
     logger.exception("Erro inesperado")
     return f"[ERRO] {e}"
