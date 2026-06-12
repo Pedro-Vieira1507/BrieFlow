@@ -1,69 +1,136 @@
 """
-briefflow_chat.py — BriefFlow: Assistente conversacional de marketing B2B.
+briefflow_chat.py - BriefFlow: Assistente conversacional de marketing B2B.
 
 Tecnologia:
   - Strands Agents como orquestrador
-  - Modelo GRATUITO: amazon.titan-text-lite-v1 (Amazon Bedrock — sem custo)
-  - Limite de tokens configuravel via .env (MAX_TOKENS, padrao 800)
-  - Raciocina a partir da conversa — sem necessidade de briefs em disco
+  - Fallback automatico de provider: Gemini -> Claude -> OpenAI
+  - Usa o primeiro provider que tiver chave valida no .env
+  - Limite de tokens configuravel (MAX_TOKENS)
+  - Raciocina a partir da conversa - sem arquivos de brief
 
-Uso:
-  python briefflow_chat.py
-
-Exemplos de conversa:
-  "Crie um podcast para lancar a linha de lubrificantes DLAB"
-  "Gere um email marketing para revendedores sobre a campanha Compre 3 Leve 4"
-  "Escreva 3 posts de Instagram para divulgar hidraulicos industriais"
-  "Salve o ultimo material gerado como podcast_dlab.txt"
-  "Liste o que ja foi salvo"
+Setup:
+  1. pip install -r requirements.txt
+  2. Copie .env.example para .env
+  3. Preencha ao menos UMA das chaves:
+       GEMINI_API_KEY   -> https://aistudio.google.com/apikey       (gratuito)
+       ANTHROPIC_API_KEY -> https://console.anthropic.com            (credito gratis no cadastro)
+       OPENAI_API_KEY   -> https://platform.openai.com/api-keys     (pay-as-you-go)
+  4. python briefflow_chat.py
 """
 
 from __future__ import annotations
 
 import logging
 import os
-import re
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 from dotenv import load_dotenv
 load_dotenv()
 
-from strands import Agent, tool
-from strands.models import BedrockModel
-
 # ---------------------------------------------------------------------------
-# Logging — silencia Strands para deixar o chat limpo
+# Logging - silencia libs para deixar o chat limpo
 # ---------------------------------------------------------------------------
-logging.basicConfig(format="%(asctime)s | %(levelname)s | %(message)s", level=logging.WARNING)
+logging.basicConfig(
+    format="%(asctime)s | %(levelname)s | %(message)s",
+    level=logging.WARNING,
+)
 logger = logging.getLogger("briefflow")
 
 # ---------------------------------------------------------------------------
 # Config via .env
 # ---------------------------------------------------------------------------
-OUTPUT_DIR  = Path(os.getenv("OUTPUT_DIR",  "data/output"))
+OUTPUT_DIR   = Path(os.getenv("OUTPUT_DIR", "data/output"))
+MAX_TOKENS   = int(os.getenv("MAX_TOKENS",  "1200"))
+TEMPERATURE  = float(os.getenv("TEMPERATURE", "0.6"))
 
-# Modelo GRATUITO no Amazon Bedrock
-# amazon.titan-text-lite-v1 — sem custo, ideal para textos estruturados
-BEDROCK_MODEL_ID = os.getenv(
-    "BEDROCK_MODEL_ID",
-    "amazon.titan-text-lite-v1",          # <-- gratuito
-)
-BEDROCK_REGION = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
+# Chaves dos providers (qualquer uma basta)
+GEMINI_API_KEY    = os.getenv("GEMINI_API_KEY",    "").strip()
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
+OPENAI_API_KEY    = os.getenv("OPENAI_API_KEY",    "").strip()
 
-# Limite de tokens para nao gastar indevidamente
-# Titan Lite: max 4096. Padrao conservador: 800 tokens por resposta.
-MAX_TOKENS  = int(os.getenv("MAX_TOKENS",  "800"))
-TEMPERATURE = float(os.getenv("TEMPERATURE", "0.6"))
+# Modelos preferidos por provider (configuravel no .env)
+GEMINI_MODEL    = os.getenv("GEMINI_MODEL",    "gemini-2.0-flash")
+ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5")
+OPENAI_MODEL    = os.getenv("OPENAI_MODEL",    "gpt-4o-mini")
 
 # ---------------------------------------------------------------------------
-# Estado em memoria — guarda o ultimo material gerado para salvar depois
+# Selecao automatica de provider
+# ---------------------------------------------------------------------------
+from strands import Agent, tool
+from strands.models.litellm import LiteLLMModel
+
+
+def _build_model() -> tuple[LiteLLMModel, str]:
+    """
+    Tenta construir o modelo na ordem de preferencia:
+      1. Gemini  (gratuito)
+      2. Claude  (Anthropic)
+      3. OpenAI  (GPT-4o mini)
+    Retorna o primeiro que tiver chave configurada.
+    Lanca RuntimeError se nenhuma chave estiver disponivel.
+    """
+    providers = [
+        (
+            "Google Gemini",
+            GEMINI_API_KEY,
+            f"gemini/{GEMINI_MODEL}",
+            {"api_key": GEMINI_API_KEY},
+        ),
+        (
+            "Anthropic Claude",
+            ANTHROPIC_API_KEY,
+            f"anthropic/{ANTHROPIC_MODEL}",
+            {"api_key": ANTHROPIC_API_KEY},
+        ),
+        (
+            "OpenAI",
+            OPENAI_API_KEY,
+            f"openai/{OPENAI_MODEL}",
+            {"api_key": OPENAI_API_KEY},
+        ),
+    ]
+
+    for nome, chave, model_id, client_args in providers:
+        if chave:
+            model = LiteLLMModel(
+                client_args=client_args,
+                model_id=model_id,
+                params={
+                    "max_tokens": MAX_TOKENS,
+                    "temperature": TEMPERATURE,
+                },
+            )
+            return model, f"{nome} ({model_id.split('/')[1]})"
+
+    raise RuntimeError(
+        "\n"
+        "[ERRO] Nenhuma chave de API encontrada no .env\n"
+        "\n"
+        "Configure ao menos UMA das opcoes abaixo no arquivo .env:\n"
+        "\n"
+        "  GEMINI_API_KEY=...     -> https://aistudio.google.com/apikey  (GRATUITO)\n"
+        "  ANTHROPIC_API_KEY=...  -> https://console.anthropic.com\n"
+        "  OPENAI_API_KEY=...     -> https://platform.openai.com/api-keys\n"
+    )
+
+
+try:
+    _model, _provider_ativo = _build_model()
+except RuntimeError as _err:
+    print(_err)
+    raise SystemExit(1)
+
+
+# ---------------------------------------------------------------------------
+# Estado em memoria
 # ---------------------------------------------------------------------------
 _ultimo_material: dict = {"conteudo": "", "tipo": "", "descricao": ""}
 
 
 # ---------------------------------------------------------------------------
-# TOOLS — acoes que o agente pode executar
+# TOOLS
 # ---------------------------------------------------------------------------
 
 @tool
@@ -75,167 +142,141 @@ def gerar_material_de_marketing(
     detalhes_extras: str = "",
 ) -> str:
     """
-    Gera um material de marketing B2B a partir de uma descricao livre em linguagem natural.
-    Nao precisa de arquivo de brief — o proprio agente extrai as informacoes da conversa.
+    Monta o prompt estruturado para gerar um material de marketing B2B.
+    O agente usa esse prompt para escrever o conteudo final com sua LLM.
+    Nao requer arquivos - extrai tudo da conversa do usuario.
 
     Args:
-        tipo (str): Tipo do material. Opcoes:
-                    'podcast', 'slides', 'ficha_tecnica', 'email',
-                    'folheto', 'post_instagram', 'post_linkedin', 'roteiro_video'.
-        descricao (str): Descricao completa do produto/campanha/contexto extraida da conversa.
-                         Ex: 'Linha de lubrificantes DLAB, campanha Compre 3 Leve 4,
-                              foco em revendedores do setor industrial'
-        publico_alvo (str): Para quem o material sera direcionado. Padrao: 'revendedores'.
-        tom (str): Tom de comunicacao desejado. Padrao: 'comercial e direto'.
-        detalhes_extras (str): Informacoes adicionais que o usuario mencionou na conversa.
+        tipo: Tipo do material:
+              podcast | slides | ficha_tecnica | email |
+              folheto | post_instagram | post_linkedin | roteiro_video
+        descricao: Contexto extraido da conversa (produto, campanha, empresa).
+        publico_alvo: Audiencia do material (padrao: revendedores).
+        tom: Tom de comunicacao (comercial, tecnico, urgente, descontraido...).
+        detalhes_extras: Informacoes adicionais mencionadas na conversa.
 
     Returns:
-        str: Prompt estruturado para o agente gerar o material via LLM.
+        Prompt estruturado pronto para geracao do material.
     """
     global _ultimo_material
 
-    TEMPLATES = {
-        "podcast": """Crie um ROTEIRO DE PODCAST de ate 5 minutos.
-Estrutura obrigatoria:
-- INTRODUCAO (30s): gancho e apresentacao
-- DESENVOLVIMENTO (3min): 3 beneficios principais, dados ou argumentos
-- ENCERRAMENTO (1min): recapitulacao e chamada para acao
-Texto em formato de fala natural, portugues pt-BR.""",
-
-        "slides": """Crie uma ESTRUTURA DE 10 SLIDES para apresentacao de capacitacao.
-Use EXATAMENTE este formato para cada slide:
-Slide N - [Titulo do Slide]:
-- Ponto 1
-- Ponto 2
-- Ponto 3
-Portugues pt-BR.""",
-
-        "ficha_tecnica": """Crie uma FICHA TECNICA para equipe de vendas.
-Formato:
-PRODUTO/SUBCATEGORIA: [nome]
-- Diferencial 1: [descricao objetiva]
-- Diferencial 2: [argumento contra concorrente]
-- Diferencial 3: [beneficio pratico para o cliente final]
-Portugues pt-BR.""",
-
-        "email": """Crie 2 EMAILS DE MARKETING:
-EMAIL 1 — Apresentacao e posicionamento de marca
-Assunto: [linha de assunto]
-Pre-header: [texto do pre-header]
-Corpo: [corpo do email, paragrafos curtos]
-
-EMAIL 2 — Oferta com urgencia
-Assunto: [linha de assunto]
-Pre-header: [texto do pre-header]
-Corpo: [corpo do email com CTA claro]
-Portugues pt-BR.""",
-
-        "folheto": """Crie o TEXTO DE UM FOLHETO PROMOCIONAL (formato A4 dobrado, 3 paineis):
-CAPA:
-[titulo impactante]
-[subtitulo]
-
-PAINEL 2 — Produtos e Beneficios:
-[bullets dos principais produtos/beneficios, max 150 palavras]
-
-PAINEL 3 — Oferta e CTA:
-[oferta especial + chamada para acao + contato]
-Portugues pt-BR.""",
-
-        "post_instagram": """Crie 3 POSTS PARA INSTAGRAM:
-POST 1:
-Legenda: [max 150 palavras, engajamento emocional]
-Hashtags: [10 hashtags relevantes]
-Sugestao de imagem: [descricao da imagem ideal]
-
-POST 2:
-Legenda: [foco em beneficio ou oferta]
-Hashtags: [10 hashtags]
-Sugestao de imagem: [descricao]
-
-POST 3:
-Legenda: [prova social ou depoimento ficticio]
-Hashtags: [10 hashtags]
-Sugestao de imagem: [descricao]
-Portugues pt-BR.""",
-
-        "post_linkedin": """Crie 2 POSTS PARA LINKEDIN (B2B, tom profissional):
-POST 1:
-[gancho forte na primeira linha]
-[desenvolvimento em paragrafos curtos]
-[CTA claro]
-[3-5 hashtags profissionais]
-
-POST 2:
-[dado ou insight de mercado como gancho]
-[argumentacao com beneficios para o negocio]
-[CTA]
-[hashtags]
-Max 200 palavras cada. Portugues pt-BR.""",
-
-        "roteiro_video": """Crie um ROTEIRO DE VIDEO CURTO (60-90 segundos):
-HOOK (0-5s): [frase de abertura impactante]
-PROBLEMA (5-15s): [dor ou desafio do publico]
-SOLUCAO (15-45s): [como o produto resolve]
-PROVA (45-60s): [resultado ou beneficio concreto]
-CTA (60-75s): [chamada para acao clara]
-Portugues pt-BR.""",
+    TEMPLATES: dict[str, str] = {
+        "podcast": (
+            "Crie um ROTEIRO DE PODCAST de ate 5 minutos.\n"
+            "Estrutura:\n"
+            "- INTRODUCAO (30s): gancho forte + apresentacao do tema\n"
+            "- DESENVOLVIMENTO (3min): 3 beneficios/argumentos com exemplos reais\n"
+            "- ENCERRAMENTO (1min): recapitulacao + chamada para acao clara\n"
+            "Formato de fala natural, portugues pt-BR."
+        ),
+        "slides": (
+            "Crie uma ESTRUTURA DE 10 SLIDES para capacitacao tecnica.\n"
+            "Formato obrigatorio para cada slide:\n"
+            "Slide N - [Titulo]:\n"
+            "- Ponto 1\n"
+            "- Ponto 2\n"
+            "- Ponto 3\n"
+            "Portugues pt-BR."
+        ),
+        "ficha_tecnica": (
+            "Crie uma FICHA TECNICA detalhada para vendedores.\n"
+            "Por produto/subcategoria:\n"
+            "PRODUTO: [nome]\n"
+            "- Especificacoes tecnicas principais\n"
+            "- Diferenciais vs concorrentes\n"
+            "- Argumentos de venda para o cliente final\n"
+            "- Aplicacoes recomendadas\n"
+            "Portugues pt-BR."
+        ),
+        "email": (
+            "Crie 2 EMAILS DE MARKETING:\n"
+            "EMAIL 1 - Apresentacao e posicionamento\n"
+            "Assunto: [...]\nPre-header: [...]\nCorpo: [paragrafos curtos, beneficios, CTA]\n"
+            "\nEMAIL 2 - Oferta com urgencia\n"
+            "Assunto: [...]\nPre-header: [...]\nCorpo: [oferta + prazo + CTA direto]\n"
+            "Portugues pt-BR."
+        ),
+        "folheto": (
+            "Crie o TEXTO DE UM FOLHETO PROMOCIONAL (A4 dobrado, 3 paineis):\n"
+            "CAPA: titulo impactante + subtitulo\n"
+            "PAINEL 2: produtos e beneficios em bullets (max 150 palavras)\n"
+            "PAINEL 3: oferta especial + CTA + contato\n"
+            "Portugues pt-BR."
+        ),
+        "post_instagram": (
+            "Crie 3 POSTS PARA INSTAGRAM:\n"
+            "POST 1:\nLegenda: [max 150 palavras]\nHashtags: [10]\nImagem sugerida: [descricao]\n"
+            "\nPOST 2:\nLegenda: [foco em beneficio]\nHashtags: [10]\nImagem sugerida: [descricao]\n"
+            "\nPOST 3:\nLegenda: [prova social]\nHashtags: [10]\nImagem sugerida: [descricao]\n"
+            "Portugues pt-BR."
+        ),
+        "post_linkedin": (
+            "Crie 2 POSTS PARA LINKEDIN (B2B profissional, max 200 palavras cada):\n"
+            "POST 1: gancho + desenvolvimento + CTA + 3-5 hashtags\n"
+            "POST 2: dado de mercado + argumento + CTA + hashtags\n"
+            "Portugues pt-BR."
+        ),
+        "roteiro_video": (
+            "Crie um ROTEIRO DE VIDEO CURTO (60-90 segundos):\n"
+            "HOOK (0-5s): frase de abertura impactante\n"
+            "PROBLEMA (5-15s): dor do publico\n"
+            "SOLUCAO (15-45s): como o produto resolve\n"
+            "PROVA (45-60s): resultado concreto\n"
+            "CTA (60-75s): chamada para acao\n"
+            "Portugues pt-BR."
+        ),
     }
 
     tipo_norm = tipo.lower().strip().replace(" ", "_")
-    template = TEMPLATES.get(tipo_norm)
+    template  = TEMPLATES.get(tipo_norm)
+
     if not template:
-        tipos_validos = "\n".join(f"  - {t}" for t in TEMPLATES)
-        return f"Tipo '{tipo}' nao reconhecido. Tipos disponiveis:\n{tipos_validos}"
+        disponiveis = " | ".join(TEMPLATES.keys())
+        return f"Tipo '{tipo}' invalido. Opcoes: {disponiveis}"
 
-    extras = f"\n\nDetalhes adicionais mencionados:\n{detalhes_extras}" if detalhes_extras.strip() else ""
+    extras = f"\nDetalhes adicionais: {detalhes_extras}" if detalhes_extras.strip() else ""
 
-    prompt = f"""Voce e um redator senior de marketing B2B especializado em conteudo para revendedores.
-
-CONTEXTO DA CAMPANHA/PRODUTO:
-{descricao}
-
-PUBLICO-ALVO: {publico_alvo}
-TOM DE COMUNICACAO: {tom}{extras}
-
-TAREFA:
-{template}
-
-IMPORTANTE:
-- Seja especifico ao contexto fornecido (nao use exemplos genericos)
-- Mantenha o tom {tom}
-- Conteudo pronto para uso, sem explicacoes adicionais
-"""
-    # Registra para possivel salvamento posterior
-    _ultimo_material["tipo"] = tipo_norm
+    _ultimo_material["tipo"]     = tipo_norm
     _ultimo_material["descricao"] = descricao[:80]
 
-    return prompt
+    return (
+        f"CONTEXTO: {descricao}\n"
+        f"PUBLICO: {publico_alvo}\n"
+        f"TOM: {tom}"
+        f"{extras}\n\n"
+        f"TAREFA:\n{template}\n\n"
+        "IMPORTANTE: Seja especifico ao contexto fornecido. "
+        "Entregue apenas o material pronto, sem explicacoes adicionais."
+    )
 
 
 @tool
-def salvar_material(conteudo: str, nome_arquivo: str = "", subpasta: str = "") -> str:
+def salvar_material(
+    conteudo: str,
+    nome_arquivo: str = "",
+    subpasta: str = "",
+) -> str:
     """
-    Salva um material de marketing gerado em um arquivo .txt em data/output/.
+    Salva um material gerado em data/output/ como arquivo .txt.
 
     Args:
-        conteudo (str): Texto completo do material a salvar.
-        nome_arquivo (str): Nome do arquivo (ex: 'podcast_dlab.txt').
-                            Se vazio, gera automaticamente com timestamp.
-        subpasta (str): Subpasta em data/output/ para organizar por campanha (opcional).
+        conteudo: Texto completo do material a salvar.
+        nome_arquivo: Nome do arquivo (ex: podcast_dlab.txt).
+                      Se omitido, gera automaticamente com timestamp.
+        subpasta: Subpasta dentro de data/output/ para organizar por campanha.
 
     Returns:
-        str: Confirmacao com o caminho completo do arquivo salvo.
+        Caminho completo do arquivo salvo.
     """
     if not conteudo or not conteudo.strip():
-        return "Nenhum conteudo fornecido para salvar."
+        return "Nenhum conteudo para salvar."
 
-    out_dir = OUTPUT_DIR / subpasta if subpasta.strip() else OUTPUT_DIR
+    out_dir = OUTPUT_DIR / subpasta.strip() if subpasta.strip() else OUTPUT_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
 
     if not nome_arquivo.strip():
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        tipo = _ultimo_material.get("tipo", "material") or "material"
+        ts   = datetime.now().strftime("%Y%m%d_%H%M%S")
+        tipo = _ultimo_material.get("tipo") or "material"
         nome_arquivo = f"{tipo}_{ts}.txt"
 
     if not nome_arquivo.endswith(".txt"):
@@ -245,9 +286,9 @@ def salvar_material(conteudo: str, nome_arquivo: str = "", subpasta: str = "") -
     try:
         path.write_text(conteudo.strip() + "\n", encoding="utf-8")
         _ultimo_material["conteudo"] = conteudo
-        return f"Material salvo com sucesso em: {path}"
+        return f"Material salvo em: {path}"
     except OSError as e:
-        return f"Erro ao salvar arquivo: {e}"
+        return f"Erro ao salvar: {e}"
 
 
 @tool
@@ -256,25 +297,25 @@ def listar_materiais_salvos(subpasta: str = "") -> str:
     Lista todos os materiais ja salvos em data/output/.
 
     Args:
-        subpasta (str): Filtra por subpasta especifica (opcional).
+        subpasta: Filtra por subpasta especifica (opcional).
 
     Returns:
-        str: Lista formatada dos arquivos com data de criacao e tamanho.
+        Lista com nome, tamanho e data de cada arquivo.
     """
-    base = OUTPUT_DIR / subpasta if subpasta.strip() else OUTPUT_DIR
+    base = OUTPUT_DIR / subpasta.strip() if subpasta.strip() else OUTPUT_DIR
     if not base.exists():
         return f"Nenhum material salvo ainda em '{base}'."
 
     arquivos = sorted(base.rglob("*.txt")) + sorted(base.rglob("*.pptx"))
     if not arquivos:
-        return f"Nenhum arquivo encontrado em '{base}'."
+        return "Nenhum arquivo encontrado."
 
     linhas = []
     for a in arquivos:
         stat = a.stat()
         data = datetime.fromtimestamp(stat.st_mtime).strftime("%d/%m %H:%M")
-        kb = max(1, stat.st_size // 1024)
-        linhas.append(f"  {a.relative_to(OUTPUT_DIR)}  ({kb}KB, {data})")
+        kb   = max(1, stat.st_size // 1024)
+        linhas.append(f"  {a.relative_to(OUTPUT_DIR)}  ({kb} KB | {data})")
 
     return f"Materiais salvos ({len(arquivos)}):\n" + "\n".join(linhas)
 
@@ -282,121 +323,104 @@ def listar_materiais_salvos(subpasta: str = "") -> str:
 @tool
 def ler_material_salvo(nome_arquivo: str, subpasta: str = "") -> str:
     """
-    Le e exibe o conteudo de um material ja salvo.
+    Le e exibe o conteudo completo de um material ja salvo.
 
     Args:
-        nome_arquivo (str): Nome do arquivo (ex: 'podcast_dlab.txt').
-        subpasta (str): Subpasta onde o arquivo esta (opcional).
+        nome_arquivo: Nome do arquivo (ex: podcast_dlab.txt).
+        subpasta: Subpasta onde o arquivo esta (opcional).
 
     Returns:
-        str: Conteudo completo do arquivo.
+        Conteudo completo do arquivo.
     """
-    base = OUTPUT_DIR / subpasta if subpasta.strip() else OUTPUT_DIR
+    base = OUTPUT_DIR / subpasta.strip() if subpasta.strip() else OUTPUT_DIR
     path = base / nome_arquivo
-
     if not path.exists():
         encontrados = list(OUTPUT_DIR.rglob(nome_arquivo))
         if encontrados:
             path = encontrados[0]
         else:
-            return f"Arquivo '{nome_arquivo}' nao encontrado em '{base}'."
-
+            return f"Arquivo '{nome_arquivo}' nao encontrado."
     return path.read_text(encoding="utf-8")
 
 
 @tool
 def tipos_de_material_disponiveis() -> str:
     """
-    Mostra todos os tipos de materiais de marketing que o BriefFlow consegue gerar
-    e exemplos de como solicitar cada um.
+    Lista todos os tipos de materiais que o BriefFlow pode gerar,
+    com descricao e exemplos de como solicitar.
 
     Returns:
-        str: Lista de tipos com descricao e exemplos de uso.
+        Lista formatada dos tipos com exemplos.
     """
-    return """Tipos de materiais que posso gerar para voce:
-
-  podcast          - Roteiro de podcast de ate 5 minutos para revendedores
-                     Ex: "Crie um podcast sobre a linha de hidraulicos DLAB"
-
-  slides           - Estrutura de 10 slides para capacitacao tecnica
-                     Ex: "Monte slides de treinamento sobre lubrificantes industriais"
-
-  ficha_tecnica    - Ficha com diferenciais por subcategoria para vendedores
-                     Ex: "Faca uma ficha tecnica dos produtos da campanha Compre 3 Leve 4"
-
-  email            - 2 emails de marketing (apresentacao + oferta/urgencia)
-                     Ex: "Escreva emails para revendedores sobre o lancamento DLAB"
-
-  folheto          - Texto de folheto A4 dobrado em 3 paineis
-                     Ex: "Crie um folheto promocional para distribuidores"
-
-  post_instagram   - 3 posts para Instagram com legenda, hashtags e sugestao de imagem
-                     Ex: "Gere posts de Instagram para a campanha de setembro"
-
-  post_linkedin    - 2 posts para LinkedIn com tom profissional B2B
-                     Ex: "Crie posts de LinkedIn sobre os novos hidraulicos"
-
-  roteiro_video    - Roteiro de video curto de 60-90 segundos
-                     Ex: "Escreva um roteiro de video para o lancamento da linha DLAB"
-
-Para qualquer tipo, basta descrever o produto/campanha diretamente na conversa!"""
+    return (
+        "Tipos de materiais que posso criar:\n\n"
+        "  podcast          Roteiro de podcast 5 min\n"
+        '                   Ex: "Crie um podcast sobre a linha DLAB de lubrificantes"\n\n'
+        "  slides           10 slides de capacitacao tecnica\n"
+        '                   Ex: "Monte slides de treinamento sobre hidraulicos"\n\n'
+        "  ficha_tecnica    Ficha com specs e diferenciais para vendedores\n"
+        '                   Ex: "Ficha tecnica dos produtos da campanha Compre 3 Leve 4"\n\n'
+        "  email            2 emails (apresentacao + oferta/urgencia)\n"
+        '                   Ex: "Emails para revendedores sobre o lancamento DLAB"\n\n'
+        "  folheto          Texto de folheto A4 em 3 paineis\n"
+        '                   Ex: "Folheto promocional para distribuidores"\n\n'
+        "  post_instagram   3 posts com legenda, hashtags e sugestao de imagem\n"
+        '                   Ex: "Posts de Instagram para a campanha de setembro"\n\n'
+        "  post_linkedin    2 posts B2B profissionais\n"
+        '                   Ex: "Posts de LinkedIn sobre hidraulicos industriais"\n\n'
+        "  roteiro_video    Roteiro de video 60-90 segundos\n"
+        '                   Ex: "Roteiro de video para o lancamento da linha DLAB"\n\n'
+        "Basta descrever o produto/campanha na conversa - sem precisar de arquivos!"
+    )
 
 
 # ---------------------------------------------------------------------------
-# Modelo e Agente
+# Agente
 # ---------------------------------------------------------------------------
-
-bedrock_model = BedrockModel(
-    model_id=BEDROCK_MODEL_ID,
-    region_name=BEDROCK_REGION,
-    # Limita tokens para controlar custos
-    max_tokens=MAX_TOKENS,
-    temperature=TEMPERATURE,
-)
 
 SYSTEM_PROMPT = f"""\
-Voce e o BriefFlow, um assistente de IA especializado em criar materiais
-de marketing B2B para revendedores e distribuidores.
+Voce e o BriefFlow, assistente de IA especializado em criar materiais de
+marketing B2B para revendedores e distribuidores.
 
-Como voce funciona:
-- Voce RACIOCINA a partir do que o usuario ESCREVE na conversa.
-- Nao precisa de arquivos de brief, JSON ou documentos externos.
-- O usuario descreve o produto, campanha ou contexto em linguagem natural,
-  e voce extrai as informacoes necessarias automaticamente.
+FORMA DE TRABALHO:
+- Voce raciocina a partir do que o usuario ESCREVE na conversa.
+- Nao precisa de arquivos, JSON ou documentos externos.
+- Extrai produto, campanha e contexto diretamente da mensagem.
 
-Ferramentas disponiveis:
-  gerar_material_de_marketing  -> extrai contexto da mensagem e gera o prompt do material
-  salvar_material              -> salva o conteudo gerado em disco
-  listar_materiais_salvos      -> lista arquivos ja gerados
-  ler_material_salvo           -> le um material salvo
-  tipos_de_material_disponiveis -> mostra o que voce pode criar
+FERRAMENTAS DISPONIVEIS:
+  gerar_material_de_marketing  -> monta o prompt e gera o material
+  salvar_material              -> salva conteudo em data/output/
+  listar_materiais_salvos      -> lista arquivos ja salvos
+  ler_material_salvo           -> le um arquivo salvo
+  tipos_de_material_disponiveis -> mostra o que pode ser criado
 
-Regras de comportamento:
-1. Quando o usuario pedir um material, use gerar_material_de_marketing para obter o prompt
-   estruturado, depois use ESSE PROMPT para gerar o texto completo voce mesmo com sua LLM.
-2. Apos gerar o conteudo, SEMPRE pergunte se o usuario quer salvar.
-3. Se o usuario disser "salva", "salve" ou "pode salvar", use salvar_material automaticamente.
-4. Se nao souber o produto/campanha, faca UMA pergunta objetiva para clarificar.
-5. Limite de tokens por resposta: {MAX_TOKENS}. Para materiais longos, divida em partes
-   se necessario e avise o usuario.
-6. Responda SEMPRE em portugues pt-BR, de forma direta e amigavel.
-7. Quando gerar um material, entregue o conteudo completo e formatado na resposta.
-8. Se o usuario pedir ajustes, peca apenas o que precisa mudar (nao regenere tudo sem necessidade).
+REGRAS DE COMPORTAMENTO:
+1. Ao receber um pedido de material:
+   a) Chame gerar_material_de_marketing para obter o prompt estruturado
+   b) Use esse prompt para escrever o material COMPLETO voce mesmo
+   c) Entregue o conteudo formatado e pronto na resposta
+   d) Pergunte: "Quer salvar esse material? Se sim, qual nome de arquivo?"
+2. Se o usuario confirmar salvamento, chame salvar_material imediatamente.
+3. Se faltar contexto essencial, faca UMA unica pergunta objetiva.
+4. Limite por resposta: {MAX_TOKENS} tokens. Para materiais longos, avise
+   que pode continuar em partes se necessario.
+5. Responda SEMPRE em portugues pt-BR, direto e amigavel.
+6. Para ajustes em material ja gerado: pergunte o que mudar, altere
+   apenas o trecho necessario.
+7. Nunca mencione providers, modelos ou detalhes tecnicos ao usuario.
 
-Exemplos de como voce age:
-  Usuario: "Crie um podcast sobre lubrificantes DLAB para revendedores"
-  Voce: [chama gerar_material_de_marketing com tipo=podcast, descricao=lubrificantes DLAB]
-        [gera o roteiro completo]
-        [pergunta se quer salvar]
-
-  Usuario: "Faca emails para a campanha Compre 3 Leve 4 com foco em preco"
-  Voce: [chama gerar_material_de_marketing com tipo=email, descricao=campanha Compre 3 Leve 4, detalhes=foco em preco]
-        [gera os 2 emails]
-        [pergunta se quer salvar]
+EXEMPLO DE FLUXO CORRETO:
+  Usuario: "Emails para campanha Compre 3 Leve 4 com urgencia"
+  Agente: [chama gerar_material_de_marketing(tipo=email, ...)]
+          [escreve os 2 emails completos]
+          "Quer salvar esses emails? Se sim, qual nome de arquivo?"
+  Usuario: "Salva como emails_c3l4.txt"
+  Agente: [chama salvar_material(...)]
+          "Salvo em data/output/emails_c3l4.txt!"
 """
 
 agent = Agent(
-    model=bedrock_model,
+    model=_model,
     system_prompt=SYSTEM_PROMPT,
     tools=[
         gerar_material_de_marketing,
@@ -412,33 +436,52 @@ agent = Agent(
 # Loop de chat
 # ---------------------------------------------------------------------------
 
-BANNER = """
-+=======================================================+
-|          BriefFlow — Assistente de Marketing          |
-|  Modelo: {modelo:<38}|
-|  Max tokens por resposta: {tokens:<28}|
-+=======================================================+
+def _fmt_banner() -> str:
+    lines = [
+        "+" + "=" * 55 + "+",
+        "|{:^55}|".format("BriefFlow - Assistente de Marketing"),
+        "|{:^55}|".format(f"Provider ativo: {_provider_ativo}"),
+        "|{:^55}|".format(f"Limite: {MAX_TOKENS} tokens por resposta"),
+        "+" + "=" * 55 + "+",
+        "",
+        "Descreva o que precisa criar. Exemplos:",
+        "  > Crie um podcast sobre a linha de lubrificantes DLAB",
+        "  > Emails para a campanha Compre 3 Leve 4 com urgencia",
+        "  > 3 posts de Instagram sobre hidraulicos industriais",
+        "  > Que tipos de material voce cria?",
+        "  > Liste o que ja foi salvo",
+        "",
+        "Digite 'sair' para encerrar.",
+    ]
+    return "\n".join(lines)
 
-So me diga o que precisa criar. Exemplos:
-  > Crie um podcast para lancar a linha de hidraulicos DLAB
-  > Escreva emails para revendedores sobre a campanha Compre 3 Leve 4
-  > Gere 3 posts de Instagram com foco nos lubrificantes industriais
-  > Que tipos de material voce consegue criar?
-  > Liste o que ja foi salvo
 
-Digite 'sair' para encerrar.
-""".format(
-    modelo=BEDROCK_MODEL_ID,
-    tokens=str(MAX_TOKENS) + " tokens",
-)
+def _tratar_erro(e: Exception) -> str:
+    msg = str(e).lower()
+    if any(k in msg for k in ("api_key", "401", "403", "authentication", "invalid key")):
+        return (
+            "[ERRO DE AUTENTICACAO] Sua chave de API e invalida ou expirou.\n"
+            f"Provider ativo: {_provider_ativo}\n"
+            "Verifique a chave no .env e reinicie o programa."
+        )
+    if any(k in msg for k in ("quota", "429", "rate limit", "too many")):
+        return (
+            "[LIMITE ATINGIDO] Limite de requisicoes atingido temporariamente.\n"
+            "Aguarde alguns minutos e tente novamente.\n"
+            "Dica: configure outra chave de provider no .env para fallback automatico."
+        )
+    if any(k in msg for k in ("timeout", "connection", "network")):
+        return "[ERRO DE CONEXAO] Verifique sua conexao com a internet e tente novamente."
+    logger.exception("Erro inesperado no agente")
+    return f"[ERRO] {e}"
 
 
 def main() -> None:
-    print(BANNER)
+    print(_fmt_banner())
 
     while True:
         try:
-            user_input = input("Voce: ").strip()
+            user_input = input("\nVoce: ").strip()
         except (EOFError, KeyboardInterrupt):
             print("\nEncerrando. Ate mais!")
             break
@@ -455,10 +498,7 @@ def main() -> None:
             result = agent(user_input)
             print(result.message)
         except Exception as e:
-            print(f"\nErro ao processar: {e}")
-            logger.exception("Erro no agente")
-
-        print()
+            print("\n" + _tratar_erro(e))
 
 
 if __name__ == "__main__":
