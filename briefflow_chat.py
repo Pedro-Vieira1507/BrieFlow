@@ -3,7 +3,7 @@ briefflow_chat.py - BriefFlow: Assistente conversacional de marketing B2B.
 
 Tecnologia:
   - Strands Agents como orquestrador
-  - Fallback REAL entre providers: Gemini -> Claude -> OpenAI
+  - Fallback REAL entre providers: Ollama (local) -> Gemini -> Claude -> OpenAI
   - Hook BeforeToolCallEvent para logging e validacao de cada tool call
   - Suporte opcional a servidores MCP (filesystem, web search, etc.)
   - Se um provider falhar (rate limit, auth, timeout, saldo), tenta o proximo
@@ -11,14 +11,17 @@ Tecnologia:
 Setup:
   1. pip install -r requirements.txt
   2. Copie .env.example para .env
-  3. Preencha ao menos UMA das chaves:
+  3. Para uso 100% GRATUITO com Ollama:
+       - Instale Ollama: https://ollama.com
+       - Execute: ollama pull llama3
+       - Defina no .env: OLLAMA_MODEL=llama3
+       - Nao precisa de API key!
+  4. Ou configure qualquer provider pago no .env:
        GEMINI_API_KEY    -> https://aistudio.google.com/apikey  (gratuito)
        ANTHROPIC_API_KEY -> https://console.anthropic.com
        OPENAI_API_KEY    -> https://platform.openai.com/api-keys
-  4. (Opcional) Para habilitar MCP, defina MCP_FILESYSTEM_PATH no .env
-     apontando para a pasta raiz que o servidor MCP pode acessar.
-     Requer Node.js instalado (para npx).
-  5. python briefflow_chat.py
+  5. (Opcional) Para habilitar MCP, defina MCP_FILESYSTEM_PATH no .env
+  6. python briefflow_chat.py
 """
 
 from __future__ import annotations
@@ -48,17 +51,20 @@ OUTPUT_DIR  = Path(os.getenv("OUTPUT_DIR", "data/output"))
 MAX_TOKENS  = int(os.getenv("MAX_TOKENS",  "1200"))
 TEMPERATURE = float(os.getenv("TEMPERATURE", "0.6"))
 
+# --- Chaves dos providers pagos ---
 GEMINI_API_KEY    = os.getenv("GEMINI_API_KEY",    "").strip()
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
 OPENAI_API_KEY    = os.getenv("OPENAI_API_KEY",    "").strip()
 
-GEMINI_MODEL    = os.getenv("GEMINI_MODEL",    "gemini-2.0-flash")
-ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5")
+# --- Modelos ---
+OLLAMA_MODEL    = os.getenv("OLLAMA_MODEL",    "").strip()   # ex: llama3, mistral, gemma3
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").strip()
+
+GEMINI_MODEL    = os.getenv("GEMINI_MODEL",    "gemini-2.5-flash")
+ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-3-5-haiku-20241022")
 OPENAI_MODEL    = os.getenv("OPENAI_MODEL",    "gpt-4o-mini")
 
 # MCP: caminho raiz opcional para o servidor filesystem MCP
-# Defina no .env: MCP_FILESYSTEM_PATH=C:\Users\Voce\Documents
-# Requer Node.js instalado (https://nodejs.org)
 MCP_FILESYSTEM_PATH = os.getenv("MCP_FILESYSTEM_PATH", "").strip()
 
 # ---------------------------------------------------------------------------
@@ -69,12 +75,8 @@ from strands.models.litellm import LiteLLMModel
 from strands.hooks.events import BeforeToolCallEvent, AfterToolCallEvent
 
 # ---------------------------------------------------------------------------
-# MCP: importacao condicional e compativel com todas as versoes do Strands
+# MCP: importacao condicional
 # ---------------------------------------------------------------------------
-# O Strands SDK usa o pacote `mcp` (Model Context Protocol) diretamente.
-# A classe StdioClientTransport NAO existe no mcp_client do Strands.
-# O padrao correto e usar MCPClient com stdio_client do pacote mcp.
-
 _MCP_DISPONIVEL = False
 MCPClient = None  # type: ignore
 
@@ -86,27 +88,78 @@ except ImportError:
 
 
 # ---------------------------------------------------------------------------
-# Providers
+# Providers — ordem: Ollama (local/gratis) -> Gemini -> Claude -> OpenAI
 # ---------------------------------------------------------------------------
 
+def _verificar_ollama_rodando() -> bool:
+    """Verifica se o servidor Ollama esta acessivel antes de adicionar como provider."""
+    try:
+        import urllib.request
+        urllib.request.urlopen(f"{OLLAMA_BASE_URL}/api/tags", timeout=2)
+        return True
+    except Exception:
+        return False
+
+
 def _montar_lista_providers() -> list[tuple[str, str, dict]]:
-    candidatos = [
-        ("Google Gemini",    f"gemini/{GEMINI_MODEL}",       {"api_key": GEMINI_API_KEY},    GEMINI_API_KEY),
-        ("Anthropic Claude", f"anthropic/{ANTHROPIC_MODEL}", {"api_key": ANTHROPIC_API_KEY}, ANTHROPIC_API_KEY),
-        ("OpenAI",           f"openai/{OPENAI_MODEL}",       {"api_key": OPENAI_API_KEY},    OPENAI_API_KEY),
-    ]
-    return [
-        (nome, model_id, client_args)
-        for nome, model_id, client_args, chave in candidatos
-        if chave
-    ]
+    candidatos = []
+
+    # 1. Ollama (local, 100% gratuito, sem API key)
+    if OLLAMA_MODEL:
+        if _verificar_ollama_rodando():
+            candidatos.append((
+                "Ollama (local)",
+                f"ollama/{OLLAMA_MODEL}",
+                {"api_base": OLLAMA_BASE_URL},
+            ))
+        else:
+            logger.warning(
+                "[Ollama] OLLAMA_MODEL definido mas servidor nao encontrado em %s. "
+                "Execute 'ollama serve' e tente novamente.",
+                OLLAMA_BASE_URL,
+            )
+            print(
+                f"[AVISO] Ollama configurado mas nao esta rodando em {OLLAMA_BASE_URL}.\n"
+                "  -> Execute: ollama serve\n"
+                "  -> E em outro terminal: ollama pull " + OLLAMA_MODEL
+            )
+
+    # 2. Google Gemini (gratuito com limite)
+    if GEMINI_API_KEY:
+        candidatos.append((
+            "Google Gemini",
+            f"gemini/{GEMINI_MODEL}",
+            {"api_key": GEMINI_API_KEY},
+        ))
+
+    # 3. Anthropic Claude
+    if ANTHROPIC_API_KEY:
+        candidatos.append((
+            "Anthropic Claude",
+            f"anthropic/{ANTHROPIC_MODEL}",
+            {"api_key": ANTHROPIC_API_KEY},
+        ))
+
+    # 4. OpenAI
+    if OPENAI_API_KEY:
+        candidatos.append((
+            "OpenAI",
+            f"openai/{OPENAI_MODEL}",
+            {"api_key": OPENAI_API_KEY},
+        ))
+
+    return candidatos
 
 
 def _criar_model(model_id: str, client_args: dict) -> LiteLLMModel:
+    params: dict = {"temperature": TEMPERATURE}
+    # Ollama nao usa max_tokens da mesma forma — evitar enviar para nao dar erro
+    if not model_id.startswith("ollama/"):
+        params["max_tokens"] = MAX_TOKENS
     return LiteLLMModel(
         client_args=client_args,
         model_id=model_id,
-        params={"max_tokens": MAX_TOKENS, "temperature": TEMPERATURE},
+        params=params,
     )
 
 
@@ -124,6 +177,7 @@ def _e_erro_recuperavel(e: Exception) -> bool:
         "service unavailable", "503", "502",
         "midstream", "mid-stream", "midstreamfallback",
         "stream", "incomplete stream",
+        "connection refused", "cannot connect",
     )
     return any(g in msg for g in gatilhos)
 
@@ -132,8 +186,12 @@ _providers = _montar_lista_providers()
 
 if not _providers:
     print(
-        "\n[ERRO] Nenhuma chave de API encontrada no .env\n\n"
-        "Configure ao menos UMA das opcoes abaixo:\n\n"
+        "\n[ERRO] Nenhum provider disponivel.\n\n"
+        "OPCAO GRATUITA (sem API key):\n"
+        "  1. Instale Ollama: https://ollama.com\n"
+        "  2. Execute: ollama pull llama3\n"
+        "  3. No .env defina: OLLAMA_MODEL=llama3\n\n"
+        "OPCOES COM API KEY (algumas gratuitas):\n"
         "  GEMINI_API_KEY=...     -> https://aistudio.google.com/apikey  (GRATUITO)\n"
         "  ANTHROPIC_API_KEY=...  -> https://console.anthropic.com\n"
         "  OPENAI_API_KEY=...     -> https://platform.openai.com/api-keys\n"
@@ -160,16 +218,10 @@ _ultimo_material: dict = {"conteudo": "", "tipo": "", "descricao": ""}
 # ---------------------------------------------------------------------------
 
 def hook_antes_tool(event: BeforeToolCallEvent) -> None:
-    """
-    Executado ANTES de cada tool call.
-    - Loga qual tool esta sendo chamada e com quais argumentos.
-    - Cancela salvar_material se o conteudo estiver vazio.
-    """
     nome = event.tool_use.get("name", "")
     inp  = event.tool_use.get("input", {})
     logger.info("[TOOL CALL] %s | args: %s", nome, json.dumps(inp, ensure_ascii=False)[:200])
 
-    # Guardrail: impede salvar material sem conteudo
     if nome == "salvar_material":
         conteudo = inp.get("conteudo", "") if isinstance(inp, dict) else ""
         if not conteudo or not str(conteudo).strip():
@@ -178,10 +230,6 @@ def hook_antes_tool(event: BeforeToolCallEvent) -> None:
 
 
 def hook_apos_tool(event: AfterToolCallEvent) -> None:
-    """
-    Executado APOS cada tool call.
-    - Loga o resultado resumido para auditoria.
-    """
     nome      = event.tool_use.get("name", "")
     resultado = str(getattr(event, "tool_result", "") or "")[:120]
     logger.info("[TOOL RESULT] %s | resultado: %s", nome, resultado)
@@ -192,29 +240,11 @@ def hook_apos_tool(event: AfterToolCallEvent) -> None:
 # ---------------------------------------------------------------------------
 
 def _montar_mcp_clients() -> list:
-    """
-    Cria MCPClients para os servidores MCP configurados no .env.
-    Retorna lista vazia se MCP nao estiver disponivel ou configurado.
-
-    Padrao correto do Strands SDK:
-      - USA: mcp.client.stdio.stdio_client + mcp.types.StdioServerParameters
-      - NAO USA: StdioClientTransport (essa classe nao existe no SDK)
-
-    Servidores suportados:
-      - Filesystem MCP (stdio): habilitado via MCP_FILESYSTEM_PATH no .env
-        Requer Node.js: https://nodejs.org
-
-    Para adicionar novos servidores MCP, inclua novos blocos seguindo
-    o padrao MCPClient(lambda: stdio_client(StdioServerParameters(...))).
-    """
     if not _MCP_DISPONIVEL or MCPClient is None:
         return []
 
     clientes = []
 
-    # --- Servidor MCP: Filesystem (stdio) ---
-    # Permite ao agente ler/listar arquivos da pasta configurada.
-    # Habilite definindo MCP_FILESYSTEM_PATH no .env
     if MCP_FILESYSTEM_PATH:
         try:
             from mcp.client.stdio import stdio_client
@@ -225,7 +255,6 @@ def _montar_mcp_clients() -> list:
                 args=["-y", "@modelcontextprotocol/server-filesystem", MCP_FILESYSTEM_PATH],
                 env=None,
             )
-            # MCPClient recebe um callable que retorna o context manager de transporte
             clientes.append(MCPClient(lambda p=params: stdio_client(p)))
             logger.info("[MCP] Servidor filesystem habilitado: %s", MCP_FILESYSTEM_PATH)
             print(f"[MCP] Filesystem ativo: {MCP_FILESYSTEM_PATH}")
@@ -234,18 +263,6 @@ def _montar_mcp_clients() -> list:
             print("[MCP] Aviso: instale com  pip install strands-agents[mcp]")
         except Exception as e:
             logger.warning("[MCP] Falha ao inicializar servidor filesystem: %s", e)
-
-    # --- Exemplo: Servidor MCP via HTTP (Streamable HTTP) ---
-    # Para habilitar um servidor MCP remoto, descomente e configure:
-    #
-    # MCP_HTTP_URL = os.getenv("MCP_HTTP_URL", "").strip()
-    # if MCP_HTTP_URL:
-    #     try:
-    #         from mcp.client.streamable_http import streamablehttp_client
-    #         clientes.append(MCPClient(lambda u=MCP_HTTP_URL: streamablehttp_client(u)))
-    #         print(f"[MCP] Servidor HTTP ativo: {MCP_HTTP_URL}")
-    #     except Exception as e:
-    #         logger.warning("[MCP] Falha ao inicializar servidor HTTP: %s", e)
 
     return clientes
 
@@ -553,25 +570,17 @@ _TOOLS_LOCAIS = [
 # ---------------------------------------------------------------------------
 
 def _criar_agente(model: LiteLLMModel) -> Agent:
-    """
-    Cria o agente com tools locais + clientes MCP (se configurados).
-    Os hooks de logging/validacao sao registrados apos a criacao.
-    """
     todas_tools = _TOOLS_LOCAIS + _mcp_clients
-
     agente = Agent(
         model=model,
         system_prompt=SYSTEM_PROMPT,
         tools=todas_tools,
     )
-
     agente.add_hook(BeforeToolCallEvent, hook_antes_tool)
     agente.add_hook(AfterToolCallEvent,  hook_apos_tool)
-
     return agente
 
 
-# Cria o agente inicial
 _provider_label, _model_atual = _provider_atual()
 agent = _criar_agente(_model_atual)
 
@@ -645,14 +654,23 @@ def _fmt_banner() -> str:
 def _msg_erro_final(e: Exception) -> str:
     msg = str(e).lower()
     if "todos os" in msg and "providers falharam" in msg:
-        return (
-            "[TODOS OS PROVIDERS FALHARAM]\n"
-            "Possiveis causas:\n"
-            "  - Gemini: limite de requisicoes atingido (aguarde alguns minutos)\n"
-            "  - Claude: saldo insuficiente -> console.anthropic.com/settings/billing\n"
-            "  - OpenAI: saldo insuficiente -> platform.openai.com/settings/billing\n"
-            "Verifique saldos e chaves no .env e tente novamente."
-        )
+        linhas = [
+            "[TODOS OS PROVIDERS FALHARAM]",
+            "Possiveis causas e solucoes:",
+        ]
+        if OLLAMA_MODEL:
+            linhas.append(f"  - Ollama: servidor nao esta rodando -> execute 'ollama serve'")
+        linhas += [
+            "  - Gemini: limite de requisicoes atingido (aguarde alguns minutos)",
+            "  - Claude: saldo insuficiente -> console.anthropic.com/settings/billing",
+            "  - OpenAI: saldo insuficiente -> platform.openai.com/settings/billing",
+            "",
+            "DICA GRATUITA: Use Ollama local!",
+            "  1. Instale: https://ollama.com",
+            "  2. Execute: ollama pull llama3",
+            "  3. No .env: OLLAMA_MODEL=llama3",
+        ]
+        return "\n".join(linhas)
     if any(k in msg for k in ("timeout", "connection", "network")):
         return "[ERRO DE CONEXAO] Verifique sua conexao com a internet."
     logger.exception("Erro inesperado")
