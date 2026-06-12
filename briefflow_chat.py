@@ -17,6 +17,7 @@ Setup:
        OPENAI_API_KEY    -> https://platform.openai.com/api-keys
   4. (Opcional) Para habilitar MCP, defina MCP_FILESYSTEM_PATH no .env
      apontando para a pasta raiz que o servidor MCP pode acessar.
+     Requer Node.js instalado (para npx).
   5. python briefflow_chat.py
 """
 
@@ -56,7 +57,8 @@ ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5")
 OPENAI_MODEL    = os.getenv("OPENAI_MODEL",    "gpt-4o-mini")
 
 # MCP: caminho raiz opcional para o servidor filesystem MCP
-# Defina no .env: MCP_FILESYSTEM_PATH=/caminho/para/pasta
+# Defina no .env: MCP_FILESYSTEM_PATH=C:\Users\Voce\Documents
+# Requer Node.js instalado (https://nodejs.org)
 MCP_FILESYSTEM_PATH = os.getenv("MCP_FILESYSTEM_PATH", "").strip()
 
 # ---------------------------------------------------------------------------
@@ -67,13 +69,19 @@ from strands.models.litellm import LiteLLMModel
 from strands.hooks.events import BeforeToolCallEvent, AfterToolCallEvent
 
 # ---------------------------------------------------------------------------
-# MCP: importacao condicional
+# MCP: importacao condicional e compativel com todas as versoes do Strands
 # ---------------------------------------------------------------------------
+# O Strands SDK usa o pacote `mcp` (Model Context Protocol) diretamente.
+# A classe StdioClientTransport NAO existe no mcp_client do Strands.
+# O padrao correto e usar MCPClient com stdio_client do pacote mcp.
+
+_MCP_DISPONIVEL = False
+MCPClient = None  # type: ignore
+
 try:
-    from strands.tools.mcp import MCPClient
+    from strands.tools.mcp import MCPClient  # noqa: F811
     _MCP_DISPONIVEL = True
 except ImportError:
-    _MCP_DISPONIVEL = False
     logger.warning("strands[mcp] nao instalado. Servidores MCP desabilitados.")
 
 
@@ -188,32 +196,42 @@ def _montar_mcp_clients() -> list:
     Cria MCPClients para os servidores MCP configurados no .env.
     Retorna lista vazia se MCP nao estiver disponivel ou configurado.
 
+    Padrao correto do Strands SDK:
+      - USA: mcp.client.stdio.stdio_client + mcp.types.StdioServerParameters
+      - NAO USA: StdioClientTransport (essa classe nao existe no SDK)
+
     Servidores suportados:
       - Filesystem MCP (stdio): habilitado via MCP_FILESYSTEM_PATH no .env
-        Requer: npx @modelcontextprotocol/server-filesystem
+        Requer Node.js: https://nodejs.org
 
-    Para adicionar novos servidores MCP, inclua novos blocos abaixo
-    seguindo o padrao MCPClient(StdioTransport(...)) ou MCPClient(HttpTransport(...)).
+    Para adicionar novos servidores MCP, inclua novos blocos seguindo
+    o padrao MCPClient(lambda: stdio_client(StdioServerParameters(...))).
     """
-    if not _MCP_DISPONIVEL:
+    if not _MCP_DISPONIVEL or MCPClient is None:
         return []
-
-    from strands.tools.mcp.mcp_client import StdioClientTransport
 
     clientes = []
 
     # --- Servidor MCP: Filesystem (stdio) ---
     # Permite ao agente ler/listar arquivos da pasta configurada.
-    # Habilite definindo MCP_FILESYSTEM_PATH=/sua/pasta no .env
+    # Habilite definindo MCP_FILESYSTEM_PATH no .env
     if MCP_FILESYSTEM_PATH:
         try:
-            fs_transport = StdioClientTransport(
+            from mcp.client.stdio import stdio_client
+            from mcp import StdioServerParameters
+
+            params = StdioServerParameters(
                 command="npx",
                 args=["-y", "@modelcontextprotocol/server-filesystem", MCP_FILESYSTEM_PATH],
+                env=None,
             )
-            clientes.append(MCPClient(lambda t=fs_transport: t))
+            # MCPClient recebe um callable que retorna o context manager de transporte
+            clientes.append(MCPClient(lambda p=params: stdio_client(p)))
             logger.info("[MCP] Servidor filesystem habilitado: %s", MCP_FILESYSTEM_PATH)
             print(f"[MCP] Filesystem ativo: {MCP_FILESYSTEM_PATH}")
+        except ImportError as e:
+            logger.warning("[MCP] Dependencias MCP nao encontradas: %s", e)
+            print("[MCP] Aviso: instale com  pip install strands-agents[mcp]")
         except Exception as e:
             logger.warning("[MCP] Falha ao inicializar servidor filesystem: %s", e)
 
@@ -221,11 +239,13 @@ def _montar_mcp_clients() -> list:
     # Para habilitar um servidor MCP remoto, descomente e configure:
     #
     # MCP_HTTP_URL = os.getenv("MCP_HTTP_URL", "").strip()
-    # if MCP_HTTP_URL and _MCP_DISPONIVEL:
-    #     from strands.tools.mcp.mcp_client import StreamableHttpClientTransport
-    #     http_transport = StreamableHttpClientTransport(url=MCP_HTTP_URL)
-    #     clientes.append(MCPClient(lambda t=http_transport: t))
-    #     print(f"[MCP] Servidor HTTP ativo: {MCP_HTTP_URL}")
+    # if MCP_HTTP_URL:
+    #     try:
+    #         from mcp.client.streamable_http import streamablehttp_client
+    #         clientes.append(MCPClient(lambda u=MCP_HTTP_URL: streamablehttp_client(u)))
+    #         print(f"[MCP] Servidor HTTP ativo: {MCP_HTTP_URL}")
+    #     except Exception as e:
+    #         logger.warning("[MCP] Falha ao inicializar servidor HTTP: %s", e)
 
     return clientes
 
@@ -537,7 +557,6 @@ def _criar_agente(model: LiteLLMModel) -> Agent:
     Cria o agente com tools locais + clientes MCP (se configurados).
     Os hooks de logging/validacao sao registrados apos a criacao.
     """
-    # Combina tools locais com MCPClients (ToolProviders)
     todas_tools = _TOOLS_LOCAIS + _mcp_clients
 
     agente = Agent(
@@ -546,7 +565,6 @@ def _criar_agente(model: LiteLLMModel) -> Agent:
         tools=todas_tools,
     )
 
-    # Registra hooks de ciclo de vida
     agente.add_hook(BeforeToolCallEvent, hook_antes_tool)
     agente.add_hook(AfterToolCallEvent,  hook_apos_tool)
 
