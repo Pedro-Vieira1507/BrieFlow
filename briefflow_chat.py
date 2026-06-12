@@ -3,10 +3,9 @@ briefflow_chat.py - BriefFlow: Assistente conversacional de marketing B2B.
 
 Tecnologia:
   - Strands Agents como orquestrador
-  - Fallback automatico de provider: Gemini -> Claude -> OpenAI
-  - Usa o primeiro provider que tiver chave valida no .env
-  - Limite de tokens configuravel (MAX_TOKENS)
-  - Raciocina a partir da conversa - sem arquivos de brief
+  - Fallback REAL entre providers: Gemini -> Claude -> OpenAI
+  - Se um provider falhar (rate limit, auth, timeout), tenta o proximo automaticamente
+  - O agente reconstroi com o proximo provider e repete a mensagem do usuario
 
 Setup:
   1. pip install -r requirements.txt
@@ -24,13 +23,12 @@ import logging
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 from dotenv import load_dotenv
 load_dotenv()
 
 # ---------------------------------------------------------------------------
-# Logging - silencia libs para deixar o chat limpo
+# Logging
 # ---------------------------------------------------------------------------
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(message)s",
@@ -41,90 +39,109 @@ logger = logging.getLogger("briefflow")
 # ---------------------------------------------------------------------------
 # Config via .env
 # ---------------------------------------------------------------------------
-OUTPUT_DIR   = Path(os.getenv("OUTPUT_DIR", "data/output"))
-MAX_TOKENS   = int(os.getenv("MAX_TOKENS",  "1200"))
-TEMPERATURE  = float(os.getenv("TEMPERATURE", "0.6"))
+OUTPUT_DIR  = Path(os.getenv("OUTPUT_DIR", "data/output"))
+MAX_TOKENS  = int(os.getenv("MAX_TOKENS",  "1200"))
+TEMPERATURE = float(os.getenv("TEMPERATURE", "0.6"))
 
-# Chaves dos providers (qualquer uma basta)
 GEMINI_API_KEY    = os.getenv("GEMINI_API_KEY",    "").strip()
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
 OPENAI_API_KEY    = os.getenv("OPENAI_API_KEY",    "").strip()
 
-# Modelos preferidos por provider (configuravel no .env)
 GEMINI_MODEL    = os.getenv("GEMINI_MODEL",    "gemini-2.0-flash")
 ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5")
 OPENAI_MODEL    = os.getenv("OPENAI_MODEL",    "gpt-4o-mini")
 
 # ---------------------------------------------------------------------------
-# Selecao automatica de provider
+# Lista de providers disponíveis (com chave configurada)
 # ---------------------------------------------------------------------------
 from strands import Agent, tool
 from strands.models.litellm import LiteLLMModel
 
 
-def _build_model() -> tuple[LiteLLMModel, str]:
+def _montar_lista_providers() -> list[tuple[str, str, dict]]:
     """
-    Tenta construir o modelo na ordem de preferencia:
-      1. Gemini  (gratuito)
-      2. Claude  (Anthropic)
-      3. OpenAI  (GPT-4o mini)
-    Retorna o primeiro que tiver chave configurada.
-    Lanca RuntimeError se nenhuma chave estiver disponivel.
+    Retorna apenas os providers que têm chave configurada, na ordem de preferência.
+    Cada item: (nome_legivel, model_id_litellm, client_args)
     """
-    providers = [
+    candidatos = [
         (
             "Google Gemini",
-            GEMINI_API_KEY,
             f"gemini/{GEMINI_MODEL}",
             {"api_key": GEMINI_API_KEY},
+            GEMINI_API_KEY,
         ),
         (
             "Anthropic Claude",
-            ANTHROPIC_API_KEY,
             f"anthropic/{ANTHROPIC_MODEL}",
             {"api_key": ANTHROPIC_API_KEY},
+            ANTHROPIC_API_KEY,
         ),
         (
             "OpenAI",
-            OPENAI_API_KEY,
             f"openai/{OPENAI_MODEL}",
             {"api_key": OPENAI_API_KEY},
+            OPENAI_API_KEY,
         ),
     ]
+    return [
+        (nome, model_id, client_args)
+        for nome, model_id, client_args, chave in candidatos
+        if chave
+    ]
 
-    for nome, chave, model_id, client_args in providers:
-        if chave:
-            model = LiteLLMModel(
-                client_args=client_args,
-                model_id=model_id,
-                params={
-                    "max_tokens": MAX_TOKENS,
-                    "temperature": TEMPERATURE,
-                },
-            )
-            return model, f"{nome} ({model_id.split('/')[1]})"
 
-    raise RuntimeError(
-        "\n"
-        "[ERRO] Nenhuma chave de API encontrada no .env\n"
-        "\n"
-        "Configure ao menos UMA das opcoes abaixo no arquivo .env:\n"
-        "\n"
+def _criar_model(model_id: str, client_args: dict) -> LiteLLMModel:
+    return LiteLLMModel(
+        client_args=client_args,
+        model_id=model_id,
+        params={
+            "max_tokens": MAX_TOKENS,
+            "temperature": TEMPERATURE,
+        },
+    )
+
+
+def _e_erro_recuperavel(e: Exception) -> bool:
+    """
+    Retorna True para erros que justificam tentar o próximo provider:
+    rate limit, autenticação inválida, token expirado, modelo indisponível.
+    """
+    msg = str(e).lower()
+    gatilhos = (
+        "429", "rate limit", "too many requests", "quota",
+        "401", "403", "authentication", "invalid key",
+        "unauthorized", "permission", "security token",
+        "unrecognized", "model not found", "does not exist",
+        "overloaded", "service unavailable", "503",
+    )
+    return any(g in msg for g in gatilhos)
+
+
+# Inicializa lista de providers disponíveis
+_providers = _montar_lista_providers()
+
+if not _providers:
+    print(
+        "\n[ERRO] Nenhuma chave de API encontrada no .env\n\n"
+        "Configure ao menos UMA das opções abaixo:\n\n"
         "  GEMINI_API_KEY=...     -> https://aistudio.google.com/apikey  (GRATUITO)\n"
         "  ANTHROPIC_API_KEY=...  -> https://console.anthropic.com\n"
         "  OPENAI_API_KEY=...     -> https://platform.openai.com/api-keys\n"
     )
-
-
-try:
-    _model, _provider_ativo = _build_model()
-except RuntimeError as _err:
-    print(_err)
     raise SystemExit(1)
+
+# Provider atual (índice na lista _providers)
+_provider_idx: int = 0
+
+
+def _provider_atual() -> tuple[str, LiteLLMModel]:
+    nome, model_id, client_args = _providers[_provider_idx]
+    label = f"{nome} ({model_id.split('/')[1]})"
+    return label, _criar_model(model_id, client_args)
 
 
 # ---------------------------------------------------------------------------
-# Estado em memoria
+# Estado em memória
 # ---------------------------------------------------------------------------
 _ultimo_material: dict = {"conteudo": "", "tipo": "", "descricao": ""}
 
@@ -236,7 +253,7 @@ def gerar_material_de_marketing(
 
     extras = f"\nDetalhes adicionais: {detalhes_extras}" if detalhes_extras.strip() else ""
 
-    _ultimo_material["tipo"]     = tipo_norm
+    _ultimo_material["tipo"]      = tipo_norm
     _ultimo_material["descricao"] = descricao[:80]
 
     return (
@@ -375,7 +392,7 @@ def tipos_de_material_disponiveis() -> str:
 
 
 # ---------------------------------------------------------------------------
-# Agente
+# Construção do agente com fallback real
 # ---------------------------------------------------------------------------
 
 SYSTEM_PROMPT = f"""\
@@ -408,28 +425,76 @@ REGRAS DE COMPORTAMENTO:
 6. Para ajustes em material ja gerado: pergunte o que mudar, altere
    apenas o trecho necessario.
 7. Nunca mencione providers, modelos ou detalhes tecnicos ao usuario.
-
-EXEMPLO DE FLUXO CORRETO:
-  Usuario: "Emails para campanha Compre 3 Leve 4 com urgencia"
-  Agente: [chama gerar_material_de_marketing(tipo=email, ...)]
-          [escreve os 2 emails completos]
-          "Quer salvar esses emails? Se sim, qual nome de arquivo?"
-  Usuario: "Salva como emails_c3l4.txt"
-  Agente: [chama salvar_material(...)]
-          "Salvo em data/output/emails_c3l4.txt!"
 """
 
-agent = Agent(
-    model=_model,
-    system_prompt=SYSTEM_PROMPT,
-    tools=[
-        gerar_material_de_marketing,
-        salvar_material,
-        listar_materiais_salvos,
-        ler_material_salvo,
-        tipos_de_material_disponiveis,
-    ],
-)
+_TOOLS = [
+    gerar_material_de_marketing,
+    salvar_material,
+    listar_materiais_salvos,
+    ler_material_salvo,
+    tipos_de_material_disponiveis,
+]
+
+
+def _criar_agente(model: LiteLLMModel) -> Agent:
+    return Agent(
+        model=model,
+        system_prompt=SYSTEM_PROMPT,
+        tools=_TOOLS,
+    )
+
+
+# Cria o agente com o primeiro provider disponível
+_provider_label, _model_atual = _provider_atual()
+agent = _criar_agente(_model_atual)
+
+
+# ---------------------------------------------------------------------------
+# Função de chamada com fallback automático
+# ---------------------------------------------------------------------------
+
+def _chamar_com_fallback(user_input: str) -> str:
+    """
+    Tenta chamar o agente. Se o provider atual falhar com erro recuperável,
+    troca automaticamente para o próximo provider e tenta novamente.
+    Repete até esgotar todos os providers disponíveis.
+    """
+    global _provider_idx, _provider_label, _model_atual, agent
+
+    tentativas = list(range(len(_providers)))  # índices a tentar
+
+    # Começa a partir do provider atual
+    indices = tentativas[_provider_idx:] + tentativas[:_provider_idx]
+
+    ultimo_erro = None
+    for idx in indices:
+        nome, model_id, client_args = _providers[idx]
+        label = f"{nome} ({model_id.split('/')[1]})"
+
+        # Reconstrói o agente se trocou de provider
+        if idx != _provider_idx:
+            print(f"\n[BriefFlow] Trocando para {label}...", flush=True)
+            _provider_idx   = idx
+            _provider_label = label
+            _model_atual    = _criar_model(model_id, client_args)
+            agent           = _criar_agente(_model_atual)
+
+        try:
+            resultado = agent(user_input)
+            return resultado.message
+        except Exception as e:
+            ultimo_erro = e
+            if _e_erro_recuperavel(e):
+                logger.warning("Provider %s falhou (%s), tentando proximo...", label, type(e).__name__)
+                continue
+            # Erro não recuperável (ex: bug de código) — não tenta outro provider
+            raise
+
+    # Todos os providers falharam
+    raise RuntimeError(
+        f"Todos os {len(_providers)} providers falharam.\n"
+        f"Ultimo erro: {ultimo_erro}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -437,12 +502,14 @@ agent = Agent(
 # ---------------------------------------------------------------------------
 
 def _fmt_banner() -> str:
+    nomes = " → ".join(n for n, _, _ in _providers)
     lines = [
-        "+" + "=" * 55 + "+",
-        "|{:^55}|".format("BriefFlow - Assistente de Marketing"),
-        "|{:^55}|".format(f"Provider ativo: {_provider_ativo}"),
-        "|{:^55}|".format(f"Limite: {MAX_TOKENS} tokens por resposta"),
-        "+" + "=" * 55 + "+",
+        "+" + "=" * 57 + "+",
+        "|{:^57}|".format("BriefFlow - Assistente de Marketing"),
+        "|{:^57}|".format(f"Providers: {nomes}"),
+        "|{:^57}|".format(f"Ativo: {_provider_label}"),
+        "|{:^57}|".format(f"Limite: {MAX_TOKENS} tokens por resposta"),
+        "+" + "=" * 57 + "+",
         "",
         "Descreva o que precisa criar. Exemplos:",
         "  > Crie um podcast sobre a linha de lubrificantes DLAB",
@@ -456,23 +523,17 @@ def _fmt_banner() -> str:
     return "\n".join(lines)
 
 
-def _tratar_erro(e: Exception) -> str:
+def _msg_erro_final(e: Exception) -> str:
     msg = str(e).lower()
-    if any(k in msg for k in ("api_key", "401", "403", "authentication", "invalid key")):
+    if "todos os" in msg and "providers falharam" in msg:
         return (
-            "[ERRO DE AUTENTICACAO] Sua chave de API e invalida ou expirou.\n"
-            f"Provider ativo: {_provider_ativo}\n"
-            "Verifique a chave no .env e reinicie o programa."
-        )
-    if any(k in msg for k in ("quota", "429", "rate limit", "too many")):
-        return (
-            "[LIMITE ATINGIDO] Limite de requisicoes atingido temporariamente.\n"
-            "Aguarde alguns minutos e tente novamente.\n"
-            "Dica: configure outra chave de provider no .env para fallback automatico."
+            "[TODOS OS PROVIDERS FALHARAM]\n"
+            "Possiveis causas: todas as chaves atingiram o limite ou estao invalidas.\n"
+            "Aguarde alguns minutos e tente novamente, ou verifique as chaves no .env."
         )
     if any(k in msg for k in ("timeout", "connection", "network")):
-        return "[ERRO DE CONEXAO] Verifique sua conexao com a internet e tente novamente."
-    logger.exception("Erro inesperado no agente")
+        return "[ERRO DE CONEXAO] Verifique sua conexao com a internet."
+    logger.exception("Erro inesperado")
     return f"[ERRO] {e}"
 
 
@@ -493,12 +554,12 @@ def main() -> None:
             print("\nEncerrando o BriefFlow. Ate mais!")
             break
 
-        print("\nBriefFlow: ", end="", flush=True)
+        print(f"\nBriefFlow [{_provider_label}]: ", end="", flush=True)
         try:
-            result = agent(user_input)
-            print(result.message)
+            resposta = _chamar_com_fallback(user_input)
+            print(resposta)
         except Exception as e:
-            print("\n" + _tratar_erro(e))
+            print("\n" + _msg_erro_final(e))
 
 
 if __name__ == "__main__":
