@@ -4,36 +4,55 @@ Interface web premium (React + Vite) + API Python (FastAPI) para geração de ma
 
 ---
 
-## ⚡ Início rápido
+## ⚡ Início rápido (Windows)
 
-```bash
-# 1. Clone
+### 1. Pré-requisitos
+
+- **Python 3.10+** — [python.org/downloads](https://www.python.org/downloads/)  
+  > ⚠️ Durante a instalação, marque **"Add Python to PATH"**
+- **Node.js 18+** — [nodejs.org](https://nodejs.org)
+- **Git** — [git-scm.com](https://git-scm.com)
+
+### 2. Clone e setup
+
+```powershell
 git clone https://github.com/Pedro-Vieira1507/BriefFlow.git
 cd BriefFlow
 
-# 2. Instale dependências Python
-pip install -r requirements.txt
-
-# 3. Instale Chromium (renderização PNG/PDF)
-playwright install chromium
-
-# 4. Configure o ambiente
-cp .env.example .env
-# Edite com modelo Ollama e/ou API keys
-
-# 5. Instale dependências Node
-npm install
-
-# 6. Inicie o Ollama (terminal separado)
-ollama serve && ollama pull llama3
-
-# 7. Inicie tudo com um comando
-npm start
-# → API:  http://localhost:8000
-# → Web:  http://localhost:5173
+# Instala tudo automaticamente (Python + Node + Playwright)
+setup.bat
 ```
 
-> **⚠️ Atenção:** Os arquivos `briefflow_chat.py`, `briefflow_v2.py` e `preview_server.py` são o app legado e estão **desativados**. Não os execute. O novo app é `api/main.py` + `web/`.
+### 3. Configure as API Keys
+
+Edite o arquivo `.env` na raiz do projeto:
+
+```env
+# Escolha ao menos UMA das opções abaixo:
+GEMINI_API_KEY=sua_chave_aqui
+# OPENAI_API_KEY=sua_chave_aqui
+# ANTHROPIC_API_KEY=sua_chave_aqui
+
+# Ou use Ollama local (gratuito):
+# OLLAMA_MODEL=llama3
+# OLLAMA_BASE_URL=http://localhost:11434
+```
+
+### 4. Inicie o BriefFlow
+
+```powershell
+# Opção A: Script automático (abre tudo de uma vez)
+start.bat
+
+# Opção B: Manual (dois terminais)
+# Terminal 1:
+python -m uvicorn api.main:app --reload --port 8000
+
+# Terminal 2:
+npm run dev
+```
+
+Acesse: **http://localhost:5173**
 
 ---
 
@@ -74,28 +93,11 @@ BriefFlow/
 ├── api/
 │   └── main.py                  # FastAPI backend
 ├── src/
-│   ├── workspace_pipeline.py    # Chat + LLM (terminal)
-│   ├── renderer.py              # PNG / PDF / HTML / TXT
-│   ├── rag_loader.py            # RAG + referências visuais
-│   └── prompts/
-│       └── system_prompt.txt
+│   ├── workspace_pipeline.py    # Chat + LLM
 ├── web/                         # Interface React/Vite
-│   ├── src/
-│   │   ├── App.jsx
-│   │   ├── main.jsx
-│   │   └── index.css
-│   └── index.html
 ├── knowledge/                   # Vault Obsidian (RAG)
-│   ├── identidade_visual.md
-│   ├── tom_de_voz.md
-│   ├── produtos/
-│   ├── exemplos_bons/
-│   ├── erros/
-│   └── referencias_visuais/
-├── data/output/                 # Materiais gerados
-├── vite.config.ts
-├── package.json
-├── tailwind.config.js
+├── setup.bat                    # Setup automático Windows
+├── start.bat                    # Inicia API + Web juntos
 ├── requirements.txt
 └── README.md
 ```
@@ -112,3 +114,7 @@ BriefFlow/
 | OpenAI | ✅ | ✅ | `OPENAI_API_KEY` |
 
 Fallback automático: **Ollama → Gemini → Claude → OpenAI**
+
+---
+
+> **⚠️ App legado:** Os arquivos `briefflow_chat.py`, `briefflow_v2.py` e `preview_server.py` estão desativados. Não os execute.
