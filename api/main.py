@@ -6,6 +6,7 @@ Endpoints:
   POST /api/referencias/upload    — faz upload de imagem de referencia visual
   GET  /api/referencias           — lista referencias visuais do vault
   GET  /api/download              — faz download de arquivo gerado
+  GET  /api/sd/status             — verifica se o Stable Diffusion está rodando
 
 Rodar:
   python -m uvicorn api.main:app --reload --port 8000
@@ -33,6 +34,12 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 from rag_loader import carregar_contexto, registrar_erro, salvar_referencia_visual
 from renderer import renderizar, FORMAT_MAP
+from image_gen import (
+    sd_disponivel,
+    gerar_imagem_produto,
+    injetar_imagem_no_html,
+    construir_prompt_produto,
+)
 
 try:
     from workspace_pipeline import (
@@ -62,6 +69,9 @@ GEMINI_KEY    = os.getenv("GEMINI_API_KEY", "")
 OPENAI_KEY    = os.getenv("OPENAI_API_KEY", "")
 ANTHROPIC_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 
+# Materiais visuais que se beneficiam de imagem SD
+MATERIAIS_VISUAIS = {"banner", "card", "instagram", "post instagram", "stories"}
+
 TMP_DIR = Path(tempfile.gettempdir())
 
 
@@ -79,7 +89,8 @@ def _ext_to_format(path: Path) -> str:
 
 
 def _file_preview_url(path: Path) -> Optional[str]:
-    if path.suffix.lower() == ".png" and path.stat().st_size < 3 * 1024 * 1024:
+    ext = path.suffix.lower()
+    if ext == ".png" and path.stat().st_size < 5 * 1024 * 1024:
         data = base64.b64encode(path.read_bytes()).decode()
         return f"data:image/png;base64,{data}"
     return None
@@ -89,7 +100,7 @@ def _file_preview_url(path: Path) -> Optional[str]:
 
 @app.get("/api/health")
 async def health():
-    """Verifica quais providers estao configurados."""
+    """Verifica quais providers estão configurados."""
     providers = ["ollama"]
     if GEMINI_KEY:    providers.append("gemini")
     if OPENAI_KEY:    providers.append("openai")
@@ -97,10 +108,24 @@ async def health():
     return {
         "status": "ok",
         "providers_configured": providers,
-        "ollama_url": os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434"),
-        "ollama_model": os.getenv("OLLAMA_MODEL", "phi3"),
+        "ollama_url":     os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434"),
+        "ollama_model":   os.getenv("OLLAMA_MODEL", "phi3"),
         "ollama_timeout": int(os.getenv("OLLAMA_TIMEOUT", "90")),
+        "sd_enabled":     sd_disponivel(),
+        "sd_url":         os.getenv("SD_BASE_URL", "http://127.0.0.1:7860"),
         "ready": True,
+    }
+
+
+@app.get("/api/sd/status")
+async def sd_status():
+    """Verifica se o Stable Diffusion (AUTOMATIC1111) está rodando."""
+    ativo = sd_disponivel()
+    return {
+        "sd_ativo": ativo,
+        "mensagem": "Stable Diffusion pronto para gerar imagens." if ativo
+                    else "SD offline. Inicie o AUTOMATIC1111 com --api --listen para ativar.",
+        "url": os.getenv("SD_BASE_URL", "http://127.0.0.1:7860"),
     }
 
 
@@ -114,6 +139,19 @@ async def chat(req: ChatRequest):
 
     material = detectar_material(mensagem)
     full_msg  = mensagem + (f"\n\n--- CONTEXTO ---\n{contexto}" if contexto else "")
+
+    # Instrui o LLM a usar placeholder SD se SD estiver ativo
+    usar_sd = (
+        material is not None
+        and material[0] in MATERIAIS_VISUAIS
+        and sd_disponivel()
+    )
+    if usar_sd:
+        full_msg += (
+            "\n\nIMPORTANTE PARA IMAGEM: No lugar da imagem do produto, use exatamente o "
+            "placeholder {{SD_IMAGE}} como valor do atributo src de um <img>, dentro de "
+            "um div com class='hero-image'. Não use via.placeholder.com nem URLs externas."
+        )
 
     rag_ctx = carregar_contexto(
         mensagem=full_msg,
@@ -131,7 +169,7 @@ async def chat(req: ChatRequest):
         chave, descricao = material
         full_msg += (
             f"\n\nIMPORTANTE: Gere APENAS {descricao}. "
-            "Entregue o conteudo completo diretamente, sem explicacoes introdutorias."
+            "Entregue o conteúdo completo diretamente, sem explicações introdutórias."
         )
 
     max_tok = 4096 if material else 1200
@@ -152,6 +190,25 @@ async def chat(req: ChatRequest):
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))
 
+    # --- Geração de imagem SD (se material visual e SD ativo) ---
+    if usar_sd and "{{SD_IMAGE}}" in resposta:
+        logger.info("Placeholder {{SD_IMAGE}} encontrado — gerando imagem SD...")
+        prompt_sd = construir_prompt_produto(contexto or mensagem)
+        img_b64   = gerar_imagem_produto(prompt_sd, material_key=material[0])
+        if img_b64:
+            resposta = injetar_imagem_no_html(resposta, img_b64)
+            logger.info("Imagem SD injetada no HTML com sucesso.")
+        else:
+            # Fallback: remove o placeholder e usa SVG simples
+            resposta = resposta.replace(
+                '{{SD_IMAGE}}',
+                '<svg width="400" height="300" viewBox="0 0 400 300" fill="none" xmlns="http://www.w3.org/2000/svg">'
+                '<rect width="400" height="300" fill="rgba(255,255,255,0.1)" rx="12"/>'
+                '<text x="200" y="140" text-anchor="middle" fill="rgba(255,255,255,0.5)" font-size="14" font-family="Inter">Imagem do Produto</text>'
+                '<text x="200" y="165" text-anchor="middle" fill="rgba(255,255,255,0.3)" font-size="11" font-family="Inter">(SD offline)</text>'
+                '</svg>'
+            )
+
     files_out = []
     previews  = []
     if material:
@@ -171,10 +228,11 @@ async def chat(req: ChatRequest):
                 previews.append(pv)
 
     return JSONResponse({
-        "response": resposta,
-        "provider": provider,
-        "files":    files_out,
-        "previews": previews,
+        "response":  resposta,
+        "provider":  provider,
+        "files":     files_out,
+        "previews":  previews,
+        "sd_usado":  usar_sd and img_b64 is not None if usar_sd else False,
     })
 
 
