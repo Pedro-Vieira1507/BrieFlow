@@ -8,7 +8,7 @@ Endpoints:
   GET  /api/download              — faz download de arquivo gerado
 
 Rodar:
-  uvicorn api.main:app --reload --port 8000
+  python -m uvicorn api.main:app --reload --port 8000
 """
 
 import os
@@ -16,6 +16,7 @@ import json
 import base64
 import logging
 import mimetypes
+import tempfile
 from pathlib import Path
 from typing import Optional, List
 
@@ -61,6 +62,10 @@ GEMINI_KEY    = os.getenv("GEMINI_API_KEY", "")
 OPENAI_KEY    = os.getenv("OPENAI_API_KEY", "")
 ANTHROPIC_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 
+# Diretório temporário compatível com Windows e Linux
+TMP_DIR = Path(tempfile.gettempdir())
+
+
 # ----- Schemas -----
 
 class ChatRequest(BaseModel):
@@ -82,7 +87,28 @@ def _file_preview_url(path: Path) -> Optional[str]:
     return None
 
 
+def _tem_provider() -> bool:
+    """Retorna True se ao menos uma API key estiver configurada."""
+    return bool(GEMINI_KEY or OPENAI_KEY or ANTHROPIC_KEY or
+                os.getenv("OLLAMA_BASE_URL") or os.getenv("OLLAMA_MODEL"))
+
+
 # ----- Endpoints -----
+
+@app.get("/api/health")
+async def health():
+    providers = []
+    if GEMINI_KEY:    providers.append("gemini")
+    if OPENAI_KEY:    providers.append("openai")
+    if ANTHROPIC_KEY: providers.append("anthropic")
+    if os.getenv("OLLAMA_BASE_URL") or os.getenv("OLLAMA_MODEL"):
+        providers.append("ollama")
+    return {
+        "status": "ok",
+        "providers_configured": providers,
+        "ready": len(providers) > 0,
+    }
+
 
 @app.post("/api/chat")
 async def chat(req: ChatRequest):
@@ -91,6 +117,16 @@ async def chat(req: ChatRequest):
 
     if not mensagem:
         raise HTTPException(status_code=400, detail="Mensagem vazia.")
+
+    if not _tem_provider():
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Nenhum provider de IA configurado. "
+                "Adicione GEMINI_API_KEY, OPENAI_API_KEY ou ANTHROPIC_API_KEY no arquivo .env "
+                "e reinicie a API."
+            ),
+        )
 
     material = detectar_material(mensagem)
     full_msg  = mensagem + (f"\n\n--- CONTEXTO ---\n{contexto}" if contexto else "")
@@ -169,8 +205,9 @@ async def upload_referencia(
     if ext not in {".png", ".jpg", ".jpeg", ".webp"}:
         raise HTTPException(status_code=400, detail="Formato invalido. Use PNG, JPG ou WEBP.")
 
-    # Salva temporariamente
-    tmp = Path("/tmp") / file.filename
+    # Salva em diretório temporário compatível com Windows e Linux
+    safe_name = Path(file.filename).name  # evita path traversal
+    tmp = TMP_DIR / safe_name
     tmp.write_bytes(await file.read())
 
     try:
