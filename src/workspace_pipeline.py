@@ -2,6 +2,8 @@ import os
 import re
 import logging
 import time
+import asyncio
+import functools
 from pathlib import Path
 from typing import Optional
 
@@ -20,8 +22,8 @@ MAX_TOKENS  = int(os.getenv("MAX_TOKENS",  "1200"))
 TEMPERATURE = float(os.getenv("TEMPERATURE", "0.6"))
 
 OLLAMA_MODEL    = os.getenv("OLLAMA_MODEL",    "phi3")
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-OLLAMA_TIMEOUT  = int(os.getenv("OLLAMA_TIMEOUT", "15"))  # segundos
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+OLLAMA_TIMEOUT  = int(os.getenv("OLLAMA_TIMEOUT", "90"))
 
 GEMINI_API_KEY  = os.getenv("GEMINI_API_KEY",  "")
 GEMINI_MODEL    = os.getenv("GEMINI_MODEL",    "gemini-2.5-flash")
@@ -52,7 +54,10 @@ def get_system_prompt() -> str:
     return _system_prompt_cache
 
 
-def _chamar_llm(messages: list, max_tokens: int = MAX_TOKENS) -> tuple:
+# --- Versoes sincronas (chamadas em thread executor) ---
+
+def _chamar_llm_sync(messages: list, max_tokens: int = MAX_TOKENS) -> tuple:
+    """Versao SINCRONA — deve ser chamada via run_in_executor, nunca diretamente em async."""
     providers = [
         {"nome": f"Ollama/{OLLAMA_MODEL}", "model": f"ollama/{OLLAMA_MODEL}",
          "api_key": "ollama", "api_base": OLLAMA_BASE_URL, "timeout": OLLAMA_TIMEOUT},
@@ -88,12 +93,13 @@ def _chamar_llm(messages: list, max_tokens: int = MAX_TOKENS) -> tuple:
 
     raise RuntimeError(
         f"Todos os providers falharam. Ultimo erro: {ultimo_erro}\n"
-        "► Verifique se o Ollama esta rodando: ollama serve\n"
-        "► Ou configure uma API key no .env"
+        "\u25ba Verifique se o Ollama esta rodando: ollama serve\n"
+        "\u25ba Ou configure uma API key no .env"
     )
 
 
-def _chamar_llm_multimodal(messages: list, max_tokens: int = 4096) -> tuple:
+def _chamar_llm_multimodal_sync(messages: list, max_tokens: int = 4096) -> tuple:
+    """Versao SINCRONA multimodal — deve ser chamada via run_in_executor."""
     providers = []
     if GEMINI_API_KEY:
         providers.append({"nome": f"Gemini/{GEMINI_MODEL}", "model": f"gemini/{GEMINI_MODEL}",
@@ -126,8 +132,24 @@ def _chamar_llm_multimodal(messages: list, max_tokens: int = 4096) -> tuple:
 
     raise RuntimeError(
         f"Nenhum provider multimodal disponivel. Ultimo erro: {ultimo_erro}\n"
-        "► Configure GEMINI_API_KEY, OPENAI_API_KEY ou ANTHROPIC_API_KEY no .env"
+        "\u25ba Configure GEMINI_API_KEY, OPENAI_API_KEY ou ANTHROPIC_API_KEY no .env"
     )
+
+
+# --- Versoes async (usadas pelo FastAPI) ---
+
+async def _chamar_llm(messages: list, max_tokens: int = MAX_TOKENS) -> tuple:
+    """Wrapper async: roda o litellm sincrono em thread separada para nao bloquear o FastAPI."""
+    loop = asyncio.get_event_loop()
+    fn = functools.partial(_chamar_llm_sync, messages, max_tokens)
+    return await loop.run_in_executor(None, fn)
+
+
+async def _chamar_llm_multimodal(messages: list, max_tokens: int = 4096) -> tuple:
+    """Wrapper async multimodal: roda em thread separada."""
+    loop = asyncio.get_event_loop()
+    fn = functools.partial(_chamar_llm_multimodal_sync, messages, max_tokens)
+    return await loop.run_in_executor(None, fn)
 
 
 MATERIAL_MAP = {
@@ -202,7 +224,8 @@ def analisar_e_salvar_referencia_visual(image_path: Path, instrucoes_usuario: st
         {"role": "user", "content": user_parts},
     ]
 
-    resposta, provider = _chamar_llm_multimodal(messages)
+    # Chama versao sincrona diretamente (contexto nao-async)
+    resposta, provider = _chamar_llm_multimodal_sync(messages)
     logger.info("Referencia visual analisada com %s", provider)
 
     try:
@@ -246,6 +269,7 @@ BANNER = """
 
 
 def chat_loop():
+    """Loop de chat para uso via terminal (nao-async)."""
     print(BANNER)
     historico        = []
     contexto_produto = ""
@@ -276,23 +300,19 @@ def chat_loop():
 
         if entrada.lower() == "/modelo":
             print(f"\n[Modelo] Ollama: {OLLAMA_MODEL} | Base: {OLLAMA_BASE_URL} | Timeout: {OLLAMA_TIMEOUT}s")
-            print(f"  Fallback texto: Gemini={'OK' if GEMINI_API_KEY else 'nao configurado'}  "
+            print(f"  Fallback: Gemini={'OK' if GEMINI_API_KEY else 'nao configurado'}  "
                   f"Claude={'OK' if ANTHROPIC_KEY else 'nao configurado'}  "
                   f"OpenAI={'OK' if OPENAI_KEY else 'nao configurado'}")
-            print("  Multimodal requer Gemini, Claude ou OpenAI configurado.\n")
             continue
 
         if entrada.lower().startswith("erro:"):
-            motivo = entrada[5:].strip()
-            registrar_erro(ultima_mensagem, ultimo_resultado, motivo)
-            print("\n[Feedback registrado] Obrigado! Isso vai ajudar a melhorar as proximas geracoes.\n")
+            registrar_erro(ultima_mensagem, ultimo_resultado, entrada[5:].strip())
+            print("\n[Feedback registrado]\n")
             continue
 
         if entrada.lower().startswith("contexto:"):
             contexto_produto = entrada[9:].strip()
             print("\n[Contexto registrado] Agora me diga o que gerar.\n")
-            historico.append({"role": "user",      "content": entrada})
-            historico.append({"role": "assistant", "content": "Contexto salvo! Me diga o que gerar."})
             continue
 
         ultima_mensagem = entrada
@@ -301,53 +321,28 @@ def chat_loop():
             mensagem=entrada + (" " + contexto_produto if contexto_produto else ""),
             material_key=material[0] if material else None,
         )
-        referencias_visuais = coletar_referencias_visuais(
-            mensagem=entrada + (" " + contexto_produto if contexto_produto else ""),
-            material_key=material[0] if material else None,
-            limite=3,
-        )
-        system_com_rag = system + rag_contexto
-
+        system_com_rag = get_system_prompt() + rag_contexto
         mensagem_final = entrada
         if contexto_produto:
-            mensagem_final = f"{entrada}\n\n--- CONTEXTO DO PRODUTO/CAMPANHA ---\n{contexto_produto}"
-
+            mensagem_final = f"{entrada}\n\n--- CONTEXTO ---\n{contexto_produto}"
         if material:
             chave, descricao = material
-            fmt_label = _formato_label(chave)
-            print(f"\n[Gerando] {fmt_label}...")
-            mensagem_final += (
-                f"\n\nIMPORTANTE: Gere APENAS {descricao}. "
-                f"Entregue o conteudo completo diretamente, sem explicacoes introdutorias."
-            )
+            mensagem_final += f"\n\nIMPORTANTE: Gere APENAS {descricao}. Entregue o conteudo completo diretamente."
+            print(f"\n[Gerando] {_formato_label(chave)}...")
         else:
             print("\n[...] ", end="", flush=True)
 
         t0 = time.time()
-
         try:
-            if referencias_visuais and (GEMINI_API_KEY or OPENAI_KEY or ANTHROPIC_KEY):
-                user_content = [{"type": "text", "text": mensagem_final}]
-                for ref in referencias_visuais:
-                    user_content.append({"type": "text", "text": f"Referencia visual: {ref['title']} | {ref['description']} | Layout: {ref['layout_notes']}"})
-                    user_content.append({"type": "image_url", "image_url": {"url": ref["data_url"]}})
-                messages = [
-                    {"role": "system", "content": system_com_rag},
-                    *historico[-12:],
-                    {"role": "user", "content": user_content},
-                ]
-                resposta, provider_usado = _chamar_llm_multimodal(messages, max_tokens=4096 if material else MAX_TOKENS)
-            else:
-                messages = [
-                    {"role": "system", "content": system_com_rag},
-                    *historico[-12:],
-                    {"role": "user",   "content": mensagem_final},
-                ]
-                resposta, provider_usado = _chamar_llm(messages, max_tokens=4096 if material else MAX_TOKENS)
-
+            messages = [
+                {"role": "system", "content": system_com_rag},
+                *historico[-12:],
+                {"role": "user", "content": mensagem_final},
+            ]
+            # Usa versao sincrona diretamente no terminal (sem asyncio)
+            resposta, provider_usado = _chamar_llm_sync(messages, max_tokens=4096 if material else MAX_TOKENS)
             tempo = time.time() - t0
             ultimo_resultado = resposta
-
             print(f"\rBriefFlow ({provider_usado}) [{tempo:.1f}s]:\n")
             print(resposta)
             print()
