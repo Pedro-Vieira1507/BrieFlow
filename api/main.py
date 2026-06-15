@@ -62,7 +62,6 @@ GEMINI_KEY    = os.getenv("GEMINI_API_KEY", "")
 OPENAI_KEY    = os.getenv("OPENAI_API_KEY", "")
 ANTHROPIC_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 
-# Diretório temporário compatível com Windows e Linux
 TMP_DIR = Path(tempfile.gettempdir())
 
 
@@ -90,17 +89,17 @@ def _file_preview_url(path: Path) -> Optional[str]:
 
 @app.get("/api/health")
 async def health():
-    """Verifica quais providers estão configurados."""
-    providers = ["ollama"]  # Ollama é sempre tentado por padrão
+    """Verifica quais providers estao configurados."""
+    providers = ["ollama"]
     if GEMINI_KEY:    providers.append("gemini")
     if OPENAI_KEY:    providers.append("openai")
     if ANTHROPIC_KEY: providers.append("anthropic")
     return {
         "status": "ok",
         "providers_configured": providers,
-        "ollama_url": os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
+        "ollama_url": os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434"),
         "ollama_model": os.getenv("OLLAMA_MODEL", "phi3"),
-        "ollama_timeout": int(os.getenv("OLLAMA_TIMEOUT", "15")),
+        "ollama_timeout": int(os.getenv("OLLAMA_TIMEOUT", "90")),
         "ready": True,
     }
 
@@ -146,10 +145,10 @@ async def chat(req: ChatRequest):
                     {"type": "image_url", "image_url": {"url": ref["data_url"]}},
                 ]
             messages = [{"role": "system", "content": system}, {"role": "user", "content": user_content}]
-            resposta, provider = _chamar_llm_multimodal(messages, max_tokens=max_tok)
+            resposta, provider = await _chamar_llm_multimodal(messages, max_tokens=max_tok)
         else:
             messages = [{"role": "system", "content": system}, {"role": "user", "content": full_msg}]
-            resposta, provider = _chamar_llm(messages, max_tokens=max_tok)
+            resposta, provider = await _chamar_llm(messages, max_tokens=max_tok)
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))
 
