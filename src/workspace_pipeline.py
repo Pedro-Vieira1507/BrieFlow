@@ -19,8 +19,10 @@ OUTPUT_DIR  = Path(os.getenv("OUTPUT_DIR", "data/output"))
 MAX_TOKENS  = int(os.getenv("MAX_TOKENS",  "1200"))
 TEMPERATURE = float(os.getenv("TEMPERATURE", "0.6"))
 
-OLLAMA_MODEL    = os.getenv("OLLAMA_MODEL",    "llama3")
+OLLAMA_MODEL    = os.getenv("OLLAMA_MODEL",    "phi3")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+OLLAMA_TIMEOUT  = int(os.getenv("OLLAMA_TIMEOUT", "15"))  # segundos
+
 GEMINI_API_KEY  = os.getenv("GEMINI_API_KEY",  "")
 GEMINI_MODEL    = os.getenv("GEMINI_MODEL",    "gemini-2.5-flash")
 ANTHROPIC_KEY   = os.getenv("ANTHROPIC_API_KEY", "")
@@ -53,23 +55,29 @@ def get_system_prompt() -> str:
 def _chamar_llm(messages: list, max_tokens: int = MAX_TOKENS) -> tuple:
     providers = [
         {"nome": f"Ollama/{OLLAMA_MODEL}", "model": f"ollama/{OLLAMA_MODEL}",
-         "api_key": "ollama", "api_base": OLLAMA_BASE_URL},
+         "api_key": "ollama", "api_base": OLLAMA_BASE_URL, "timeout": OLLAMA_TIMEOUT},
     ]
     if GEMINI_API_KEY:
         providers.append({"nome": f"Gemini/{GEMINI_MODEL}", "model": f"gemini/{GEMINI_MODEL}",
-                          "api_key": GEMINI_API_KEY, "api_base": None})
+                          "api_key": GEMINI_API_KEY, "api_base": None, "timeout": 60})
     if ANTHROPIC_KEY:
         providers.append({"nome": f"Claude/{ANTHROPIC_MODEL}", "model": ANTHROPIC_MODEL,
-                          "api_key": ANTHROPIC_KEY, "api_base": None})
+                          "api_key": ANTHROPIC_KEY, "api_base": None, "timeout": 60})
     if OPENAI_KEY:
         providers.append({"nome": f"OpenAI/{OPENAI_MODEL}", "model": OPENAI_MODEL,
-                          "api_key": OPENAI_KEY, "api_base": None})
+                          "api_key": OPENAI_KEY, "api_base": None, "timeout": 60})
 
     ultimo_erro = None
     for p in providers:
         try:
-            kwargs = dict(model=p["model"], messages=messages, max_tokens=max_tokens,
-                          temperature=TEMPERATURE, api_key=p["api_key"], timeout=120)
+            kwargs = dict(
+                model=p["model"],
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=TEMPERATURE,
+                api_key=p["api_key"],
+                timeout=p["timeout"],
+            )
             if p["api_base"]:
                 kwargs["api_base"] = p["api_base"]
             resposta = litellm.completion(**kwargs)
@@ -89,19 +97,25 @@ def _chamar_llm_multimodal(messages: list, max_tokens: int = 4096) -> tuple:
     providers = []
     if GEMINI_API_KEY:
         providers.append({"nome": f"Gemini/{GEMINI_MODEL}", "model": f"gemini/{GEMINI_MODEL}",
-                          "api_key": GEMINI_API_KEY, "api_base": None})
+                          "api_key": GEMINI_API_KEY, "api_base": None, "timeout": 60})
     if OPENAI_KEY:
         providers.append({"nome": f"OpenAI/{OPENAI_MODEL}", "model": OPENAI_MODEL,
-                          "api_key": OPENAI_KEY, "api_base": None})
+                          "api_key": OPENAI_KEY, "api_base": None, "timeout": 60})
     if ANTHROPIC_KEY:
         providers.append({"nome": f"Claude/{ANTHROPIC_MODEL}", "model": ANTHROPIC_MODEL,
-                          "api_key": ANTHROPIC_KEY, "api_base": None})
+                          "api_key": ANTHROPIC_KEY, "api_base": None, "timeout": 60})
 
     ultimo_erro = None
     for p in providers:
         try:
-            kwargs = dict(model=p["model"], messages=messages, max_tokens=max_tokens,
-                          temperature=0.2, api_key=p["api_key"], timeout=120)
+            kwargs = dict(
+                model=p["model"],
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=0.2,
+                api_key=p["api_key"],
+                timeout=p["timeout"],
+            )
             if p["api_base"]:
                 kwargs["api_base"] = p["api_base"]
             resposta = litellm.completion(**kwargs)
@@ -228,52 +242,6 @@ BANNER = """
 |  Powered by Ollama (local) + fallback Gemini/Claude/OpenAI   |
 |  RAG ativo: pasta knowledge/ alimenta cada geracao           |
 +--------------------------------------------------------------+
-
-Formatos de saida automaticos:
-  banner / card / instagram  ->  PNG
-  stories                    ->  PNG (3 arquivos 1080x1920)
-  ficha tecnica / proposta   ->  PDF (A4)
-  landing page / e-mail      ->  HTML
-  linkedin / ads / scripts   ->  TXT
-
-Recursos extras:
-  * upload de referencias visuais para aprendizagem de layout
-  * salvamento automatico no vault knowledge/referencias_visuais/
-
-Como usar:
-  * Converse normalmente - pergunte, peca ideias, tire duvidas.
-  * Para gerar: "crie um banner para o produto X"
-  * Para passar contexto: "contexto: [dados do produto]"
-  * Para reportar erro: "erro: [descreva o problema com o ultimo resultado]"
-  * Comandos: /ajuda  /modelo  /limpar  /sair
-"""
-
-AJUDA = """
-+--- Comandos ---------------------------------------------------+
-|  /ajuda   -> exibe este menu                                  |
-|  /modelo  -> mostra provider ativo e fallbacks                |
-|  /limpar  -> reinicia conversa                                |
-|  /sair    -> encerra o BriefFlow                              |
-+--- Materiais e formatos ---------------------------------------+
-|  banner              ->  PNG                                  |
-|  card de produto     ->  PNG                                  |
-|  post instagram      ->  PNG (1080x1080)                      |
-|  stories             ->  PNG (3 x 1080x1920)                  |
-|  ficha tecnica       ->  PDF (A4)                             |
-|  proposta / one pager->  PDF (A4)                             |
-|  landing page        ->  HTML                                 |
-|  e-mail marketing    ->  HTML                                 |
-|  linkedin / reels    ->  TXT                                  |
-|  google ads / meta   ->  TXT                                  |
-|  script whatsapp     ->  TXT                                  |
-+--- RAG / Contexto ---------------------------------------------+
-|  contexto: [nome, specs, publico-alvo, oferta]                |
-|  Os arquivos em knowledge/ sao injetados automaticamente      |
-|  Referencias visuais em knowledge/referencias_visuais/        |
-+--- Feedback de qualidade --------------------------------------+
-|  erro: [descreva o que ficou ruim no ultimo material]         |
-|  O exemplo sera salvo em knowledge/erros/ para melhoria       |
-+---------------------------------------------------------------+
 """
 
 
@@ -306,12 +274,8 @@ def chat_loop():
             print("\n[OK] Conversa reiniciada.\n")
             continue
 
-        if entrada.lower() == "/ajuda":
-            print(AJUDA)
-            continue
-
         if entrada.lower() == "/modelo":
-            print(f"\n[Modelo] Ollama: {OLLAMA_MODEL} | Base: {OLLAMA_BASE_URL}")
+            print(f"\n[Modelo] Ollama: {OLLAMA_MODEL} | Base: {OLLAMA_BASE_URL} | Timeout: {OLLAMA_TIMEOUT}s")
             print(f"  Fallback texto: Gemini={'OK' if GEMINI_API_KEY else 'nao configurado'}  "
                   f"Claude={'OK' if ANTHROPIC_KEY else 'nao configurado'}  "
                   f"OpenAI={'OK' if OPENAI_KEY else 'nao configurado'}")
@@ -352,10 +316,6 @@ def chat_loop():
             chave, descricao = material
             fmt_label = _formato_label(chave)
             print(f"\n[Gerando] {fmt_label}...")
-            if rag_contexto:
-                print("[RAG] Contexto textual do vault injetado.")
-            if referencias_visuais:
-                print(f"[RAG] {len(referencias_visuais)} referencia(s) visual(is) anexada(s).")
             mensagem_final += (
                 f"\n\nIMPORTANTE: Gere APENAS {descricao}. "
                 f"Entregue o conteudo completo diretamente, sem explicacoes introdutorias."
@@ -369,14 +329,8 @@ def chat_loop():
             if referencias_visuais and (GEMINI_API_KEY or OPENAI_KEY or ANTHROPIC_KEY):
                 user_content = [{"type": "text", "text": mensagem_final}]
                 for ref in referencias_visuais:
-                    user_content.append({
-                        "type": "text",
-                        "text": f"Referencia visual: {ref['title']} | Tipo: {ref['material_type']} | Descricao: {ref['description']} | Layout: {ref['layout_notes']}"
-                    })
-                    user_content.append({
-                        "type": "image_url",
-                        "image_url": {"url": ref["data_url"]}
-                    })
+                    user_content.append({"type": "text", "text": f"Referencia visual: {ref['title']} | {ref['description']} | Layout: {ref['layout_notes']}"})
+                    user_content.append({"type": "image_url", "image_url": {"url": ref["data_url"]}})
                 messages = [
                     {"role": "system", "content": system_com_rag},
                     *historico[-12:],
@@ -408,8 +362,6 @@ def chat_loop():
                 )
                 for arq in arquivos:
                     print(f"[Salvo] {arq}")
-                print()
-                print("Se o resultado nao ficou bom, digite: erro: [descreva o problema]")
                 print()
 
             historico.append({"role": "user",      "content": entrada})

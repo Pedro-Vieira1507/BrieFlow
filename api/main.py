@@ -18,7 +18,7 @@ import logging
 import mimetypes
 import tempfile
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
@@ -80,33 +80,28 @@ def _ext_to_format(path: Path) -> str:
 
 
 def _file_preview_url(path: Path) -> Optional[str]:
-    """Gera data-URL para PNG pequeno (preview inline)."""
     if path.suffix.lower() == ".png" and path.stat().st_size < 3 * 1024 * 1024:
         data = base64.b64encode(path.read_bytes()).decode()
         return f"data:image/png;base64,{data}"
     return None
 
 
-def _tem_provider() -> bool:
-    """Retorna True se ao menos uma API key estiver configurada."""
-    return bool(GEMINI_KEY or OPENAI_KEY or ANTHROPIC_KEY or
-                os.getenv("OLLAMA_BASE_URL") or os.getenv("OLLAMA_MODEL"))
-
-
 # ----- Endpoints -----
 
 @app.get("/api/health")
 async def health():
-    providers = []
+    """Verifica quais providers estão configurados."""
+    providers = ["ollama"]  # Ollama é sempre tentado por padrão
     if GEMINI_KEY:    providers.append("gemini")
     if OPENAI_KEY:    providers.append("openai")
     if ANTHROPIC_KEY: providers.append("anthropic")
-    if os.getenv("OLLAMA_BASE_URL") or os.getenv("OLLAMA_MODEL"):
-        providers.append("ollama")
     return {
         "status": "ok",
         "providers_configured": providers,
-        "ready": len(providers) > 0,
+        "ollama_url": os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
+        "ollama_model": os.getenv("OLLAMA_MODEL", "phi3"),
+        "ollama_timeout": int(os.getenv("OLLAMA_TIMEOUT", "15")),
+        "ready": True,
     }
 
 
@@ -117,16 +112,6 @@ async def chat(req: ChatRequest):
 
     if not mensagem:
         raise HTTPException(status_code=400, detail="Mensagem vazia.")
-
-    if not _tem_provider():
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "Nenhum provider de IA configurado. "
-                "Adicione GEMINI_API_KEY, OPENAI_API_KEY ou ANTHROPIC_API_KEY no arquivo .env "
-                "e reinicie a API."
-            ),
-        )
 
     material = detectar_material(mensagem)
     full_msg  = mensagem + (f"\n\n--- CONTEXTO ---\n{contexto}" if contexto else "")
@@ -168,9 +153,8 @@ async def chat(req: ChatRequest):
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))
 
-    # Renderiza material
-    files_out  = []
-    previews   = []
+    files_out = []
+    previews  = []
     if material:
         chave, _ = material
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -205,8 +189,7 @@ async def upload_referencia(
     if ext not in {".png", ".jpg", ".jpeg", ".webp"}:
         raise HTTPException(status_code=400, detail="Formato invalido. Use PNG, JPG ou WEBP.")
 
-    # Salva em diretório temporário compatível com Windows e Linux
-    safe_name = Path(file.filename).name  # evita path traversal
+    safe_name = Path(file.filename).name
     tmp = TMP_DIR / safe_name
     tmp.write_bytes(await file.read())
 
@@ -216,7 +199,6 @@ async def upload_referencia(
             instrucoes_usuario=f"tipo={material_type}; {description}",
         )
     except RuntimeError as e:
-        # Fallback sem analise multimodal
         payload = salvar_referencia_visual(
             origem_path=tmp,
             title=Path(file.filename).stem.replace("_", " ").title(),
@@ -226,10 +208,9 @@ async def upload_referencia(
             layout_notes=description or "Sem notas adicionais.",
         )
 
-    # Preview
-    refs_dir  = KNOWLEDGE_DIR / "referencias_visuais"
-    img_path  = refs_dir / payload["file_name"]
-    preview   = None
+    refs_dir = KNOWLEDGE_DIR / "referencias_visuais"
+    img_path = refs_dir / payload["file_name"]
+    preview  = None
     if img_path.exists():
         data    = base64.b64encode(img_path.read_bytes()).decode()
         mt      = mimetypes.guess_type(str(img_path))[0] or "image/png"
@@ -265,7 +246,6 @@ async def download_file(path: str):
     p = Path(path)
     if not p.exists() or not p.is_file():
         raise HTTPException(status_code=404, detail="Arquivo nao encontrado.")
-    # Seguranca: apenas arquivos dentro de data/output
     try:
         p.relative_to(OUTPUT_DIR.resolve())
     except ValueError:
@@ -273,7 +253,6 @@ async def download_file(path: str):
     return FileResponse(p, filename=p.name)
 
 
-# Serve o build do React em producao
 _web_dist = Path("web/dist")
 if _web_dist.exists():
     app.mount("/", StaticFiles(directory=str(_web_dist), html=True), name="static")
