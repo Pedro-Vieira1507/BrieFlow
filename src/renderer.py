@@ -9,10 +9,17 @@ Converte HTML gerado pelo LLM para o formato nativo de cada material:
   - Carrossel LinkedIn, Ads, Copy -> TXT
 
 Requer: pip install playwright && playwright install chromium
+
+NOTA WINDOWS: Playwright sync_api nao pode rodar dentro do event loop do uvicorn.
+A solucao e executar a captura em um subprocess Python separado.
 """
 
-import time
+import json
 import logging
+import subprocess
+import sys
+import tempfile
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -102,65 +109,56 @@ FORMAT_MAP: dict = {
 }
 
 
-def _playwright_disponivel() -> bool:
-    try:
-        from playwright.sync_api import sync_playwright  # noqa: F401
-        return True
-    except ImportError:
-        return False
+# ---------------------------------------------------------------------------
+# Script embutido que roda em subprocess isolado (sem conflito de event loop)
+# ---------------------------------------------------------------------------
 
+_WORKER_SCRIPT = """
+import sys, json
+from pathlib import Path
+from playwright.sync_api import sync_playwright
 
-def _renderizar_png(html: str, output_path: Path, width: int, height: Optional[int]) -> Path:
-    """Captura screenshot PNG aguardando carregamento completo de fontes e imagens."""
-    from playwright.sync_api import sync_playwright
+args_json = sys.argv[1]
+a = json.loads(args_json)
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(
-            args=["--no-sandbox", "--disable-setuid-sandbox", "--font-render-hinting=none"]
-        )
+renderer = a["renderer"]
+html     = a["html"]
+output   = a["output"]
+width    = a["width"]
+height   = a.get("height")
+stories_dir = a.get("stories_dir")
+
+def launch_browser(p):
+    return p.chromium.launch(
+        args=["--no-sandbox", "--disable-setuid-sandbox", "--font-render-hinting=none"]
+    )
+
+with sync_playwright() as p:
+    if renderer == "png":
+        browser = launch_browser(p)
         page = browser.new_page(
             viewport={"width": width, "height": height or 900},
-            device_scale_factor=2,  # alta resolucao (2x)
+            device_scale_factor=2,
         )
-
-        # Injeta HTML e aguarda rede + fontes
         page.set_content(html, wait_until="networkidle")
         page.wait_for_load_state("domcontentloaded")
-
-        # Aguarda fontes web carregarem via JS
         try:
             page.evaluate("document.fonts.ready")
         except Exception:
             pass
-
-        # Pausa extra para animacoes CSS e imagens lazy
         page.wait_for_timeout(800)
-
         if height is None:
-            real_height = page.evaluate("document.body.scrollHeight")
-            page.set_viewport_size({"width": width, "height": max(real_height, 100)})
+            real_h = page.evaluate("document.body.scrollHeight")
+            page.set_viewport_size({"width": width, "height": max(real_h, 100)})
             page.wait_for_timeout(200)
-
-        page.screenshot(
-            path=str(output_path),
-            full_page=(height is None),
-            animations="disabled",
-        )
+        page.screenshot(path=output, full_page=(height is None), animations="disabled")
         browser.close()
+        print(json.dumps({"ok": True, "files": [output]}))
 
-    return output_path
-
-
-def _renderizar_png_stories(html: str, output_dir: Path, width: int, height: int) -> list:
-    from playwright.sync_api import sync_playwright
-
-    paths = []
-    with sync_playwright() as p:
-        browser = p.chromium.launch(
-            args=["--no-sandbox", "--disable-setuid-sandbox"]
-        )
+    elif renderer == "png_stories":
+        browser = launch_browser(p)
         page = browser.new_page(
-            viewport={"width": width, "height": height},
+            viewport={"width": width, "height": height or 1920},
             device_scale_factor=2,
         )
         page.set_content(html, wait_until="networkidle")
@@ -169,28 +167,24 @@ def _renderizar_png_stories(html: str, output_dir: Path, width: int, height: int
         except Exception:
             pass
         page.wait_for_timeout(800)
-
         slides = page.query_selector_all(".story, .slide, [data-slide]")
+        paths = []
+        sd = Path(stories_dir)
+        sd.mkdir(parents=True, exist_ok=True)
         if slides:
             for i, slide in enumerate(slides[:3], start=1):
-                out = output_dir / f"story_{i:02d}.png"
-                slide.screenshot(path=str(out))
+                out = str(sd / f"story_{i:02d}.png")
+                slide.screenshot(path=out)
                 paths.append(out)
         else:
-            out = output_dir / "story_01.png"
-            page.screenshot(path=str(out), full_page=False, animations="disabled")
+            out = str(sd / "story_01.png")
+            page.screenshot(path=out, full_page=False, animations="disabled")
             paths.append(out)
         browser.close()
-    return paths
+        print(json.dumps({"ok": True, "files": paths}))
 
-
-def _renderizar_pdf(html: str, output_path: Path) -> Path:
-    from playwright.sync_api import sync_playwright
-
-    with sync_playwright() as p:
-        browser = p.chromium.launch(
-            args=["--no-sandbox", "--disable-setuid-sandbox"]
-        )
+    elif renderer == "pdf":
+        browser = launch_browser(p)
         page = browser.new_page()
         page.set_content(html, wait_until="networkidle")
         try:
@@ -199,13 +193,52 @@ def _renderizar_pdf(html: str, output_path: Path) -> Path:
             pass
         page.wait_for_timeout(600)
         page.pdf(
-            path=str(output_path),
+            path=output,
             format="A4",
             print_background=True,
             margin={"top": "10mm", "bottom": "10mm", "left": "0", "right": "0"},
         )
         browser.close()
-    return output_path
+        print(json.dumps({"ok": True, "files": [output]}))
+"""
+
+
+def _playwright_disponivel() -> bool:
+    try:
+        from playwright.sync_api import sync_playwright  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+def _run_in_subprocess(payload: dict) -> list[str]:
+    """
+    Executa o worker Playwright em subprocess isolado para evitar conflito
+    de event loop no Windows quando chamado de dentro do uvicorn/asyncio.
+    """
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".py", delete=False, encoding="utf-8"
+    ) as tf:
+        tf.write(_WORKER_SCRIPT)
+        script_path = tf.name
+
+    try:
+        result = subprocess.run(
+            [sys.executable, script_path, json.dumps(payload)],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr.strip() or "subprocess falhou sem stderr")
+
+        # Ultima linha do stdout e o JSON com resultado
+        last_line = result.stdout.strip().splitlines()[-1]
+        data = json.loads(last_line)
+        return data["files"]
+
+    finally:
+        Path(script_path).unlink(missing_ok=True)
 
 
 def renderizar(conteudo: str, material_key: str, output_dir: Path, nome_base: str) -> list:
@@ -234,6 +267,7 @@ def renderizar(conteudo: str, material_key: str, output_dir: Path, nome_base: st
 
     logger.info("Renderizando '%s' como %s...", label, fmt.upper())
 
+    # --- Formatos texto/HTML: sem Playwright ---
     if renderer == "txt":
         path = output_dir / f"{nome_arquivo}.txt"
         path.write_text(conteudo, encoding="utf-8")
@@ -244,6 +278,7 @@ def renderizar(conteudo: str, material_key: str, output_dir: Path, nome_base: st
         path.write_text(conteudo, encoding="utf-8")
         return [path]
 
+    # --- Formatos visuais: requerem Playwright ---
     if not _playwright_disponivel():
         logger.warning(
             "Playwright nao instalado. Salvando '%s' como HTML.\n"
@@ -256,20 +291,41 @@ def renderizar(conteudo: str, material_key: str, output_dir: Path, nome_base: st
 
     try:
         if renderer == "png":
-            path = output_dir / f"{nome_arquivo}.png"
-            _renderizar_png(conteudo, path, width, height)
-            return [path]
+            output_path = str(output_dir / f"{nome_arquivo}.png")
+            payload = {
+                "renderer": "png",
+                "html": conteudo,
+                "output": output_path,
+                "width": width,
+                "height": height,
+            }
+            files = _run_in_subprocess(payload)
+            return [Path(f) for f in files]
 
         elif renderer == "png_stories":
             stories_dir = output_dir / nome_arquivo
-            stories_dir.mkdir(parents=True, exist_ok=True)
-            paths = _renderizar_png_stories(conteudo, stories_dir, width, height or 1920)
-            return paths
+            payload = {
+                "renderer": "png_stories",
+                "html": conteudo,
+                "output": "",
+                "width": width,
+                "height": height or 1920,
+                "stories_dir": str(stories_dir),
+            }
+            files = _run_in_subprocess(payload)
+            return [Path(f) for f in files]
 
         elif renderer == "pdf":
-            path = output_dir / f"{nome_arquivo}.pdf"
-            _renderizar_pdf(conteudo, path)
-            return [path]
+            output_path = str(output_dir / f"{nome_arquivo}.pdf")
+            payload = {
+                "renderer": "pdf",
+                "html": conteudo,
+                "output": output_path,
+                "width": width,
+                "height": height,
+            }
+            files = _run_in_subprocess(payload)
+            return [Path(f) for f in files]
 
     except Exception as e:
         logger.error("Erro na renderizacao visual (%s): %s — salvando como HTML.", fmt.upper(), e)
@@ -277,6 +333,7 @@ def renderizar(conteudo: str, material_key: str, output_dir: Path, nome_base: st
         path.write_text(conteudo, encoding="utf-8")
         return [path]
 
+    # fallback final (nao deveria chegar aqui)
     path = output_dir / f"{nome_arquivo}.html"
     path.write_text(conteudo, encoding="utf-8")
     return [path]
