@@ -1,4 +1,3 @@
-import io
 import os
 import re
 import json
@@ -10,362 +9,325 @@ from typing import Optional
 from dotenv import load_dotenv
 load_dotenv()
 
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseDownload
-
 import litellm
 
 # ── Configurações ─────────────────────────────────────────────────────────────
-SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
-DRIVE_FOLDER_ID = os.getenv("GOOGLE_DRIVE_FOLDER_ID", "").strip()
-OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", "data/output"))
-INPUT_DIR  = Path(os.getenv("INPUT_DIR",  "data/inbox"))
+OUTPUT_DIR   = Path(os.getenv("OUTPUT_DIR", "data/output"))
+MAX_TOKENS   = int(os.getenv("MAX_TOKENS",   "1200"))
+TEMPERATURE  = float(os.getenv("TEMPERATURE", "0.6"))
 
-LLM_MODEL   = os.getenv("LLM_MODEL",   "gpt-4o-mini")   # modelo padrão rápido
-LLM_API_KEY = os.getenv("LLM_API_KEY", "")
-LLM_TIMEOUT = int(os.getenv("LLM_TIMEOUT", "60"))        # segundos
+# ── Modelos por provider ───────────────────────────────────────────────────────
+OLLAMA_MODEL    = os.getenv("OLLAMA_MODEL",    "llama3")
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+GEMINI_API_KEY  = os.getenv("GEMINI_API_KEY",  "")
+GEMINI_MODEL    = os.getenv("GEMINI_MODEL",    "gemini-2.5-flash")
+ANTHROPIC_KEY   = os.getenv("ANTHROPIC_API_KEY", "")
+ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-3-5-haiku-20241022")
+OPENAI_KEY      = os.getenv("OPENAI_API_KEY",  "")
+OPENAI_MODEL    = os.getenv("OPENAI_MODEL",    "gpt-4o-mini")
 
-# ── Logger ────────────────────────────────────────────────────────────────────
-logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
+# ── Logger ─────────────────────────────────────────────────────────────────────
+logging.basicConfig(
+    level=logging.WARNING,
+    format="%(asctime)s | %(levelname)s | %(message)s",
+)
 logger = logging.getLogger(__name__)
 
-# ── Cache em memória ──────────────────────────────────────────────────────────
-_drive_service = None
-_brand_profile_cache: dict = {}
+# ── System prompt (cache em memória) ──────────────────────────────────────────
+SYSTEM_PROMPT_PATH = Path("src/prompts/system_prompt.txt")
+_system_prompt_cache: Optional[str] = None
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Google Drive
-# ─────────────────────────────────────────────────────────────────────────────
-
-def get_drive_service():
-    global _drive_service
-    if _drive_service:
-        return _drive_service
-
-    creds = None
-    token_path = Path("credentials/token.json")
-    creds_path = Path("credentials/credentials.json")
-
-    if token_path.exists():
-        creds = Credentials.from_authorized_user_file(str(token_path), SCOPES)
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file(str(creds_path), SCOPES)
-            creds = flow.run_local_server(port=0)
-        token_path.parent.mkdir(parents=True, exist_ok=True)
-        token_path.write_text(creds.to_json(), encoding="utf-8")
-
-    _drive_service = build("drive", "v3", credentials=creds)
-    return _drive_service
-
-
-def listar_arquivos_drive(folder_id: str) -> list:
-    service = get_drive_service()
-    query  = f"'{folder_id}' in parents and trashed = false"
-    fields = "nextPageToken, files(id,name,mimeType)"
-    all_files, page_token = [], None
-
-    while True:
-        params = dict(q=query, fields=fields, pageSize=100,
-                      includeItemsFromAllDrives=True, supportsAllDrives=True)
-        if page_token:
-            params["pageToken"] = page_token
-        result = service.files().list(**params).execute()
-        all_files.extend(result.get("files", []))
-        page_token = result.get("nextPageToken")
-        if not page_token:
-            break
-
-    processable = [
-        f for f in all_files
-        if f["mimeType"] in {"text/plain", "application/vnd.google-apps.document"}
-        or f["name"].lower().endswith((".txt", ".docx"))
-    ]
-    logger.info("Drive: %d arquivo(s) encontrados.", len(processable))
-    return processable
-
-
-def baixar_arquivo_drive(file_id: str, file_name: str, mime_type: str) -> str:
-    INPUT_DIR.mkdir(parents=True, exist_ok=True)
-    service   = get_drive_service()
-    safe_name = re.sub(r'[<>:"/\\|?*]', "_", file_name).strip()
-
-    if mime_type == "application/vnd.google-apps.document":
-        request  = service.files().export_media(fileId=file_id, mimeType="text/plain")
-        out_path = INPUT_DIR / f"{Path(safe_name).stem}.txt"
+def get_system_prompt() -> str:
+    global _system_prompt_cache
+    if _system_prompt_cache:
+        return _system_prompt_cache
+    if SYSTEM_PROMPT_PATH.exists():
+        _system_prompt_cache = SYSTEM_PROMPT_PATH.read_text(encoding="utf-8").strip()
     else:
-        request  = service.files().get_media(fileId=file_id, supportsAllDrives=True)
-        out_path = INPUT_DIR / safe_name
-
-    with io.FileIO(str(out_path), "wb") as fh:
-        downloader = MediaIoBaseDownload(fh, request)
-        done = False
-        while not done:
-            _, done = downloader.next_chunk()
-
-    return str(out_path)
+        _system_prompt_cache = (
+            "Você é o BriefFlow, um agente de marketing conversacional premium. "
+            "Responda às perguntas do usuário de forma direta e gere o conteúdo "
+            "solicitado com qualidade de agência. Gere SOMENTE o que for pedido."
+        )
+    return _system_prompt_cache
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Brand Extractor — identifica identidade visual do site
-# ─────────────────────────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
+# Seletor de provider com fallback automático
+# Ordem: Ollama → Gemini → Anthropic → OpenAI
+# ──────────────────────────────────────────────────────────────────────────────
 
-def extrair_brand_profile(url: str, conteudo_html: str) -> dict:
-    """Chama o LLM para extrair paleta, fonte e tom de voz de um site."""
-    if url in _brand_profile_cache:
-        logger.info("Brand profile em cache para: %s", url)
-        return _brand_profile_cache[url]
+def _chamar_llm(messages: list, max_tokens: int = MAX_TOKENS) -> tuple:
+    """
+    Tenta Ollama -> Gemini -> Anthropic -> OpenAI nessa ordem.
+    Retorna (texto_gerado, nome_provider) ou lança RuntimeError.
+    """
+    providers = []
 
-    brand_prompt_path = Path("src/prompts/brand_extractor_prompt.txt")
-    if brand_prompt_path.exists():
-        instrucoes = brand_prompt_path.read_text(encoding="utf-8")
-    else:
-        instrucoes = "Extraia nome, cores HEX, fonte e tom de voz do site. Retorne JSON."
+    # 1. Ollama (local, sempre tenta primeiro)
+    providers.append({
+        "nome": f"Ollama/{OLLAMA_MODEL}",
+        "model": f"ollama/{OLLAMA_MODEL}",
+        "api_key": "ollama",
+        "api_base": OLLAMA_BASE_URL,
+    })
 
-    resposta = litellm.completion(
-        model=LLM_MODEL,
-        api_key=LLM_API_KEY,
-        messages=[
-            {"role": "system", "content": instrucoes},
-            {"role": "user",   "content": f"URL: {url}\n\nCONTEÚDO:\n{conteudo_html[:6000]}"}
-        ],
-        max_tokens=800,
-        temperature=0.1,
-        timeout=LLM_TIMEOUT,
+    # 2. Gemini
+    if GEMINI_API_KEY:
+        providers.append({
+            "nome": f"Gemini/{GEMINI_MODEL}",
+            "model": f"gemini/{GEMINI_MODEL}",
+            "api_key": GEMINI_API_KEY,
+            "api_base": None,
+        })
+
+    # 3. Anthropic
+    if ANTHROPIC_KEY:
+        providers.append({
+            "nome": f"Claude/{ANTHROPIC_MODEL}",
+            "model": ANTHROPIC_MODEL,
+            "api_key": ANTHROPIC_KEY,
+            "api_base": None,
+        })
+
+    # 4. OpenAI
+    if OPENAI_KEY:
+        providers.append({
+            "nome": f"OpenAI/{OPENAI_MODEL}",
+            "model": OPENAI_MODEL,
+            "api_key": OPENAI_KEY,
+            "api_base": None,
+        })
+
+    ultimo_erro = None
+    for p in providers:
+        try:
+            kwargs = dict(
+                model=p["model"],
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=TEMPERATURE,
+                api_key=p["api_key"],
+                timeout=120,
+            )
+            if p["api_base"]:
+                kwargs["api_base"] = p["api_base"]
+
+            resposta = litellm.completion(**kwargs)
+            return resposta.choices[0].message.content.strip(), p["nome"]
+
+        except Exception as e:
+            ultimo_erro = e
+            logger.warning("Falha em %s: %s — tentando próximo provider.", p["nome"], e)
+            continue
+
+    raise RuntimeError(
+        f"Todos os providers falharam. Último erro: {ultimo_erro}\n"
+        "► Verifique se o Ollama está rodando: ollama serve\n"
+        "► Ou configure uma API key no .env (GEMINI_API_KEY, ANTHROPIC_API_KEY ou OPENAI_API_KEY)"
     )
 
-    raw = resposta.choices[0].message.content.strip()
-    try:
-        match = re.search(r"\{.*\}", raw, re.DOTALL)
-        profile = json.loads(match.group(0)) if match else {}
-    except Exception:
-        profile = {}
 
-    _brand_profile_cache[url] = profile
-    logger.info("Brand profile extraído para: %s", url)
-    return profile
-
-
-# ─────────────────────────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
 # Detector de intenção — qual material gerar
-# ─────────────────────────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
 
 MATERIAL_MAP = {
-    "banner":           "banner HTML profissional (hero com gradiente, headline bold, CTA)",
-    "ficha":            "ficha técnica HTML completa (hero + stats bar + specs + tabela + rodapé)",
-    "ficha tecnica":    "ficha técnica HTML completa (hero + stats bar + specs + tabela + rodapé)",
-    "post linkedin":    "carrossel LinkedIn 6 slides (copy + briefing visual por slide)",
-    "linkedin":         "carrossel LinkedIn 6 slides (copy + briefing visual por slide)",
-    "post instagram":   "post Instagram feed 1080x1080 (legenda + hashtags + briefing visual)",
-    "instagram":        "post Instagram feed 1080x1080 (legenda + hashtags + briefing visual)",
-    "stories":          "sequência de 3 Instagram Stories (narrativa dor→solução→CTA + briefing)",
-    "reels":            "roteiro Reels/TikTok 60s cena a cena com timecodes",
-    "tiktok":           "roteiro Reels/TikTok 60s cena a cena com timecodes",
-    "email":            "e-mail marketing HTML completo responsivo (Gmail + Outlook)",
-    "e-mail":           "e-mail marketing HTML completo responsivo (Gmail + Outlook)",
-    "google ads":       "3 variações de anúncio Google Ads RSA (headlines + descriptions + extensões)",
-    "ads":              "3 variações de anúncio Google Ads RSA (headlines + descriptions + extensões)",
-    "proposta":         "one-pager proposta comercial para WhatsApp/e-mail de vendas",
-    "one pager":        "one-pager proposta comercial para WhatsApp/e-mail de vendas",
-    "whatsapp":         "script de abordagem comercial para WhatsApp",
-    "script":           "script de abordagem comercial para WhatsApp",
+    "banner":         "banner HTML profissional (hero com gradiente, headline bold, CTA)",
+    "ficha tecnica":  "ficha técnica HTML completa (hero + stats bar + specs + tabela + rodapé)",
+    "ficha":          "ficha técnica HTML completa (hero + stats bar + specs + tabela + rodapé)",
+    "post linkedin":  "carrossel LinkedIn 6 slides (copy + briefing visual por slide)",
+    "linkedin":       "carrossel LinkedIn 6 slides (copy + briefing visual por slide)",
+    "post instagram": "post Instagram feed 1080x1080 (legenda + hashtags + briefing visual)",
+    "instagram":      "post Instagram feed 1080x1080 (legenda + hashtags + briefing visual)",
+    "stories":        "sequência de 3 Instagram Stories (dor→solução→CTA + briefing)",
+    "reels":          "roteiro Reels/TikTok 60s cena a cena com timecodes",
+    "tiktok":         "roteiro Reels/TikTok 60s cena a cena com timecodes",
+    "email":          "e-mail marketing HTML completo responsivo (Gmail + Outlook)",
+    "e-mail":         "e-mail marketing HTML completo responsivo (Gmail + Outlook)",
+    "google ads":     "3 variações de anúncio Google Ads RSA (headlines + descriptions + extensões)",
+    "meta ads":       "3 variações de anúncio Meta Ads (feed + stories + reels copy)",
+    "proposta":       "one-pager proposta comercial para WhatsApp/e-mail de vendas",
+    "one pager":      "one-pager proposta comercial para WhatsApp/e-mail de vendas",
+    "whatsapp":       "script de abordagem comercial para WhatsApp",
+    "script":         "script de abordagem comercial para WhatsApp",
+    "card":           "card de produto HTML responsivo com foto, specs e CTA",
+    "landing page":   "landing page HTML completa com hero, benefícios, prova social e CTA",
 }
 
 
-def detectar_material(mensagem: str) -> tuple[str, str]:
-    """
-    Detecta qual material o usuário quer gerar.
-    Retorna (chave_material, descricao_material).
-    Se não detectar, retorna ('livre', mensagem original).
-    """
+def detectar_material(mensagem: str) -> Optional[tuple]:
+    """Retorna (chave, descricao) se detectar intenção de gerar material, senão None."""
     msg_lower = mensagem.lower()
+    verbos = ["gere", "crie", "cria", "faça", "faz", "gera", "monte", "monta", "escreva", "escreve", "produz"]
+    tem_verbo = any(v in msg_lower for v in verbos)
     for chave, descricao in MATERIAL_MAP.items():
         if chave in msg_lower:
             return chave, descricao
-    return "livre", mensagem
+    return None
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Gerador principal — on-demand, gera só o que foi pedido
-# ─────────────────────────────────────────────────────────────────────────────
-
-def gerar_conteudo(
-    mensagem_usuario: str,
-    contexto: str = "",
-    brand_profile: Optional[dict] = None,
-) -> str:
-    """
-    Gera SOMENTE o conteúdo solicitado na mensagem.
-    Sem lote, sem materiais não pedidos.
-
-    Args:
-        mensagem_usuario: O que o usuário pediu (ex: "gere um banner para o produto X")
-        contexto: Texto adicional de contexto (transcrição, dados do produto, etc.)
-        brand_profile: Dicionário com identidade visual da marca (opcional)
-
-    Returns:
-        str: Conteúdo gerado pelo LLM
-    """
-    system_prompt_path = Path("src/prompts/system_prompt.txt")
-    system_prompt = (
-        system_prompt_path.read_text(encoding="utf-8").strip()
-        if system_prompt_path.exists()
-        else "Você é um especialista em marketing digital. Gere o conteúdo solicitado com qualidade de agência premium."
-    )
-
-    # Injeta brand profile se disponível
-    brand_context = ""
-    if brand_profile:
-        brand_context = f"""
-
-── IDENTIDADE VISUAL DA MARCA ──
-Empresa: {brand_profile.get('nome_empresa', 'N/D')}
-Slogan: {brand_profile.get('slogan', 'N/D')}
-Cor primária: {brand_profile.get('cores', {}).get('primaria', '#1a4b8c')}
-Cor accent: {brand_profile.get('cores', {}).get('accent', '#f97316')}
-Fonte: {brand_profile.get('fonte_principal', 'Inter')}
-Tom de voz: {brand_profile.get('tom_de_voz', 'profissional')}
-Use EXATAMENTE estas cores e fonte em todo HTML gerado.
-"""
-
-    # Monta contexto de produto/campanha se houver
-    contexto_bloco = f"\n\n── CONTEXTO DO PRODUTO/CAMPANHA ──\n{contexto.strip()}" if contexto.strip() else ""
-
-    # Detecta o material para dar instrução focada ao LLM
-    chave, descricao_material = detectar_material(mensagem_usuario)
-    instrucao_foco = (
-        f"\n\nGere APENAS: {descricao_material}.\nNão gere outros materiais. Não explique o raciocínio. Entregue o conteúdo diretamente."
-        if chave != "livre"
-        else "\nEntregue o conteúdo solicitado diretamente, sem explicações."
-    )
-
-    user_message = mensagem_usuario + instrucao_foco + brand_context + contexto_bloco
-
-    logger.info("Gerando: '%s' | Modelo: %s", chave, LLM_MODEL)
-    t0 = time.time()
-
-    resposta = litellm.completion(
-        model=LLM_MODEL,
-        api_key=LLM_API_KEY,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user",   "content": user_message},
-        ],
-        max_tokens=4096,
-        temperature=0.5,
-        timeout=LLM_TIMEOUT,
-    )
-
-    conteudo = resposta.choices[0].message.content.strip()
-    logger.info("Gerado em %.1fs | Tokens usados: %s", time.time() - t0,
-                resposta.usage.total_tokens if resposta.usage else "N/D")
-    return conteudo
-
-
-def salvar_output(conteudo: str, nome_arquivo: str) -> str:
-    """Salva o conteúdo gerado em OUTPUT_DIR."""
+def salvar_output(conteudo: str, nome: str) -> str:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = time.strftime("%Y%m%d_%H%M%S")
-    ext = ".html" if "<!DOCTYPE" in conteudo or "<html" in conteudo.lower() else ".txt"
-    path = OUTPUT_DIR / f"{nome_arquivo}_{timestamp}{ext}"
+    ext = ".html" if ("<!DOCTYPE" in conteudo or "<html" in conteudo.lower()) else ".txt"
+    path = OUTPUT_DIR / f"{nome}_{timestamp}{ext}"
     path.write_text(conteudo, encoding="utf-8")
-    logger.info("Salvo em: %s", path)
     return str(path)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Interface de chat interativo
-# ─────────────────────────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
+# Chat interativo — a IA responde E gera conteúdo
+# ──────────────────────────────────────────────────────────────────────────────
+
+BANNER = """
+╔══════════════════════════════════════════════════════════════╗
+║            BriefFlow ✦ Agente de Marketing                   ║
+║  Powered by Ollama (local) + fallback Gemini/Claude/OpenAI   ║
+╚══════════════════════════════════════════════════════════════╝
+
+Como usar:
+  • Converse normalmente — pergunte, peça ideias, tire dúvidas.
+  • Para gerar conteúdo: "crie um banner para o produto X"
+  • Para passar contexto: "contexto: [cole aqui dados do produto]"
+  • Comandos: /ajuda  /modelo  /limpar  /sair
+
+Exemplos rápidos:
+  › gere um banner para pipetas sorológicas Kasvi
+  › crie um post instagram sobre promoção de fim de ano
+  › escreva um script whatsapp para vender microscópios
+  › quais formatos de conteúdo você consegue criar?
+"""
+
+AJUDA = """
+┌─ Comandos ──────────────────────────────────────────────────┐
+│  /ajuda   → exibe este menu                                 │
+│  /modelo  → mostra provider ativo e fallbacks               │
+│  /limpar  → reinicia conversa (limpa histórico)             │
+│  /sair    → encerra o BriefFlow                             │
+├─ Materiais que posso gerar ─────────────────────────────────┤
+│  banner · ficha técnica · card · landing page · e-mail      │
+│  post instagram · stories · reels · linkedin                │
+│  google ads · meta ads · script whatsapp · proposta         │
+├─ Como passar contexto ──────────────────────────────────────┤
+│  contexto: [nome do produto, specs, público-alvo, oferta]   │
+│  Depois peça o material: "gere um banner"                   │
+└─────────────────────────────────────────────────────────────┘
+"""
+
 
 def chat_loop():
-    """Loop de chat interativo no terminal."""
-    print("\n" + "="*60)
-    print("  BriefFlow — Agente de Marketing via Chat")
-    print("  Digite 'sair' para encerrar")
-    print("="*60 + "\n")
+    print(BANNER)
 
-    brand_profile = None
-    contexto = ""
+    historico = []         # histórico da conversa
+    contexto_produto = ""  # contexto extra do usuário
+    system = get_system_prompt()
 
     while True:
         try:
-            mensagem = input("Você: ").strip()
+            entrada = input("Você: ").strip()
         except (EOFError, KeyboardInterrupt):
-            print("\nEncerrando BriefFlow.")
+            print("\nAté logo! ✦")
             break
 
-        if not mensagem:
+        if not entrada:
             continue
-        if mensagem.lower() in ("sair", "exit", "quit"):
-            print("Até logo!")
+
+        # ── Comandos especiais ────────────────────────────────────────────────
+        if entrada.lower() in ("/sair", "sair", "exit", "quit"):
+            print("Até logo! ✦")
             break
 
-        # Detecta se o usuário colou uma URL
-        url_match = re.search(r'https?://[^\s]+', mensagem)
-        if url_match:
-            url = url_match.group(0)
-            print(f"\n🔍 Analisando identidade visual de: {url}")
-            print("   (Cole o HTML da página no próximo campo para extração completa,")
-            print("    ou pressione Enter para pular e informar cores manualmente)")
-            html_input = input("HTML da página (ou Enter para pular): ").strip()
-
-            if html_input:
-                brand_profile = extrair_brand_profile(url, html_input)
-                nome = brand_profile.get("nome_empresa", "Empresa")
-                cor  = brand_profile.get("cores", {}).get("primaria", "N/D")
-                fonte = brand_profile.get("fonte_principal", "N/D")
-                print(f"\n✅ Marca identificada: {nome} | Cor: {cor} | Fonte: {fonte}")
-            else:
-                print("⚠️  HTML não fornecido. Continuando sem brand profile.")
-                print("   Dica: informe as cores e nome da empresa na sua mensagem.")
-
-        # Detecta contexto de produto (transcrição ou dados extras)
-        if any(k in mensagem.lower() for k in ["contexto:", "produto:", "transcrição:", "dados:"]):
-            contexto = mensagem
-            print("📎 Contexto registrado. Agora me diga o que gerar.")
+        if entrada.lower() == "/limpar":
+            historico.clear()
+            contexto_produto = ""
+            print("\n✓ Conversa reiniciada.\n")
             continue
 
-        # Gera o conteúdo pedido
-        print("\n⏳ Gerando...")
-        t0 = time.time()
+        if entrada.lower() == "/ajuda":
+            print(AJUDA)
+            continue
 
-        try:
-            resultado = gerar_conteudo(
-                mensagem_usuario=mensagem,
-                contexto=contexto,
-                brand_profile=brand_profile,
+        if entrada.lower() == "/modelo":
+            print(f"\n🔧 Ollama ativo: {OLLAMA_MODEL} | Base: {OLLAMA_BASE_URL}")
+            print(f"   Fallback: "
+                  f"Gemini={'✓' if GEMINI_API_KEY else '✗'}  "
+                  f"Claude={'✓' if ANTHROPIC_KEY else '✗'}  "
+                  f"OpenAI={'✓' if OPENAI_KEY else '✗'}\n")
+            continue
+
+        # ── Registro de contexto de produto ───────────────────────────────────
+        if entrada.lower().startswith("contexto:"):
+            contexto_produto = entrada[9:].strip()
+            print("\n📎 Contexto registrado! Agora me diga o que gerar.\n")
+            historico.append({"role": "user",      "content": entrada})
+            historico.append({"role": "assistant", "content": "Contexto salvo! Me diga agora o que você precisa gerar com essas informações."})
+            continue
+
+        # ── Monta mensagem final com contexto se houver ───────────────────────
+        mensagem_final = entrada
+        if contexto_produto:
+            mensagem_final = (
+                f"{entrada}\n\n"
+                f"--- CONTEXTO DO PRODUTO/CAMPANHA ---\n{contexto_produto}"
             )
 
+        # ── Detecta se é pedido de geração de material ────────────────────────
+        material = detectar_material(entrada)
+        if material:
+            chave, descricao = material
+            mensagem_final += (
+                f"\n\nIMPORTANTE: Gere APENAS {descricao}. "
+                f"Entregue o conteúdo completo diretamente, sem explicações introdutórias."
+            )
+
+        # ── Chama o LLM ───────────────────────────────────────────────────────
+        print("\n⏳ ", end="", flush=True)
+        t0 = time.time()
+
+        messages = [
+            {"role": "system", "content": system},
+            *historico[-12:],  # janela de contexto: últimas 12 trocas
+            {"role": "user",   "content": mensagem_final},
+        ]
+
+        # Mais tokens para materiais de geração
+        max_tok = 4096 if material else MAX_TOKENS
+
+        try:
+            resposta, provider_usado = _chamar_llm(messages, max_tokens=max_tok)
             tempo = time.time() - t0
-            print(f"\n✅ Pronto em {tempo:.1f}s\n")
-            print("-" * 60)
-            print(resultado)
-            print("-" * 60)
 
-            # Salva automaticamente
-            chave, _ = detectar_material(mensagem)
-            caminho = salvar_output(resultado, chave)
-            print(f"\n💾 Salvo em: {caminho}\n")
+            # ── Exibe resposta ─────────────────────────────────────────────────
+            print(f"\rBriefFlow ({provider_usado}) [{tempo:.1f}s]:\n")
+            print(resposta)
+            print()
 
+            # ── Salva automaticamente se for material ──────────────────────────
+            if material:
+                caminho = salvar_output(resposta, chave)
+                print(f"💾 Salvo em: {caminho}\n")
+
+            # ── Atualiza histórico ─────────────────────────────────────────────
+            historico.append({"role": "user",      "content": entrada})
+            historico.append({"role": "assistant", "content": resposta})
+
+            # Limita histórico a 20 mensagens para não estourar contexto
+            if len(historico) > 20:
+                historico = historico[-20:]
+
+        except RuntimeError as e:
+            print(f"\r❌ {e}\n")
         except Exception as e:
-            logger.error("Erro na geração: %s", e)
-            print(f"\n❌ Erro: {e}")
-            print("Verifique sua API key e conexão.\n")
+            print(f"\r❌ Erro inesperado: {e}\n")
+            logger.exception("Erro no chat loop")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
 # Entrypoint
-# ─────────────────────────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
 
 def main():
-    if not LLM_API_KEY:
-        logger.warning("LLM_API_KEY não definida no .env — verifique antes de usar.")
     chat_loop()
 
 
