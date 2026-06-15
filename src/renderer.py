@@ -18,12 +18,6 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# Mapa de formatos por material
-# format   : extensao do arquivo de saida
-# renderer : 'png' | 'pdf' | 'html' | 'txt'
-# width    : largura do viewport em px
-# height   : altura do viewport em px (None = altura automatica)
-
 FORMAT_MAP: dict = {
     "banner": {
         "format": "png", "renderer": "png",
@@ -117,26 +111,65 @@ def _playwright_disponivel() -> bool:
 
 
 def _renderizar_png(html: str, output_path: Path, width: int, height: Optional[int]) -> Path:
+    """Captura screenshot PNG aguardando carregamento completo de fontes e imagens."""
     from playwright.sync_api import sync_playwright
+
     with sync_playwright() as p:
-        browser = p.chromium.launch()
-        page = browser.new_page(viewport={"width": width, "height": height or 900})
+        browser = p.chromium.launch(
+            args=["--no-sandbox", "--disable-setuid-sandbox", "--font-render-hinting=none"]
+        )
+        page = browser.new_page(
+            viewport={"width": width, "height": height or 900},
+            device_scale_factor=2,  # alta resolucao (2x)
+        )
+
+        # Injeta HTML e aguarda rede + fontes
         page.set_content(html, wait_until="networkidle")
+        page.wait_for_load_state("domcontentloaded")
+
+        # Aguarda fontes web carregarem via JS
+        try:
+            page.evaluate("document.fonts.ready")
+        except Exception:
+            pass
+
+        # Pausa extra para animacoes CSS e imagens lazy
+        page.wait_for_timeout(800)
+
         if height is None:
             real_height = page.evaluate("document.body.scrollHeight")
             page.set_viewport_size({"width": width, "height": max(real_height, 100)})
-        page.screenshot(path=str(output_path), full_page=(height is None))
+            page.wait_for_timeout(200)
+
+        page.screenshot(
+            path=str(output_path),
+            full_page=(height is None),
+            animations="disabled",
+        )
         browser.close()
+
     return output_path
 
 
 def _renderizar_png_stories(html: str, output_dir: Path, width: int, height: int) -> list:
     from playwright.sync_api import sync_playwright
+
     paths = []
     with sync_playwright() as p:
-        browser = p.chromium.launch()
-        page = browser.new_page(viewport={"width": width, "height": height})
+        browser = p.chromium.launch(
+            args=["--no-sandbox", "--disable-setuid-sandbox"]
+        )
+        page = browser.new_page(
+            viewport={"width": width, "height": height},
+            device_scale_factor=2,
+        )
         page.set_content(html, wait_until="networkidle")
+        try:
+            page.evaluate("document.fonts.ready")
+        except Exception:
+            pass
+        page.wait_for_timeout(800)
+
         slides = page.query_selector_all(".story, .slide, [data-slide]")
         if slides:
             for i, slide in enumerate(slides[:3], start=1):
@@ -145,7 +178,7 @@ def _renderizar_png_stories(html: str, output_dir: Path, width: int, height: int
                 paths.append(out)
         else:
             out = output_dir / "story_01.png"
-            page.screenshot(path=str(out), full_page=False)
+            page.screenshot(path=str(out), full_page=False, animations="disabled")
             paths.append(out)
         browser.close()
     return paths
@@ -153,10 +186,18 @@ def _renderizar_png_stories(html: str, output_dir: Path, width: int, height: int
 
 def _renderizar_pdf(html: str, output_path: Path) -> Path:
     from playwright.sync_api import sync_playwright
+
     with sync_playwright() as p:
-        browser = p.chromium.launch()
+        browser = p.chromium.launch(
+            args=["--no-sandbox", "--disable-setuid-sandbox"]
+        )
         page = browser.new_page()
         page.set_content(html, wait_until="networkidle")
+        try:
+            page.evaluate("document.fonts.ready")
+        except Exception:
+            pass
+        page.wait_for_timeout(600)
         page.pdf(
             path=str(output_path),
             format="A4",
@@ -193,25 +234,21 @@ def renderizar(conteudo: str, material_key: str, output_dir: Path, nome_base: st
 
     logger.info("Renderizando '%s' como %s...", label, fmt.upper())
 
-    # TXT: direto, sem Playwright
     if renderer == "txt":
         path = output_dir / f"{nome_arquivo}.txt"
         path.write_text(conteudo, encoding="utf-8")
         return [path]
 
-    # HTML: direto, sem Playwright
     if renderer == "html":
         path = output_dir / f"{nome_arquivo}.html"
         path.write_text(conteudo, encoding="utf-8")
         return [path]
 
-    # Renderizacoes visuais: requerem Playwright
     if not _playwright_disponivel():
         logger.warning(
             "Playwright nao instalado. Salvando '%s' como HTML.\n"
-            "Para ativar conversao para %s:\n"
-            "  pip install playwright && playwright install chromium",
-            label, fmt.upper()
+            "Para ativar: pip install playwright && playwright install chromium",
+            label
         )
         path = output_dir / f"{nome_arquivo}.html"
         path.write_text(conteudo, encoding="utf-8")
@@ -235,12 +272,11 @@ def renderizar(conteudo: str, material_key: str, output_dir: Path, nome_base: st
             return [path]
 
     except Exception as e:
-        logger.error("Erro na renderizacao visual (%s): %s - salvando como HTML.", fmt.upper(), e)
+        logger.error("Erro na renderizacao visual (%s): %s — salvando como HTML.", fmt.upper(), e)
         path = output_dir / f"{nome_arquivo}_fallback.html"
         path.write_text(conteudo, encoding="utf-8")
         return [path]
 
-    # Fallback final
     path = output_dir / f"{nome_arquivo}.html"
     path.write_text(conteudo, encoding="utf-8")
     return [path]

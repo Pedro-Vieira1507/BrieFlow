@@ -10,10 +10,10 @@ load_dotenv()
 
 import litellm
 
-# Importa renderer (mesmo diretorio)
 import sys
 sys.path.insert(0, str(Path(__file__).parent))
 from renderer import renderizar, FORMAT_MAP
+from rag_loader import carregar_contexto, registrar_erro
 
 # Configuracoes
 OUTPUT_DIR  = Path(os.getenv("OUTPUT_DIR", "data/output"))
@@ -33,7 +33,6 @@ OPENAI_MODEL    = os.getenv("OPENAI_MODEL",    "gpt-4o-mini")
 logging.basicConfig(level=logging.WARNING, format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger(__name__)
 
-# System prompt (cache em memoria)
 SYSTEM_PROMPT_PATH = Path("src/prompts/system_prompt.txt")
 _system_prompt_cache: Optional[str] = None
 
@@ -51,9 +50,6 @@ def get_system_prompt() -> str:
         )
     return _system_prompt_cache
 
-
-# Seletor de provider com fallback automatico
-# Ordem: Ollama -> Gemini -> Anthropic -> OpenAI
 
 def _chamar_llm(messages: list, max_tokens: int = MAX_TOKENS) -> tuple:
     providers = [
@@ -90,7 +86,6 @@ def _chamar_llm(messages: list, max_tokens: int = MAX_TOKENS) -> tuple:
     )
 
 
-# Detector de intencao
 MATERIAL_MAP = {
     "banner":         "banner HTML profissional (hero com gradiente, headline bold, CTA)",
     "ficha tecnica":  "ficha tecnica HTML completa (hero + stats bar + specs + tabela + rodape)",
@@ -130,12 +125,11 @@ def _formato_label(chave: str) -> str:
     return f"{label} -> {fmt}"
 
 
-# Chat interativo
-
 BANNER = """
 +--------------------------------------------------------------+
 |            BriefFlow  Agente de Marketing                    |
 |  Powered by Ollama (local) + fallback Gemini/Claude/OpenAI   |
+|  RAG ativo: pasta knowledge/ alimenta cada geracao           |
 +--------------------------------------------------------------+
 
 Formatos de saida automaticos:
@@ -149,6 +143,7 @@ Como usar:
   * Converse normalmente - pergunte, peca ideias, tire duvidas.
   * Para gerar: "crie um banner para o produto X"
   * Para passar contexto: "contexto: [dados do produto]"
+  * Para reportar erro: "erro: [descreva o problema com o ultimo resultado]"
   * Comandos: /ajuda  /modelo  /limpar  /sair
 """
 
@@ -170,9 +165,12 @@ AJUDA = """
 |  linkedin / reels    ->  TXT                                  |
 |  google ads / meta   ->  TXT                                  |
 |  script whatsapp     ->  TXT                                  |
-+--- Como passar contexto ---------------------------------------+
++--- RAG / Contexto ---------------------------------------------+
 |  contexto: [nome, specs, publico-alvo, oferta]                |
-|  Depois peca o material: "gere um banner"                     |
+|  Os arquivos em knowledge/ sao injetados automaticamente      |
++--- Feedback de qualidade --------------------------------------+
+|  erro: [descreva o que ficou ruim no ultimo material]         |
+|  O exemplo sera salvo em knowledge/erros/ para melhoria       |
 +---------------------------------------------------------------+
 """
 
@@ -182,6 +180,8 @@ def chat_loop():
     historico        = []
     contexto_produto = ""
     system           = get_system_prompt()
+    ultimo_resultado = ""
+    ultima_mensagem  = ""
 
     while True:
         try:
@@ -201,6 +201,7 @@ def chat_loop():
         if entrada.lower() == "/limpar":
             historico.clear()
             contexto_produto = ""
+            ultimo_resultado = ""
             print("\n[OK] Conversa reiniciada.\n")
             continue
 
@@ -215,6 +216,13 @@ def chat_loop():
                   f"OpenAI={'OK' if OPENAI_KEY else 'nao configurado'}\n")
             continue
 
+        # Loop de feedback — registra erro no vault
+        if entrada.lower().startswith("erro:"):
+            motivo = entrada[5:].strip()
+            registrar_erro(ultima_mensagem, ultimo_resultado, motivo)
+            print("\n[Feedback registrado] Obrigado! Isso vai ajudar a melhorar as proximas geracoes.\n")
+            continue
+
         # Registro de contexto
         if entrada.lower().startswith("contexto:"):
             contexto_produto = entrada[9:].strip()
@@ -223,17 +231,31 @@ def chat_loop():
             historico.append({"role": "assistant", "content": "Contexto salvo! Me diga o que gerar."})
             continue
 
+        ultima_mensagem = entrada
+
+        # Detecta material e informa formato de saida
+        material = detectar_material(entrada)
+
+        # Carrega contexto do RAG (Obsidian vault)
+        rag_contexto = carregar_contexto(
+            mensagem=entrada + (" " + contexto_produto if contexto_produto else ""),
+            material_key=material[0] if material else None,
+        )
+
+        # Monta system prompt + RAG
+        system_com_rag = system + rag_contexto
+
         # Monta mensagem final
         mensagem_final = entrada
         if contexto_produto:
             mensagem_final = f"{entrada}\n\n--- CONTEXTO DO PRODUTO/CAMPANHA ---\n{contexto_produto}"
 
-        # Detecta material e informa formato de saida
-        material = detectar_material(entrada)
         if material:
             chave, descricao = material
             fmt_label = _formato_label(chave)
             print(f"\n[Gerando] {fmt_label}...")
+            if rag_contexto:
+                print("[RAG] Contexto do vault injetado.")
             mensagem_final += (
                 f"\n\nIMPORTANTE: Gere APENAS {descricao}. "
                 f"Entregue o conteudo completo diretamente, sem explicacoes introdutorias."
@@ -244,7 +266,7 @@ def chat_loop():
         # Chama o LLM
         t0       = time.time()
         messages = [
-            {"role": "system", "content": system},
+            {"role": "system", "content": system_com_rag},
             *historico[-12:],
             {"role": "user",   "content": mensagem_final},
         ]
@@ -253,6 +275,7 @@ def chat_loop():
         try:
             resposta, provider_usado = _chamar_llm(messages, max_tokens=max_tok)
             tempo = time.time() - t0
+            ultimo_resultado = resposta
 
             print(f"\rBriefFlow ({provider_usado}) [{tempo:.1f}s]:\n")
             print(resposta)
@@ -269,6 +292,8 @@ def chat_loop():
                 )
                 for arq in arquivos:
                     print(f"[Salvo] {arq}")
+                print()
+                print("Se o resultado nao ficou bom, digite: erro: [descreva o problema]")
                 print()
 
             # Atualiza historico
