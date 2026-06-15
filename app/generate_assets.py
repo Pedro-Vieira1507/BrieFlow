@@ -1,140 +1,96 @@
-"""
-generate_assets.py — Pipeline principal de geração de assets de marketing.
-
-Fluxo:
-  1. Lê .brief.json da pasta inbox/
-  2. Chama Gemini LLM para gerar: podcast, slides, ficha, emails, folheto
-  3. Converte slides em PPTX (python-pptx)
-  4. Gera versões visuais via visual_ai.py:
-       - E-mails, Folheto, Ficha → HTML + PDF (Gemini formata + WeasyPrint renderiza)
-       - Posts → Gemini Imagen (fallback automático: Pexels)
-  5. Salva generation_manifest.json com todos os resultados
-
-Configurações relevantes no .env:
-  SKIP_VISUAL_AI=false            → true para pular toda etapa visual
-  VISUAL_AI_PROVIDER_POSTS=...    → gemini_imagen | pexels | skip
-  VISUAL_AI_PROVIDER_DOCS=...     → weasyprint | skip
-"""
+# app/generate_assets.py
+# Pipeline de geração de assets de marketing a partir de um brief estruturado (JSON).
+# Usa ASSET_REGISTRY para determinar o formato de saída de cada tipo de material.
 
 from pathlib import Path
 import json
-import logging
 import os
 import random
 import time
 from typing import Optional, Tuple
 
 from dotenv import load_dotenv
-
-load_dotenv()  # sempre antes de qualquer os.getenv()
-
 from google import genai
 from google.genai import types
 from google.genai import errors as genai_errors
 
-from app.slides_ppt import slides_txt_to_ppt
-from app.visual_ai import run_visual_generation
-
-# ---------------------------------------------------------------------------
-# Logging
-# ---------------------------------------------------------------------------
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%H:%M:%S",
-)
-logger = logging.getLogger(__name__)
+from app.renderers import render_txt, render_pdf, render_banner_image, render_pptx
 
 
-def log(message: str) -> None:
-    logger.info(message)
-
-
-# ---------------------------------------------------------------------------
-# Configurações via .env
-# ---------------------------------------------------------------------------
-INBOX_DIR    = Path("data/inbox")
+# ── Diretórios e configurações ─────────────────────────────────────────────────
+INBOX_DIR = Path("data/inbox")
 EXAMPLES_DIR = Path("data/examples")
-DEFAULT_TEMPLATE_PATH = Path("data/template slides/APRESENTAÇÃO - MODELO [todos copiar].pptx")
+DEFAULT_TEMPLATE_PATH = Path(
+    r"data/tempalate slides/APRESENTAÇÃO - MODELO [todos copiar].pptx"
+)
 
-PRIMARY_MODEL    = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
-FALLBACK_MODELS  = [
+PRIMARY_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+FALLBACK_MODELS = [
     m.strip()
     for m in os.getenv("GEMINI_FALLBACK_MODELS", "gemini-2.5-flash").split(",")
     if m.strip()
 ]
 
-OFFLINE_MODE    = os.getenv("OFFLINE_MODE",   "false").strip().lower() in {"1", "true", "yes", "on"}
-SKIP_EXISTING   = os.getenv("SKIP_EXISTING",  "true" ).strip().lower() in {"1", "true", "yes", "on"}
-SKIP_VISUAL_AI  = os.getenv("SKIP_VISUAL_AI", "false").strip().lower() in {"1", "true", "yes", "on"}
+OFFLINE_MODE = os.getenv("OFFLINE_MODE", "false").strip().lower() in {
+    "1", "true", "yes", "on"
+}
+SKIP_EXISTING = os.getenv("SKIP_EXISTING", "true").strip().lower() in {
+    "1", "true", "yes", "on"
+}
 
-# Controla qual provedor usa para gerar imagens de posts e PDFs de documentos
-# Esses valores são repassados para visual_ai.py via variáveis de ambiente
-VISUAL_AI_PROVIDER_POSTS = os.getenv("VISUAL_AI_PROVIDER_POSTS", "gemini_imagen").strip().lower()
-VISUAL_AI_PROVIDER_DOCS  = os.getenv("VISUAL_AI_PROVIDER_DOCS",  "weasyprint"   ).strip().lower()
-
-DEFAULT_RETRIES                  = int(  os.getenv("GEN_RETRIES",          "5"  ))
-DEFAULT_TIMEOUT_BETWEEN_ASSETS   = float(os.getenv("SLEEP_BETWEEN_ASSETS", "0.5"))
+DEFAULT_RETRIES = int(os.getenv("GEN_RETRIES", "5"))
+DEFAULT_SLEEP = float(os.getenv("SLEEP_BETWEEN_ASSETS", "0.5"))
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+# ── Logging ────────────────────────────────────────────────────────────────────
+def log(message: str) -> None:
+    print(message)
 
+
+# ── Cliente Gemini ─────────────────────────────────────────────────────────────
 def get_client() -> Optional[genai.Client]:
+    load_dotenv()
     if OFFLINE_MODE:
-        log("OFFLINE_MODE ativo. A API não será chamada.")
+        log("[INFO] OFFLINE_MODE ativo. A API não será chamada.")
         return None
     api_key = os.getenv("GEMINI_API_KEY", "").strip()
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY não definido no .env")
-    try:
-        return genai.Client(api_key=api_key)
-    except Exception as e:
-        raise RuntimeError(f"Falha ao inicializar cliente Gemini: {e}") from e
+    return genai.Client(api_key=api_key)
 
 
+# ── Leitura do brief ───────────────────────────────────────────────────────────
 def load_brief(brief_path: Path) -> dict:
     return json.loads(brief_path.read_text(encoding="utf-8"))
 
 
-def write_text_file(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        path.write_text(content.strip() + "\n", encoding="utf-8")
-    except OSError as e:
-        raise RuntimeError(f"Falha ao salvar arquivo {path}: {e}") from e
-
-
+# ── Exemplos offline ───────────────────────────────────────────────────────────
 def load_example_text(asset_key: str) -> str:
     example_map = {
-        "podcast":  EXAMPLES_DIR / "podcast_revendedores.txt",
-        "slides":   EXAMPLES_DIR / "slides_capacitacao_10.txt",
-        "ficha":    EXAMPLES_DIR / "ficha_tecnica_vendedores.txt",
-        "emails":   EXAMPLES_DIR / "emails_marketing_revendedores.txt",
-        "folheto":  EXAMPLES_DIR / "folheto_promocional.txt",
+        "podcast": EXAMPLES_DIR / "podcast_revendedores.txt",
+        "slides": EXAMPLES_DIR / "slides_capacitacao_10.txt",
+        "ficha": EXAMPLES_DIR / "ficha_tecnica_vendedores.txt",
+        "emails": EXAMPLES_DIR / "emails_marketing_revendedores.txt",
+        "banner": EXAMPLES_DIR / "banner_copy.txt",
     }
     example_file = example_map.get(asset_key)
     if not example_file or not example_file.exists():
         raise FileNotFoundError(
-            f"Arquivo de exemplo para OFFLINE_MODE não encontrado: {example_file}"
+            f"Exemplo offline não encontrado para '{asset_key}': {example_file}"
         )
     return example_file.read_text(encoding="utf-8")
 
 
+# ── Modelos com fallback ───────────────────────────────────────────────────────
 def build_models_list() -> list[str]:
     models = [PRIMARY_MODEL] + FALLBACK_MODELS
     seen, ordered = set(), []
-    for model in models:
-        if model and model not in seen:
-            ordered.append(model)
-            seen.add(model)
+    for m in models:
+        if m and m not in seen:
+            ordered.append(m)
+            seen.add(m)
     return ordered
 
-
-# ---------------------------------------------------------------------------
-# LLM
-# ---------------------------------------------------------------------------
 
 def call_model(
     client: Optional[genai.Client],
@@ -144,21 +100,14 @@ def call_model(
     max_retries: int = DEFAULT_RETRIES,
 ) -> Tuple[str, str]:
     if OFFLINE_MODE:
-        content = load_example_text(asset_key)
-        return content, "offline-example"
+        return load_example_text(asset_key), "offline-example"
 
     if client is None:
         raise RuntimeError("Cliente Gemini não inicializado.")
 
-    last_error: Optional[Exception] = None
-    models = build_models_list()
-
-    if not models:
-        raise RuntimeError(f"Nenhum modelo configurado para asset '{asset_key}'.")
-
-    for model in models:
-        log(f"Chamando modelo para '{asset_key}': {model}")
-
+    last_error = None
+    for model in build_models_list():
+        log(f"[INFO] Gerando '{asset_key}' com modelo: {model}")
         for attempt in range(max_retries):
             try:
                 response = client.models.generate_content(
@@ -168,40 +117,26 @@ def call_model(
                 )
                 text = (response.text or "").strip()
                 if not text:
-                    raise RuntimeError(
-                        f"Resposta vazia do modelo {model} para asset '{asset_key}'"
-                    )
+                    raise RuntimeError(f"Resposta vazia do modelo {model} para '{asset_key}'")
                 return text, model
-
             except genai_errors.ServerError as e:
                 last_error = e
                 wait = (2 ** attempt) + random.uniform(0.2, 1.2)
-                log(f"ServerError '{asset_key}' modelo '{model}' tentativa {attempt + 1}/{max_retries}: {e}")
+                log(f"[ERRO] ServerError em '{asset_key}', tentativa {attempt + 1}/{max_retries}: {e}")
                 if attempt < max_retries - 1:
-                    log(f"Aguardando {wait:.1f}s para retry...")
+                    log(f"[INFO] Aguardando {wait:.1f}s...")
                     time.sleep(wait)
                 else:
-                    log(f"Modelo '{model}' falhou após {max_retries} tentativas.")
-
-            except genai_errors.APIError as e:
+                    log(f"[WARN] Modelo '{model}' esgotou tentativas. Tentando fallback...")
+            except (genai_errors.APIError, Exception) as e:
                 last_error = e
-                log(f"APIError '{asset_key}' modelo '{model}': {e}")
+                log(f"[ERRO] Falha em '{asset_key}', modelo '{model}': {e}")
                 break
 
-            except Exception as e:
-                last_error = e
-                log(f"Falha inesperada '{asset_key}' modelo '{model}': {e}")
-                break
-
-    raise last_error if isinstance(last_error, BaseException) else RuntimeError(
-        f"Falha ao gerar asset '{asset_key}' com todos os modelos."
-    )
+    raise last_error or RuntimeError(f"Todos os modelos falharam para asset '{asset_key}'.")
 
 
-# ---------------------------------------------------------------------------
-# Prompts
-# ---------------------------------------------------------------------------
-
+# ── Builders de prompt ─────────────────────────────────────────────────────────
 def build_podcast_prompt(brief: dict) -> str:
     return f"""
 Contexto estruturado (JSON)
@@ -215,11 +150,10 @@ voltado para REVENDEDORES, sobre a linha de produtos descrita no contexto.
 
 Regras:
 - Foco em PEGADA COMERCIAL, com base técnica.
-- Apresente rapidamente as sub-categorias relevantes.
 - Destaque 2-3 vantagens chave para o revendedor.
-- Termine com chamada forte para uma oferta, se fizer sentido.
-- Estruture como fala, em blocos: Introdução, Desenvolvimento, Encerramento.
-- Texto em português (pt-BR).
+- Termine com chamada forte para a oferta.
+- Estruture como fala: Introdução / Desenvolvimento / Encerramento.
+- Português (pt-BR).
 """.strip()
 
 
@@ -231,19 +165,25 @@ Contexto estruturado (JSON)
 
 Tarefa
 ------
-Monte uma ESTRUTURA de 10 SLIDES para uma apresentação
-de capacitação técnica sobre a linha de produtos do contexto,
-voltada para REVENDEDORES.
+Monte uma ESTRUTURA de 10 SLIDES para capacitação técnica voltada a REVENDEDORES.
 
-Regras:
-- Use EXATAMENTE este formato:
+Use EXATAMENTE este formato:
+
 Slide 1 - Título:
 - ...
+
 Slide 2 - Assunto:
 - ...
+
+...
+
 Slide 10 - Assunto:
 - ...
-- Texto em português (pt-BR).
+
+Regras:
+- Linguagem clara, foco técnico.
+- Mencione gráficos/tabelas apenas como referência (ex: "gráfico de barras").
+- Português (pt-BR).
 """.strip()
 
 
@@ -258,14 +198,14 @@ Tarefa
 Crie uma FICHA TÉCNICA textual para vendedores internos,
 com 2-3 diferenciais práticos por subcategoria.
 
-Formato:
-Subcategoria: Nome
+Formato obrigatório:
+Subcategoria: Nome da subcategoria
 - Diferencial 1
 - Diferencial 2
 - Diferencial 3
 
 Regras:
-- Foco em argumentação contra concorrentes.
+- Foco em argumentos contra concorrentes.
 - Português (pt-BR).
 """.strip()
 
@@ -278,10 +218,10 @@ Contexto estruturado (JSON)
 
 Tarefa
 ------
-Crie 2 EMAILS DE MARKETING para REVENDEDORES:
+Crie uma sequência de 2 EMAILS DE MARKETING para REVENDEDORES:
 
-EMAIL 1 — Apresentação da linha e posicionamento da marca.
-EMAIL 2 — Oferta e urgência.
+EMAIL 1 – Apresentar a linha e posicionar a marca.
+EMAIL 2 – Oferta e urgência.
 
 Formato:
 EMAIL 1
@@ -295,11 +235,12 @@ Pré-header:
 Corpo:
 
 Regras:
-- Parágrafos curtos. CTA claro. Português (pt-BR).
+- Parágrafos curtos, CTA claro.
+- Português (pt-BR).
 """.strip()
 
 
-def build_folheto_prompt(brief: dict) -> str:
+def build_banner_prompt(brief: dict) -> str:
     return f"""
 Contexto estruturado (JSON)
 ---------------------------
@@ -307,24 +248,114 @@ Contexto estruturado (JSON)
 
 Tarefa
 ------
-Crie o TEXTO de um FOLHETO PROMOCIONAL para revendedores,
-no formato A4 dobrado (3 painéis).
+Crie o COPY VISUAL para um BANNER de marketing (1200x628px), destinado a
+campanha digital (e-mail marketing, LinkedIn, WhatsApp Business).
 
-Estrutura:
-Capa: Título impactante + subtítulo
-Painel 2: Principais produtos e benefícios (bullets)
-Painel 3: Oferta especial + CTA + contato
+Formato de saída — use EXATAMENTE estas 4 linhas:
+Linha 1: Título principal (máximo 8 palavras, impactante)
+Linha 2: Subtítulo / proposta de valor (máximo 12 palavras)
+Linha 3: CTA — chamada para ação (máximo 5 palavras)
+Linha 4: Rodapé informativo (ex: validade da oferta, slogan da marca)
 
 Regras:
-- Linguagem comercial e direta.
-- Máximo 150 palavras por painel.
+- Texto direto, sem pontuação excessiva.
 - Português (pt-BR).
 """.strip()
 
 
-# ---------------------------------------------------------------------------
-# PPTX
-# ---------------------------------------------------------------------------
+# ── ASSET_REGISTRY — fonte única da verdade para formatos de saída ─────────────
+#
+# Adicionar um novo asset: basta criar uma entrada aqui.
+# Campos:
+#   prompt_builder : função que recebe o brief (dict) e retorna o prompt (str)
+#   output_format  : extensão final do arquivo (sem ponto)
+#   renderer       : função de app.renderers que salva o arquivo no formato correto
+#   filename       : nome base do arquivo de saída (sem extensão)
+#   temperature    : criatividade do LLM para esse asset
+#
+ASSET_REGISTRY: dict[str, dict] = {
+    "podcast": {
+        "prompt_builder": build_podcast_prompt,
+        "output_format": "txt",
+        "renderer": render_txt,
+        "filename": "podcast_revendedores",
+        "temperature": 0.5,
+    },
+    "slides": {
+        "prompt_builder": build_slides_prompt,
+        "output_format": "pptx",
+        "renderer": render_pptx,
+        "filename": "slides_capacitacao_10",
+        "temperature": 0.4,
+    },
+    "ficha": {
+        "prompt_builder": build_ficha_prompt,
+        "output_format": "pdf",
+        "renderer": render_pdf,
+        "filename": "ficha_tecnica_vendedores",
+        "temperature": 0.4,
+    },
+    "emails": {
+        "prompt_builder": build_emails_prompt,
+        "output_format": "txt",
+        "renderer": render_txt,
+        "filename": "emails_marketing_revendedores",
+        "temperature": 0.6,
+    },
+    "banner": {
+        "prompt_builder": build_banner_prompt,
+        "output_format": "png",
+        "renderer": render_banner_image,
+        "filename": "banner_campanha",
+        "temperature": 0.7,
+    },
+}
+
+
+# ── Motor de geração universal ─────────────────────────────────────────────────
+def generate_one_asset(
+    *,
+    client: Optional[genai.Client],
+    asset_key: str,
+    brief: dict,
+    out_dir: Path,
+    manifest: dict,
+) -> None:
+    config      = ASSET_REGISTRY[asset_key]
+    ext         = config["output_format"]
+    filename    = config["filename"]
+    output_path = out_dir / f"{filename}.{ext}"
+
+    if SKIP_EXISTING and output_path.exists():
+        log(f"[SKIP] Já existe: {output_path}")
+        manifest["assets"][asset_key] = {
+            "status": "skipped_existing",
+            "output_file": str(output_path),
+            "output_format": ext,
+        }
+        return
+
+    prompt = config["prompt_builder"](brief)
+    content, model_used = call_model(
+        client=client,
+        prompt=prompt,
+        asset_key=asset_key,
+        temperature=config["temperature"],
+    )
+
+    # 🎯 Renderiza no formato correto conforme o registry
+    renderer = config["renderer"]
+    renderer(content, output_path)
+
+    manifest["assets"][asset_key] = {
+        "status": "generated",
+        "output_file": str(output_path),
+        "output_format": ext,
+        "model": model_used,
+        "temperature": config["temperature"],
+    }
+    log(f"[OK] Asset '{asset_key}' → {ext.upper()} ({model_used})")
+
 
 def get_images_dir(out_dir: Path) -> Path:
     images_dir = out_dir / "images"
@@ -332,212 +363,47 @@ def get_images_dir(out_dir: Path) -> Path:
     return images_dir
 
 
-def generate_one_asset(
-    *,
-    client: Optional[genai.Client],
-    asset_key: str,
-    prompt: str,
-    output_path: Path,
-    temperature: float,
-    manifest: dict,
-) -> None:
-    if SKIP_EXISTING and output_path.exists():
-        log(f"[SKIP] Já existe: {output_path.name}")
-        manifest["assets"][asset_key] = {
-            "status": "skipped_existing",
-            "output_file": str(output_path),
-            "source": "existing_file",
-        }
-        return
-
-    content, source_used = call_model(
-        client=client,
-        prompt=prompt,
-        asset_key=asset_key,
-        temperature=temperature,
-    )
-    write_text_file(output_path, content)
-    manifest["assets"][asset_key] = {
-        "status": "generated",
-        "output_file": str(output_path),
-        "source": source_used,
-        "temperature": temperature,
-    }
-    log(f"[OK] Asset '{asset_key}' gerado via: {source_used}")
-
-
-def maybe_generate_pptx(
-    slides_txt: Path,
-    manifest: dict,
-    *,
-    template_path: Path,
-    images_dir: Path,
-) -> None:
-    pptx_path = slides_txt.with_suffix(".pptx")
-
-    if not slides_txt.exists():
-        manifest["assets"]["slides_pptx"] = {
-            "status": "skipped_missing_source",
-            "reason": str(slides_txt),
-        }
-        log(f"[WARN] TXT de slides não encontrado, PPTX pulado.")
-        return
-
-    if not template_path.exists():
-        manifest["assets"]["slides_pptx"] = {
-            "status": "error",
-            "error": f"Template não encontrado: {template_path}",
-        }
-        log(f"[ERRO] Template PPTX não encontrado: {template_path}")
-        return
-
-    if SKIP_EXISTING and pptx_path.exists():
-        log(f"[SKIP] PPTX já existe: {pptx_path.name}")
-        manifest["assets"]["slides_pptx"] = {
-            "status": "skipped_existing",
-            "output_file": str(pptx_path),
-        }
-        return
-
-    try:
-        slides_txt_to_ppt(
-            slides_txt,
-            template_path=template_path,
-            images_dir=images_dir,
-        )
-        manifest["assets"]["slides_pptx"] = {
-            "status": "generated",
-            "output_file": str(pptx_path),
-        }
-        log(f"[OK] PPTX gerado: {pptx_path.name}")
-    except Exception as e:
-        manifest["assets"]["slides_pptx"] = {"status": "error", "error": str(e)}
-        log(f"[ERRO] Falha ao gerar PPTX: {e}")
-
-
-# ---------------------------------------------------------------------------
-# Orquestrador principal
-# ---------------------------------------------------------------------------
-
+# ── Orquestrador principal ─────────────────────────────────────────────────────
 def generate_assets_for_brief(brief_path: Path) -> None:
-    brief     = load_brief(brief_path)
-    base_name = brief_path.stem.replace(".brief", "")
-    out_dir   = brief_path.parent / f"{base_name}_assets"
+    brief    = load_brief(brief_path)
+    base     = brief_path.stem.replace(".brief", "")
+    out_dir  = brief_path.parent / f"{base}_assets"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    log(f"=== Brief: {brief_path.name} | Output: {out_dir} ===")
-
-    try:
-        client = get_client()
-    except RuntimeError as e:
-        log(f"[ERRO] Não foi possível inicializar cliente Gemini: {e}")
-        if not OFFLINE_MODE:
-            raise
-        client = None
-
-    images_dir = get_images_dir(out_dir)
+    client = get_client()
 
     manifest = {
-        "brief_file":                str(brief_path),
-        "output_dir":                str(out_dir),
-        "offline_mode":              OFFLINE_MODE,
-        "skip_visual_ai":            SKIP_VISUAL_AI,
-        "visual_ai_provider_posts":  VISUAL_AI_PROVIDER_POSTS,
-        "visual_ai_provider_docs":   VISUAL_AI_PROVIDER_DOCS,
-        "primary_model":             PRIMARY_MODEL,
-        "fallback_models":           FALLBACK_MODELS,
-        "template_path":             str(DEFAULT_TEMPLATE_PATH),
-        "images_dir":                str(images_dir),
-        "assets":                    {},
-        "visual_ai":                 {},
+        "brief_file": str(brief_path),
+        "output_dir": str(out_dir),
+        "offline_mode": OFFLINE_MODE,
+        "primary_model": PRIMARY_MODEL,
+        "fallback_models": FALLBACK_MODELS,
+        "assets": {},
     }
 
-    # Caminhos de output de texto
-    podcast_txt = out_dir / "podcast_revendedores.txt"
-    slides_txt  = out_dir / "slides_capacitacao_10.txt"
-    ficha_txt   = out_dir / "ficha_tecnica_vendedores.txt"
-    emails_txt  = out_dir / "emails_marketing_revendedores.txt"
-    folheto_txt = out_dir / "folheto_promocional.txt"
-
-    # ----------------------------------------------------------------
-    # Etapa 1: Geração de texto via LLM
-    # ----------------------------------------------------------------
-    log("--- Etapa 1/3: Geração de texto (Gemini) ---")
-
-    generate_one_asset(
-        client=client, asset_key="podcast",
-        prompt=build_podcast_prompt(brief),
-        output_path=podcast_txt, temperature=0.5, manifest=manifest,
-    )
-    time.sleep(DEFAULT_TIMEOUT_BETWEEN_ASSETS)
-
-    generate_one_asset(
-        client=client, asset_key="slides",
-        prompt=build_slides_prompt(brief),
-        output_path=slides_txt, temperature=0.4, manifest=manifest,
-    )
-    time.sleep(DEFAULT_TIMEOUT_BETWEEN_ASSETS)
-
-    generate_one_asset(
-        client=client, asset_key="ficha",
-        prompt=build_ficha_prompt(brief),
-        output_path=ficha_txt, temperature=0.4, manifest=manifest,
-    )
-    time.sleep(DEFAULT_TIMEOUT_BETWEEN_ASSETS)
-
-    generate_one_asset(
-        client=client, asset_key="emails",
-        prompt=build_emails_prompt(brief),
-        output_path=emails_txt, temperature=0.6, manifest=manifest,
-    )
-    time.sleep(DEFAULT_TIMEOUT_BETWEEN_ASSETS)
-
-    generate_one_asset(
-        client=client, asset_key="folheto",
-        prompt=build_folheto_prompt(brief),
-        output_path=folheto_txt, temperature=0.6, manifest=manifest,
-    )
-
-    # ----------------------------------------------------------------
-    # Etapa 2: Geração de PPTX
-    # ----------------------------------------------------------------
-    log("--- Etapa 2/3: Conversão de slides para PPTX ---")
-    maybe_generate_pptx(
-        slides_txt, manifest,
-        template_path=DEFAULT_TEMPLATE_PATH,
-        images_dir=images_dir,
-    )
-
-    # ----------------------------------------------------------------
-    # Etapa 3: Geração visual (HTML/PDF + imagens de posts)
-    # ----------------------------------------------------------------
-    if SKIP_VISUAL_AI:
-        log("--- Etapa 3/3: SKIP_VISUAL_AI=true, etapa visual ignorada. ---")
-    else:
-        log(f"--- Etapa 3/3: Geração visual | docs={VISUAL_AI_PROVIDER_DOCS} | posts={VISUAL_AI_PROVIDER_POSTS} ---")
+    for asset_key in ASSET_REGISTRY:
+        log(f"\n[INFO] ── Gerando asset: {asset_key} ──")
         try:
-            visual_results = run_visual_generation(
+            generate_one_asset(
+                client=client,
+                asset_key=asset_key,
                 brief=brief,
                 out_dir=out_dir,
-                slides_text=slides_txt.read_text(encoding="utf-8") if slides_txt.exists() else None,
-                emails_text=emails_txt.read_text(encoding="utf-8") if emails_txt.exists() else None,
-                folheto_text=folheto_txt.read_text(encoding="utf-8") if folheto_txt.exists() else None,
-                ficha_text=ficha_txt.read_text(encoding="utf-8") if ficha_txt.exists() else None,
-                post_text=emails_txt.read_text(encoding="utf-8") if emails_txt.exists() else None,
+                manifest=manifest,
             )
-            manifest["visual_ai"] = visual_results
-            gerados = [k for k, v in visual_results.items() if v]
-            log(f"[OK] Visual AI concluída. Arquivos gerados: {gerados}")
         except Exception as e:
-            manifest["visual_ai"]["error"] = str(e)
-            log(f"[ERRO] Falha na etapa visual: {e}")
+            log(f"[ERRO] Falha ao gerar '{asset_key}': {e}")
+            manifest["assets"][asset_key] = {
+                "status": "error",
+                "error": str(e),
+            }
+        time.sleep(DEFAULT_SLEEP)
 
-    # ----------------------------------------------------------------
-    # Manifest final
-    # ----------------------------------------------------------------
     manifest_path = out_dir / "generation_manifest.json"
-    write_text_file(manifest_path, json.dumps(manifest, ensure_ascii=False, indent=2))
-    log(f"=== Concluído. Todos os assets em: {out_dir} ===")
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    log(f"\n[OK] Todos os assets gerados em: {out_dir}")
 
 
 def generate_assets_for_inbox() -> None:
@@ -547,11 +413,11 @@ def generate_assets_for_inbox() -> None:
 
     briefs = sorted(INBOX_DIR.glob("*.brief.json"))
     if not briefs:
-        log(f"[WARN] Nenhum .brief.json encontrado em {INBOX_DIR}")
+        log(f"[WARN] Nenhum arquivo .brief.json encontrado em {INBOX_DIR}")
         return
 
     for brief_path in briefs:
-        log(f"Processando brief: {brief_path.name}")
+        log(f"[INFO] Processando brief: {brief_path.name}")
         try:
             generate_assets_for_brief(brief_path)
         except Exception as e:
