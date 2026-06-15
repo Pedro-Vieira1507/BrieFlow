@@ -13,14 +13,12 @@ import litellm
 import sys
 sys.path.insert(0, str(Path(__file__).parent))
 from renderer import renderizar, FORMAT_MAP
-from rag_loader import carregar_contexto, registrar_erro
+from rag_loader import carregar_contexto, registrar_erro, coletar_referencias_visuais, salvar_referencia_visual
 
-# Configuracoes
 OUTPUT_DIR  = Path(os.getenv("OUTPUT_DIR", "data/output"))
 MAX_TOKENS  = int(os.getenv("MAX_TOKENS",  "1200"))
 TEMPERATURE = float(os.getenv("TEMPERATURE", "0.6"))
 
-# Modelos por provider
 OLLAMA_MODEL    = os.getenv("OLLAMA_MODEL",    "llama3")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 GEMINI_API_KEY  = os.getenv("GEMINI_API_KEY",  "")
@@ -35,6 +33,7 @@ logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT_PATH = Path("src/prompts/system_prompt.txt")
 _system_prompt_cache: Optional[str] = None
+
 
 def get_system_prompt() -> str:
     global _system_prompt_cache
@@ -86,6 +85,37 @@ def _chamar_llm(messages: list, max_tokens: int = MAX_TOKENS) -> tuple:
     )
 
 
+def _chamar_llm_multimodal(messages: list, max_tokens: int = 4096) -> tuple:
+    providers = []
+    if GEMINI_API_KEY:
+        providers.append({"nome": f"Gemini/{GEMINI_MODEL}", "model": f"gemini/{GEMINI_MODEL}",
+                          "api_key": GEMINI_API_KEY, "api_base": None})
+    if OPENAI_KEY:
+        providers.append({"nome": f"OpenAI/{OPENAI_MODEL}", "model": OPENAI_MODEL,
+                          "api_key": OPENAI_KEY, "api_base": None})
+    if ANTHROPIC_KEY:
+        providers.append({"nome": f"Claude/{ANTHROPIC_MODEL}", "model": ANTHROPIC_MODEL,
+                          "api_key": ANTHROPIC_KEY, "api_base": None})
+
+    ultimo_erro = None
+    for p in providers:
+        try:
+            kwargs = dict(model=p["model"], messages=messages, max_tokens=max_tokens,
+                          temperature=0.2, api_key=p["api_key"], timeout=120)
+            if p["api_base"]:
+                kwargs["api_base"] = p["api_base"]
+            resposta = litellm.completion(**kwargs)
+            return resposta.choices[0].message.content.strip(), p["nome"]
+        except Exception as e:
+            ultimo_erro = e
+            logger.warning("Falha multimodal em %s: %s - tentando proximo.", p["nome"], e)
+
+    raise RuntimeError(
+        f"Nenhum provider multimodal disponivel. Ultimo erro: {ultimo_erro}\n"
+        "► Configure GEMINI_API_KEY, OPENAI_API_KEY ou ANTHROPIC_API_KEY no .env"
+    )
+
+
 MATERIAL_MAP = {
     "banner":         "banner HTML profissional (hero com gradiente, headline bold, CTA)",
     "ficha tecnica":  "ficha tecnica HTML completa (hero + stats bar + specs + tabela + rodape)",
@@ -125,6 +155,73 @@ def _formato_label(chave: str) -> str:
     return f"{label} -> {fmt}"
 
 
+def _inferir_tipo_material(texto: str) -> str:
+    texto = texto.lower()
+    if "banner" in texto:
+        return "banner"
+    if "instagram" in texto:
+        return "instagram"
+    if "story" in texto or "stories" in texto:
+        return "stories"
+    if "landing" in texto:
+        return "landing page"
+    return "geral"
+
+
+def analisar_e_salvar_referencia_visual(image_path: Path, instrucoes_usuario: str = "") -> dict:
+    titulo_base = image_path.stem.replace("_", " ").replace("-", " ").strip().title()
+
+    system = (
+        "Voce e um diretor de arte senior e analista de design. "
+        "Analise a imagem enviada e responda em JSON valido com as chaves: "
+        "title, material_type, description, tags, layout_notes. "
+        "description deve resumir o design em 1-2 frases. "
+        "tags deve ser um array curto. "
+        "layout_notes deve descrever composicao, hierarquia visual, cores, tipografia, alinhamento e uso de espaco negativo."
+    )
+    user_parts = [
+        {"type": "text", "text": f"Analise esta referencia visual. Instrucoes extras do usuario: {instrucoes_usuario or 'nenhuma'}"},
+        {"type": "image_url", "image_url": {"url": f"data:image/{image_path.suffix.lower().replace('.', '')};base64," + __import__('base64').b64encode(image_path.read_bytes()).decode('utf-8')}}
+    ]
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user_parts},
+    ]
+
+    resposta, provider = _chamar_llm_multimodal(messages)
+    logger.info("Referencia visual analisada com %s", provider)
+
+    try:
+        cleaned = resposta.strip()
+        if cleaned.startswith("```"):
+            cleaned = re.sub(r"^```json\s*|^```|```$", "", cleaned, flags=re.MULTILINE).strip()
+        payload = __import__('json').loads(cleaned)
+    except Exception:
+        payload = {
+            "title": titulo_base,
+            "material_type": _inferir_tipo_material(instrucoes_usuario or image_path.stem),
+            "description": "Referencia visual enviada pelo usuario para orientar layout e estilo.",
+            "tags": ["referencia", "visual"],
+            "layout_notes": resposta[:1000],
+        }
+
+    payload.setdefault("title", titulo_base)
+    payload.setdefault("material_type", _inferir_tipo_material(instrucoes_usuario or image_path.stem))
+    payload.setdefault("description", "Referencia visual enviada pelo usuario para orientar layout e estilo.")
+    payload.setdefault("tags", ["referencia", "visual"])
+    payload.setdefault("layout_notes", "Sem notas adicionais.")
+
+    salvar_referencia_visual(
+        origem_path=image_path,
+        title=payload["title"],
+        material_type=payload["material_type"],
+        description=payload["description"],
+        tags=payload["tags"],
+        layout_notes=payload["layout_notes"],
+    )
+    return payload
+
+
 BANNER = """
 +--------------------------------------------------------------+
 |            BriefFlow  Agente de Marketing                    |
@@ -138,6 +235,10 @@ Formatos de saida automaticos:
   ficha tecnica / proposta   ->  PDF (A4)
   landing page / e-mail      ->  HTML
   linkedin / ads / scripts   ->  TXT
+
+Recursos extras:
+  * upload de referencias visuais para aprendizagem de layout
+  * salvamento automatico no vault knowledge/referencias_visuais/
 
 Como usar:
   * Converse normalmente - pergunte, peca ideias, tire duvidas.
@@ -168,6 +269,7 @@ AJUDA = """
 +--- RAG / Contexto ---------------------------------------------+
 |  contexto: [nome, specs, publico-alvo, oferta]                |
 |  Os arquivos em knowledge/ sao injetados automaticamente      |
+|  Referencias visuais em knowledge/referencias_visuais/        |
 +--- Feedback de qualidade --------------------------------------+
 |  erro: [descreva o que ficou ruim no ultimo material]         |
 |  O exemplo sera salvo em knowledge/erros/ para melhoria       |
@@ -193,7 +295,6 @@ def chat_loop():
         if not entrada:
             continue
 
-        # Comandos especiais
         if entrada.lower() in ("/sair", "sair", "exit", "quit"):
             print("Ate logo!")
             break
@@ -211,19 +312,18 @@ def chat_loop():
 
         if entrada.lower() == "/modelo":
             print(f"\n[Modelo] Ollama: {OLLAMA_MODEL} | Base: {OLLAMA_BASE_URL}")
-            print(f"  Fallback: Gemini={'OK' if GEMINI_API_KEY else 'nao configurado'}  "
+            print(f"  Fallback texto: Gemini={'OK' if GEMINI_API_KEY else 'nao configurado'}  "
                   f"Claude={'OK' if ANTHROPIC_KEY else 'nao configurado'}  "
-                  f"OpenAI={'OK' if OPENAI_KEY else 'nao configurado'}\n")
+                  f"OpenAI={'OK' if OPENAI_KEY else 'nao configurado'}")
+            print("  Multimodal requer Gemini, Claude ou OpenAI configurado.\n")
             continue
 
-        # Loop de feedback — registra erro no vault
         if entrada.lower().startswith("erro:"):
             motivo = entrada[5:].strip()
             registrar_erro(ultima_mensagem, ultimo_resultado, motivo)
             print("\n[Feedback registrado] Obrigado! Isso vai ajudar a melhorar as proximas geracoes.\n")
             continue
 
-        # Registro de contexto
         if entrada.lower().startswith("contexto:"):
             contexto_produto = entrada[9:].strip()
             print("\n[Contexto registrado] Agora me diga o que gerar.\n")
@@ -232,20 +332,18 @@ def chat_loop():
             continue
 
         ultima_mensagem = entrada
-
-        # Detecta material e informa formato de saida
         material = detectar_material(entrada)
-
-        # Carrega contexto do RAG (Obsidian vault)
         rag_contexto = carregar_contexto(
             mensagem=entrada + (" " + contexto_produto if contexto_produto else ""),
             material_key=material[0] if material else None,
         )
-
-        # Monta system prompt + RAG
+        referencias_visuais = coletar_referencias_visuais(
+            mensagem=entrada + (" " + contexto_produto if contexto_produto else ""),
+            material_key=material[0] if material else None,
+            limite=3,
+        )
         system_com_rag = system + rag_contexto
 
-        # Monta mensagem final
         mensagem_final = entrada
         if contexto_produto:
             mensagem_final = f"{entrada}\n\n--- CONTEXTO DO PRODUTO/CAMPANHA ---\n{contexto_produto}"
@@ -255,7 +353,9 @@ def chat_loop():
             fmt_label = _formato_label(chave)
             print(f"\n[Gerando] {fmt_label}...")
             if rag_contexto:
-                print("[RAG] Contexto do vault injetado.")
+                print("[RAG] Contexto textual do vault injetado.")
+            if referencias_visuais:
+                print(f"[RAG] {len(referencias_visuais)} referencia(s) visual(is) anexada(s).")
             mensagem_final += (
                 f"\n\nIMPORTANTE: Gere APENAS {descricao}. "
                 f"Entregue o conteudo completo diretamente, sem explicacoes introdutorias."
@@ -263,17 +363,34 @@ def chat_loop():
         else:
             print("\n[...] ", end="", flush=True)
 
-        # Chama o LLM
-        t0       = time.time()
-        messages = [
-            {"role": "system", "content": system_com_rag},
-            *historico[-12:],
-            {"role": "user",   "content": mensagem_final},
-        ]
-        max_tok = 4096 if material else MAX_TOKENS
+        t0 = time.time()
 
         try:
-            resposta, provider_usado = _chamar_llm(messages, max_tokens=max_tok)
+            if referencias_visuais and (GEMINI_API_KEY or OPENAI_KEY or ANTHROPIC_KEY):
+                user_content = [{"type": "text", "text": mensagem_final}]
+                for ref in referencias_visuais:
+                    user_content.append({
+                        "type": "text",
+                        "text": f"Referencia visual: {ref['title']} | Tipo: {ref['material_type']} | Descricao: {ref['description']} | Layout: {ref['layout_notes']}"
+                    })
+                    user_content.append({
+                        "type": "image_url",
+                        "image_url": {"url": ref["data_url"]}
+                    })
+                messages = [
+                    {"role": "system", "content": system_com_rag},
+                    *historico[-12:],
+                    {"role": "user", "content": user_content},
+                ]
+                resposta, provider_usado = _chamar_llm_multimodal(messages, max_tokens=4096 if material else MAX_TOKENS)
+            else:
+                messages = [
+                    {"role": "system", "content": system_com_rag},
+                    *historico[-12:],
+                    {"role": "user",   "content": mensagem_final},
+                ]
+                resposta, provider_usado = _chamar_llm(messages, max_tokens=4096 if material else MAX_TOKENS)
+
             tempo = time.time() - t0
             ultimo_resultado = resposta
 
@@ -281,7 +398,6 @@ def chat_loop():
             print(resposta)
             print()
 
-            # Renderiza e salva no formato correto
             if material:
                 chave, _ = material
                 arquivos = renderizar(
@@ -296,7 +412,6 @@ def chat_loop():
                 print("Se o resultado nao ficou bom, digite: erro: [descreva o problema]")
                 print()
 
-            # Atualiza historico
             historico.append({"role": "user",      "content": entrada})
             historico.append({"role": "assistant", "content": resposta})
             if len(historico) > 20:
