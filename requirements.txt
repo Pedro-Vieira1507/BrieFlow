@@ -1,8 +1,3 @@
-# Strands Agents - orquestrador principal
-strands-agents>=0.1.0
-
-# LiteLLM - conecta Strands ao Gemini, Claude e OpenAI
-litellm>=1.40.0
-
-# Utils
+requests>=2.31.0
 python-dotenv>=1.0.0
+flask>=3.0.0
