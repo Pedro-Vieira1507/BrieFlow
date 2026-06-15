@@ -1,5 +1,6 @@
 import os
 import re
+import json
 import logging
 import time
 import asyncio
@@ -10,7 +11,7 @@ from typing import Optional
 from dotenv import load_dotenv
 load_dotenv()
 
-import litellm
+import httpx
 
 import sys
 sys.path.insert(0, str(Path(__file__).parent))
@@ -23,7 +24,7 @@ TEMPERATURE = float(os.getenv("TEMPERATURE", "0.6"))
 
 OLLAMA_MODEL    = os.getenv("OLLAMA_MODEL",    "phi3")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
-OLLAMA_TIMEOUT  = int(os.getenv("OLLAMA_TIMEOUT", "90"))
+OLLAMA_TIMEOUT  = int(os.getenv("OLLAMA_TIMEOUT", "120"))
 
 GEMINI_API_KEY  = os.getenv("GEMINI_API_KEY",  "")
 GEMINI_MODEL    = os.getenv("GEMINI_MODEL",    "gemini-2.5-flash")
@@ -54,62 +55,44 @@ def get_system_prompt() -> str:
     return _system_prompt_cache
 
 
-# --- Versoes sincronas (chamadas em thread executor) ---
+# ---------------------------------------------------------------------------
+# Ollama via httpx direto (evita bug do litellm no Windows + uvicorn)
+# ---------------------------------------------------------------------------
 
-def _chamar_llm_sync(messages: list, max_tokens: int = MAX_TOKENS) -> tuple:
-    """Versao SINCRONA — deve ser chamada via run_in_executor, nunca diretamente em async."""
-    providers = [
-        {"nome": f"Ollama/{OLLAMA_MODEL}", "model": f"ollama/{OLLAMA_MODEL}",
-         "api_key": "ollama", "api_base": OLLAMA_BASE_URL, "timeout": OLLAMA_TIMEOUT},
-    ]
-    if GEMINI_API_KEY:
-        providers.append({"nome": f"Gemini/{GEMINI_MODEL}", "model": f"gemini/{GEMINI_MODEL}",
-                          "api_key": GEMINI_API_KEY, "api_base": None, "timeout": 60})
-    if ANTHROPIC_KEY:
-        providers.append({"nome": f"Claude/{ANTHROPIC_MODEL}", "model": ANTHROPIC_MODEL,
-                          "api_key": ANTHROPIC_KEY, "api_base": None, "timeout": 60})
-    if OPENAI_KEY:
-        providers.append({"nome": f"OpenAI/{OPENAI_MODEL}", "model": OPENAI_MODEL,
-                          "api_key": OPENAI_KEY, "api_base": None, "timeout": 60})
-
-    ultimo_erro = None
-    for p in providers:
-        try:
-            kwargs = dict(
-                model=p["model"],
-                messages=messages,
-                max_tokens=max_tokens,
-                temperature=TEMPERATURE,
-                api_key=p["api_key"],
-                timeout=p["timeout"],
-            )
-            if p["api_base"]:
-                kwargs["api_base"] = p["api_base"]
-            resposta = litellm.completion(**kwargs)
-            return resposta.choices[0].message.content.strip(), p["nome"]
-        except Exception as e:
-            ultimo_erro = e
-            logger.warning("Falha em %s: %s - tentando proximo.", p["nome"], e)
-
-    raise RuntimeError(
-        f"Todos os providers falharam. Ultimo erro: {ultimo_erro}\n"
-        "\u25ba Verifique se o Ollama esta rodando: ollama serve\n"
-        "\u25ba Ou configure uma API key no .env"
-    )
+def _ollama_chat_sync(messages: list, max_tokens: int, temperature: float) -> str:
+    """Chama /api/chat do Ollama diretamente via httpx sincrono."""
+    payload = {
+        "model": OLLAMA_MODEL,
+        "messages": messages,
+        "stream": False,
+        "options": {
+            "num_predict": max_tokens,
+            "temperature": temperature,
+        },
+    }
+    with httpx.Client(timeout=OLLAMA_TIMEOUT) as client:
+        resp = client.post(f"{OLLAMA_BASE_URL}/api/chat", json=payload)
+        resp.raise_for_status()
+        return resp.json()["message"]["content"].strip()
 
 
-def _chamar_llm_multimodal_sync(messages: list, max_tokens: int = 4096) -> tuple:
-    """Versao SINCRONA multimodal — deve ser chamada via run_in_executor."""
+# ---------------------------------------------------------------------------
+# Fallback cloud via litellm (so usado se Ollama falhar ou para multimodal)
+# ---------------------------------------------------------------------------
+
+def _litellm_cloud_sync(messages: list, max_tokens: int, temperature: float) -> tuple:
+    """Tenta providers cloud (Gemini, Claude, OpenAI) via litellm."""
+    import litellm
     providers = []
     if GEMINI_API_KEY:
         providers.append({"nome": f"Gemini/{GEMINI_MODEL}", "model": f"gemini/{GEMINI_MODEL}",
                           "api_key": GEMINI_API_KEY, "api_base": None, "timeout": 60})
-    if OPENAI_KEY:
-        providers.append({"nome": f"OpenAI/{OPENAI_MODEL}", "model": OPENAI_MODEL,
-                          "api_key": OPENAI_KEY, "api_base": None, "timeout": 60})
     if ANTHROPIC_KEY:
         providers.append({"nome": f"Claude/{ANTHROPIC_MODEL}", "model": ANTHROPIC_MODEL,
                           "api_key": ANTHROPIC_KEY, "api_base": None, "timeout": 60})
+    if OPENAI_KEY:
+        providers.append({"nome": f"OpenAI/{OPENAI_MODEL}", "model": OPENAI_MODEL,
+                          "api_key": OPENAI_KEY, "api_base": None, "timeout": 60})
 
     ultimo_erro = None
     for p in providers:
@@ -118,7 +101,7 @@ def _chamar_llm_multimodal_sync(messages: list, max_tokens: int = 4096) -> tuple
                 model=p["model"],
                 messages=messages,
                 max_tokens=max_tokens,
-                temperature=0.2,
+                temperature=temperature,
                 api_key=p["api_key"],
                 timeout=p["timeout"],
             )
@@ -128,29 +111,51 @@ def _chamar_llm_multimodal_sync(messages: list, max_tokens: int = 4096) -> tuple
             return resposta.choices[0].message.content.strip(), p["nome"]
         except Exception as e:
             ultimo_erro = e
-            logger.warning("Falha multimodal em %s: %s - tentando proximo.", p["nome"], e)
+            logger.warning("Falha em %s: %s", p["nome"], e)
 
-    raise RuntimeError(
-        f"Nenhum provider multimodal disponivel. Ultimo erro: {ultimo_erro}\n"
-        "\u25ba Configure GEMINI_API_KEY, OPENAI_API_KEY ou ANTHROPIC_API_KEY no .env"
-    )
+    raise RuntimeError(f"Todos os providers cloud falharam. Ultimo erro: {ultimo_erro}")
 
 
-# --- Versoes async (usadas pelo FastAPI) ---
+# ---------------------------------------------------------------------------
+# Funcoes principais (sincronas — usadas diretamente no terminal)
+# ---------------------------------------------------------------------------
+
+def _chamar_llm_sync(messages: list, max_tokens: int = MAX_TOKENS) -> tuple:
+    # 1. Tenta Ollama local via httpx
+    try:
+        texto = _ollama_chat_sync(messages, max_tokens, TEMPERATURE)
+        return texto, f"Ollama/{OLLAMA_MODEL}"
+    except Exception as e:
+        logger.warning("Ollama falhou (%s), tentando cloud...", e)
+
+    # 2. Fallback cloud
+    return _litellm_cloud_sync(messages, max_tokens, TEMPERATURE)
+
+
+def _chamar_llm_multimodal_sync(messages: list, max_tokens: int = 4096) -> tuple:
+    """Multimodal so suportado em cloud (Gemini/Claude/OpenAI)."""
+    return _litellm_cloud_sync(messages, max_tokens, temperature=0.2)
+
+
+# ---------------------------------------------------------------------------
+# Wrappers async (usados pelo FastAPI)
+# ---------------------------------------------------------------------------
 
 async def _chamar_llm(messages: list, max_tokens: int = MAX_TOKENS) -> tuple:
-    """Wrapper async: roda o litellm sincrono em thread separada para nao bloquear o FastAPI."""
     loop = asyncio.get_event_loop()
     fn = functools.partial(_chamar_llm_sync, messages, max_tokens)
     return await loop.run_in_executor(None, fn)
 
 
 async def _chamar_llm_multimodal(messages: list, max_tokens: int = 4096) -> tuple:
-    """Wrapper async multimodal: roda em thread separada."""
     loop = asyncio.get_event_loop()
     fn = functools.partial(_chamar_llm_multimodal_sync, messages, max_tokens)
     return await loop.run_in_executor(None, fn)
 
+
+# ---------------------------------------------------------------------------
+# Mapa de materiais
+# ---------------------------------------------------------------------------
 
 MATERIAL_MAP = {
     "banner":         "banner HTML profissional (hero com gradiente, headline bold, CTA)",
@@ -224,7 +229,6 @@ def analisar_e_salvar_referencia_visual(image_path: Path, instrucoes_usuario: st
         {"role": "user", "content": user_parts},
     ]
 
-    # Chama versao sincrona diretamente (contexto nao-async)
     resposta, provider = _chamar_llm_multimodal_sync(messages)
     logger.info("Referencia visual analisada com %s", provider)
 
@@ -232,7 +236,7 @@ def analisar_e_salvar_referencia_visual(image_path: Path, instrucoes_usuario: st
         cleaned = resposta.strip()
         if cleaned.startswith("```"):
             cleaned = re.sub(r"^```json\s*|^```|```$", "", cleaned, flags=re.MULTILINE).strip()
-        payload = __import__('json').loads(cleaned)
+        payload = json.loads(cleaned)
     except Exception:
         payload = {
             "title": titulo_base,
@@ -269,11 +273,9 @@ BANNER = """
 
 
 def chat_loop():
-    """Loop de chat para uso via terminal (nao-async)."""
     print(BANNER)
     historico        = []
     contexto_produto = ""
-    system           = get_system_prompt()
     ultimo_resultado = ""
     ultima_mensagem  = ""
 
@@ -286,30 +288,21 @@ def chat_loop():
 
         if not entrada:
             continue
-
         if entrada.lower() in ("/sair", "sair", "exit", "quit"):
             print("Ate logo!")
             break
-
         if entrada.lower() == "/limpar":
             historico.clear()
             contexto_produto = ""
-            ultimo_resultado = ""
             print("\n[OK] Conversa reiniciada.\n")
             continue
-
         if entrada.lower() == "/modelo":
-            print(f"\n[Modelo] Ollama: {OLLAMA_MODEL} | Base: {OLLAMA_BASE_URL} | Timeout: {OLLAMA_TIMEOUT}s")
-            print(f"  Fallback: Gemini={'OK' if GEMINI_API_KEY else 'nao configurado'}  "
-                  f"Claude={'OK' if ANTHROPIC_KEY else 'nao configurado'}  "
-                  f"OpenAI={'OK' if OPENAI_KEY else 'nao configurado'}")
+            print(f"\n[Modelo] Ollama: {OLLAMA_MODEL} | Base: {OLLAMA_BASE_URL} | Timeout: {OLLAMA_TIMEOUT}s\n")
             continue
-
         if entrada.lower().startswith("erro:"):
             registrar_erro(ultima_mensagem, ultimo_resultado, entrada[5:].strip())
             print("\n[Feedback registrado]\n")
             continue
-
         if entrada.lower().startswith("contexto:"):
             contexto_produto = entrada[9:].strip()
             print("\n[Contexto registrado] Agora me diga o que gerar.\n")
@@ -339,7 +332,6 @@ def chat_loop():
                 *historico[-12:],
                 {"role": "user", "content": mensagem_final},
             ]
-            # Usa versao sincrona diretamente no terminal (sem asyncio)
             resposta, provider_usado = _chamar_llm_sync(messages, max_tokens=4096 if material else MAX_TOKENS)
             tempo = time.time() - t0
             ultimo_resultado = resposta
