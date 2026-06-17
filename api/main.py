@@ -131,6 +131,10 @@ async def sd_status():
 
 @app.post("/api/chat")
 async def chat(req: ChatRequest):
+    # ✅ Inicializadas antes de qualquer bloco condicional — evita UnboundLocalError
+    img_b64 = None
+    usar_sd = False
+
     mensagem = req.message.strip()
     contexto = req.contexto.strip() if req.contexto else ""
 
@@ -232,7 +236,7 @@ async def chat(req: ChatRequest):
         "provider":  provider,
         "files":     files_out,
         "previews":  previews,
-        "sd_usado":  usar_sd and img_b64 is not None if usar_sd else False,
+        "sd_usado":  usar_sd and img_b64 is not None,
     })
 
 
