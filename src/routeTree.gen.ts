@@ -9,151 +9,48 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as NovaCampanhaRouteImport } from './routes/nova-campanha'
-import { Route as HistoricoRouteImport } from './routes/historico'
-import { Route as ConfiguracoesRouteImport } from './routes/configuracoes'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as CampanhaIdRouteImport } from './routes/campanha.$id'
-import { Route as CampanhaIdTranscricaoRouteImport } from './routes/campanha.$id.transcricao'
-import { Route as CampanhaIdMateriaisRouteImport } from './routes/campanha.$id.materiais'
-import { Route as CampanhaIdBriefRouteImport } from './routes/campanha.$id.brief'
+import { Route as ChatThreadIdRouteImport } from './routes/chat.$threadId'
 
-const NovaCampanhaRoute = NovaCampanhaRouteImport.update({
-  id: '/nova-campanha',
-  path: '/nova-campanha',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const HistoricoRoute = HistoricoRouteImport.update({
-  id: '/historico',
-  path: '/historico',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ConfiguracoesRoute = ConfiguracoesRouteImport.update({
-  id: '/configuracoes',
-  path: '/configuracoes',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const CampanhaIdRoute = CampanhaIdRouteImport.update({
-  id: '/campanha/$id',
-  path: '/campanha/$id',
+const ChatThreadIdRoute = ChatThreadIdRouteImport.update({
+  id: '/chat/$threadId',
+  path: '/chat/$threadId',
   getParentRoute: () => rootRouteImport,
-} as any)
-const CampanhaIdTranscricaoRoute = CampanhaIdTranscricaoRouteImport.update({
-  id: '/transcricao',
-  path: '/transcricao',
-  getParentRoute: () => CampanhaIdRoute,
-} as any)
-const CampanhaIdMateriaisRoute = CampanhaIdMateriaisRouteImport.update({
-  id: '/materiais',
-  path: '/materiais',
-  getParentRoute: () => CampanhaIdRoute,
-} as any)
-const CampanhaIdBriefRoute = CampanhaIdBriefRouteImport.update({
-  id: '/brief',
-  path: '/brief',
-  getParentRoute: () => CampanhaIdRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/configuracoes': typeof ConfiguracoesRoute
-  '/historico': typeof HistoricoRoute
-  '/nova-campanha': typeof NovaCampanhaRoute
-  '/campanha/$id': typeof CampanhaIdRouteWithChildren
-  '/campanha/$id/brief': typeof CampanhaIdBriefRoute
-  '/campanha/$id/materiais': typeof CampanhaIdMateriaisRoute
-  '/campanha/$id/transcricao': typeof CampanhaIdTranscricaoRoute
+  '/chat/$threadId': typeof ChatThreadIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/configuracoes': typeof ConfiguracoesRoute
-  '/historico': typeof HistoricoRoute
-  '/nova-campanha': typeof NovaCampanhaRoute
-  '/campanha/$id': typeof CampanhaIdRouteWithChildren
-  '/campanha/$id/brief': typeof CampanhaIdBriefRoute
-  '/campanha/$id/materiais': typeof CampanhaIdMateriaisRoute
-  '/campanha/$id/transcricao': typeof CampanhaIdTranscricaoRoute
+  '/chat/$threadId': typeof ChatThreadIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/configuracoes': typeof ConfiguracoesRoute
-  '/historico': typeof HistoricoRoute
-  '/nova-campanha': typeof NovaCampanhaRoute
-  '/campanha/$id': typeof CampanhaIdRouteWithChildren
-  '/campanha/$id/brief': typeof CampanhaIdBriefRoute
-  '/campanha/$id/materiais': typeof CampanhaIdMateriaisRoute
-  '/campanha/$id/transcricao': typeof CampanhaIdTranscricaoRoute
+  '/chat/$threadId': typeof ChatThreadIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths:
-    | '/'
-    | '/configuracoes'
-    | '/historico'
-    | '/nova-campanha'
-    | '/campanha/$id'
-    | '/campanha/$id/brief'
-    | '/campanha/$id/materiais'
-    | '/campanha/$id/transcricao'
+  fullPaths: '/' | '/chat/$threadId'
   fileRoutesByTo: FileRoutesByTo
-  to:
-    | '/'
-    | '/configuracoes'
-    | '/historico'
-    | '/nova-campanha'
-    | '/campanha/$id'
-    | '/campanha/$id/brief'
-    | '/campanha/$id/materiais'
-    | '/campanha/$id/transcricao'
-  id:
-    | '__root__'
-    | '/'
-    | '/configuracoes'
-    | '/historico'
-    | '/nova-campanha'
-    | '/campanha/$id'
-    | '/campanha/$id/brief'
-    | '/campanha/$id/materiais'
-    | '/campanha/$id/transcricao'
+  to: '/' | '/chat/$threadId'
+  id: '__root__' | '/' | '/chat/$threadId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  ConfiguracoesRoute: typeof ConfiguracoesRoute
-  HistoricoRoute: typeof HistoricoRoute
-  NovaCampanhaRoute: typeof NovaCampanhaRoute
-  CampanhaIdRoute: typeof CampanhaIdRouteWithChildren
+  ChatThreadIdRoute: typeof ChatThreadIdRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/nova-campanha': {
-      id: '/nova-campanha'
-      path: '/nova-campanha'
-      fullPath: '/nova-campanha'
-      preLoaderRoute: typeof NovaCampanhaRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/historico': {
-      id: '/historico'
-      path: '/historico'
-      fullPath: '/historico'
-      preLoaderRoute: typeof HistoricoRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/configuracoes': {
-      id: '/configuracoes'
-      path: '/configuracoes'
-      fullPath: '/configuracoes'
-      preLoaderRoute: typeof ConfiguracoesRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/': {
       id: '/'
       path: '/'
@@ -161,69 +58,30 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/campanha/$id': {
-      id: '/campanha/$id'
-      path: '/campanha/$id'
-      fullPath: '/campanha/$id'
-      preLoaderRoute: typeof CampanhaIdRouteImport
+    '/chat/$threadId': {
+      id: '/chat/$threadId'
+      path: '/chat/$threadId'
+      fullPath: '/chat/$threadId'
+      preLoaderRoute: typeof ChatThreadIdRouteImport
       parentRoute: typeof rootRouteImport
-    }
-    '/campanha/$id/transcricao': {
-      id: '/campanha/$id/transcricao'
-      path: '/transcricao'
-      fullPath: '/campanha/$id/transcricao'
-      preLoaderRoute: typeof CampanhaIdTranscricaoRouteImport
-      parentRoute: typeof CampanhaIdRoute
-    }
-    '/campanha/$id/materiais': {
-      id: '/campanha/$id/materiais'
-      path: '/materiais'
-      fullPath: '/campanha/$id/materiais'
-      preLoaderRoute: typeof CampanhaIdMateriaisRouteImport
-      parentRoute: typeof CampanhaIdRoute
-    }
-    '/campanha/$id/brief': {
-      id: '/campanha/$id/brief'
-      path: '/brief'
-      fullPath: '/campanha/$id/brief'
-      preLoaderRoute: typeof CampanhaIdBriefRouteImport
-      parentRoute: typeof CampanhaIdRoute
     }
   }
 }
 
-interface CampanhaIdRouteChildren {
-  CampanhaIdBriefRoute: typeof CampanhaIdBriefRoute
-  CampanhaIdMateriaisRoute: typeof CampanhaIdMateriaisRoute
-  CampanhaIdTranscricaoRoute: typeof CampanhaIdTranscricaoRoute
-}
-
-const CampanhaIdRouteChildren: CampanhaIdRouteChildren = {
-  CampanhaIdBriefRoute: CampanhaIdBriefRoute,
-  CampanhaIdMateriaisRoute: CampanhaIdMateriaisRoute,
-  CampanhaIdTranscricaoRoute: CampanhaIdTranscricaoRoute,
-}
-
-const CampanhaIdRouteWithChildren = CampanhaIdRoute._addFileChildren(
-  CampanhaIdRouteChildren,
-)
-
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  ConfiguracoesRoute: ConfiguracoesRoute,
-  HistoricoRoute: HistoricoRoute,
-  NovaCampanhaRoute: NovaCampanhaRoute,
-  CampanhaIdRoute: CampanhaIdRouteWithChildren,
+  ChatThreadIdRoute: ChatThreadIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
 
 import type { getRouter } from './router.tsx'
-import type { createStart } from '@tanstack/react-start'
+import type { startInstance } from './start.ts'
 declare module '@tanstack/react-start' {
   interface Register {
     ssr: true
     router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
   }
 }
