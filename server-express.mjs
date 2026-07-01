@@ -92,15 +92,15 @@ app.post("/api/chat", async (req, res) => {
   const reader = ollamaRes.body.getReader();
   const decoder = new TextDecoder();
   let lineBuffer = "";
-  let htmlAccum = "";     // acumula tokens HTML até encontrar <!DOCTYPE
-  let htmlStarted = false; // true após encontrar e enviar o início <!DOCTYPE
+  let htmlAccum = "";
+  let htmlStarted = false;
+  // Guarda o último token HTML enviado para poder strip do ``` no fim
+  let lastHtmlToken = "";
+  let lastHtmlTokenSent = false;
 
-  // Envia um token SSE — único ponto de saída para dados
   const sendToken = (token) => res.write(`data: ${JSON.stringify(token)}\n\n`);
 
-  // Flush final: chamado UMA vez quando o stream termina
   const finish = () => {
-    // Se acumulámos HTML mas nunca encontrámos <!DOCTYPE, envia tudo limpo
     if (isHtml && !htmlStarted && htmlAccum) {
       sendToken(stripMarkdownWrapper(htmlAccum));
     }
@@ -126,24 +126,26 @@ app.post("/api/chat", async (req, res) => {
 
         if (isHtml) {
           if (!htmlStarted) {
-            // Acumula até encontrar <!DOCTYPE (case-insensitive)
             htmlAccum += token;
             const idx = htmlAccum.toLowerCase().indexOf("<!doctype");
             if (idx !== -1) {
               htmlStarted = true;
-              // Envia tudo desde <!DOCTYPE em diante
               sendToken(htmlAccum.slice(idx));
-              htmlAccum = ""; // limpar — já enviado
+              htmlAccum = "";
             }
           } else {
-            // Já encontrámos o início — envia cada token directamente
-            if (token) sendToken(token);
+            // Ignorar tokens que sejam apenas backticks (wrapper de fecho do modelo)
+            const trimmed = token.trim();
+            if (trimmed && /^`+$/.test(trimmed)) {
+              // é só backticks — descartar
+            } else if (token) {
+              sendToken(token);
+            }
           }
         } else {
           if (token) sendToken(token);
         }
 
-        // Último chunk do Ollama — termina aqui
         if (parsed.done) { finish(); return; }
       }
 
