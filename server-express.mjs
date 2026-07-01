@@ -11,7 +11,10 @@ const DEFAULT_MODEL = process.env.OLLAMA_MODEL ?? "gemma3:4b";
 const HTML_INTENTS = new Set(["email", "banner", "instagram"]);
 
 // ─────────────────────────────────────────────────────────────────
-// BRAND IDENTITIES — paletas e tipografia oficiais por marca
+// BRAND IDENTITIES
+// productQueries[3] → queries específicas da marca para imagens de produto.
+// Estas queries TEM PRIORIDADE MÁXIMA — sobrescrevem qualquer coisa gerada pelo LLM.
+// Coloque sempre o nome da marca nas queries para garantir especificidade.
 // ─────────────────────────────────────────────────────────────────
 const BRAND_IDENTITIES = {
   forlab: {
@@ -25,6 +28,12 @@ const BRAND_IDENTITIES = {
     font: "Montserrat",
     palette: "azul corporativo — #001f5b, #003399, accent #0055cc",
     bgSearchQuery: "modern blue laboratory interior professional",
+    // Queries fixas de produto — sempre usadas para FORLAB
+    productQueries: [
+      "FORLAB pipette laboratory equipment product",
+      "FORLAB micropipette set professional",
+      "FORLAB laboratory equipment analytical",
+    ],
   },
   shimadzu: {
     displayName: "SHIMADZU",
@@ -37,6 +46,11 @@ const BRAND_IDENTITIES = {
     font: "Montserrat",
     palette: "azul Shimadzu — #001433, #002d6b, accent #006bb6",
     bgSearchQuery: "scientific analytical laboratory instruments blue",
+    productQueries: [
+      "Shimadzu HPLC analytical instrument product",
+      "Shimadzu spectrophotometer laboratory equipment",
+      "Shimadzu balance analytical weighing scale",
+    ],
   },
   dlab: {
     displayName: "DLAB",
@@ -48,7 +62,13 @@ const BRAND_IDENTITIES = {
     dotColor: "#ff4d4d",
     font: "Montserrat",
     palette: "vermelho DLAB — #1a0000, #5c0000, accent #cc0000",
-    bgSearchQuery: "laboratory pipettes dark red professional background",
+    bgSearchQuery: "laboratory dark professional red background",
+    // Queries fixas de produto — sempre usadas para DLAB
+    productQueries: [
+      "DLAB pipette micropipette white background",
+      "DLAB single channel pipette laboratory",
+      "DLAB multichannel pipette set product",
+    ],
   },
   eppendorf: {
     displayName: "EPPENDORF",
@@ -61,6 +81,11 @@ const BRAND_IDENTITIES = {
     font: "Montserrat",
     palette: "verde Eppendorf — #002e1f, #005c3f, accent #00884a",
     bgSearchQuery: "eppendorf laboratory green professional background",
+    productQueries: [
+      "Eppendorf pipette Research Plus white background",
+      "Eppendorf centrifuge laboratory equipment product",
+      "Eppendorf thermomixer laboratory instrument",
+    ],
   },
   brand_generic: {
     displayName: "",
@@ -73,6 +98,7 @@ const BRAND_IDENTITIES = {
     font: "Montserrat",
     palette: "azul padrão",
     bgSearchQuery: "modern laboratory interior dark blue",
+    productQueries: null, // genérico: usa queries do LLM
   },
 };
 
@@ -163,7 +189,6 @@ function bannerTemplate(d) {
     d.product_img_3 || FALLBACKS[2],
   ];
 
-  // Produto central maior e em destaque; laterais ligeiramente menores e rotacionados
   const productItems = `
     <div class="prod-float prod-float--left">
       <img src="${imgs[0]}" alt="Produto 1" class="prod-img"
@@ -209,8 +234,6 @@ body{width:1200px;height:400px;overflow:hidden;font-family:'Montserrat',sans-ser
   background-image:linear-gradient(rgba(255,255,255,.03) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.03) 1px,transparent 1px);
   background-size:44px 44px;z-index:1;pointer-events:none
 }
-
-/* ── COLUNA ESQUERDA ── */
 .col-left{padding:36px 24px 36px 48px;display:flex;flex-direction:column;justify-content:center;position:relative;z-index:3}
 .brand-tag{display:inline-flex;align-items:center;gap:8px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.18);border-radius:20px;padding:4px 14px;margin-bottom:16px;width:fit-content}
 .brand-tag .dot{width:7px;height:7px;background:${dotColor};border-radius:50%;box-shadow:0 0 8px ${dotColor}}
@@ -219,27 +242,24 @@ body{width:1200px;height:400px;overflow:hidden;font-family:'Montserrat',sans-ser
 .headline em{font-style:normal;color:${accentLight}}
 .subline{font-size:13px;font-weight:600;color:rgba(255,255,255,.6);margin-bottom:10px;letter-spacing:.3px}
 .description{font-size:12px;font-weight:400;color:rgba(255,255,255,.45);line-height:1.65;max-width:280px}
-
-/* ── COLUNA CENTRAL — produtos flutuando ── */
 .col-center{
   display:flex;align-items:flex-end;justify-content:center;
   gap:0;padding:0 8px 0 8px;
   position:relative;z-index:3;overflow:visible
 }
-/* Sombra projetada que segue o contorno do produto (não um retângulo) */
 .prod-float{
   position:relative;display:flex;align-items:flex-end;justify-content:center;
   flex-shrink:0
 }
 .prod-float--left{
   width:160px;height:340px;
-  margin-right:-20px;   /* sobreposição leve com o central */
+  margin-right:-20px;
   transform:rotate(-4deg) translateY(8px);
   z-index:4
 }
 .prod-float--center{
   width:220px;height:380px;
-  z-index:6            /* produto central à frente */
+  z-index:6
 }
 .prod-float--right{
   width:160px;height:340px;
@@ -250,18 +270,13 @@ body{width:1200px;height:400px;overflow:hidden;font-family:'Montserrat',sans-ser
 .prod-img{
   width:100%;height:100%;
   object-fit:contain;
-  /* Remove fundo branco de JPGs sem transparência */
   mix-blend-mode:multiply;
-  /* Sombra que segue o contorno real do objeto */
   filter:
     drop-shadow(0 16px 32px rgba(0,0,0,.55))
     drop-shadow(0  4px  8px rgba(0,0,0,.35))
     drop-shadow(0  0   1px rgba(0,0,0,.2));
-  /* Leve brilho para integrar ao ambiente azul do banner */
   transition:filter .3s
 }
-
-/* ── COLUNA DIREITA ── */
 .col-right{padding:36px 44px 36px 20px;display:flex;flex-direction:column;align-items:flex-end;justify-content:center;position:relative;z-index:3}
 .col-right::before{content:'';position:absolute;bottom:-60px;right:-60px;width:280px;height:280px;background:${glowRight};pointer-events:none;z-index:0}
 .badge{background:${badgeGrad};border-radius:14px;padding:16px 22px;text-align:center;margin-bottom:14px;box-shadow:${badgeShadow};min-width:175px;position:relative;overflow:hidden}
@@ -463,6 +478,7 @@ app.post("/api/chat", async (req, res) => {
       return res.status(502).json({ error: `Erro ao gerar dados: ${err.message}` });
     }
 
+    // Sobrescreve cores com identidade da marca
     data.bg1         = brandIdentity.bg1;
     data.bg2         = brandIdentity.bg2;
     data.accent      = brandIdentity.accent;
@@ -471,10 +487,20 @@ app.post("/api/chat", async (req, res) => {
     data.dotColor    = brandIdentity.dotColor;
 
     if (intent === "banner") {
-      const bgQuery = data.bg_search_query  || brandIdentity.bgSearchQuery;
-      const q1      = data.search_query_1   || "laboratory pipette product white background";
-      const q2      = data.search_query_2   || "micropipette set isolated white";
-      const q3      = data.search_query_3   || "pipette tips rack laboratory";
+      const bgQuery = data.bg_search_query || brandIdentity.bgSearchQuery;
+
+      // ★ PRIORIDADE MÁXIMA: queries específicas da marca sobrescrevem o LLM
+      // Se a marca tem productQueries definidas, usa elas; caso contrário usa o LLM
+      let q1, q2, q3;
+      if (brandIdentity.productQueries) {
+        [q1, q2, q3] = brandIdentity.productQueries;
+        console.log(`[img] usando productQueries da marca "${brandIdentity.displayName}":`, [q1, q2, q3]);
+      } else {
+        q1 = data.search_query_1 || "laboratory pipette product white background";
+        q2 = data.search_query_2 || "micropipette set isolated white";
+        q3 = data.search_query_3 || "pipette tips rack laboratory";
+        console.log(`[img] usando queries do LLM:`, [q1, q2, q3]);
+      }
 
       console.log(`[img] iniciando busca paralela: ["${bgQuery}","${q1}","${q2}","${q3}"]`);
       try {
