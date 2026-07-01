@@ -11,13 +11,22 @@ const DEFAULT_MODEL = process.env.OLLAMA_MODEL ?? "gemma3:4b";
 const HTML_INTENTS = new Set(["email", "banner", "instagram"]);
 
 // ─────────────────────────────────────────────────────────────────
-// IMAGE SEARCH — sem API Key obrigatória
-// Estratégia: Google Images via scrape simples → Bing fallback
+// IMAGE SEARCH — DDG + Bing fallback
 // ─────────────────────────────────────────────────────────────────
-async function searchProductImage(query) {
+async function searchProductImages(queries) {
+  // Retorna array de até N URLs (uma por query)
+  const results = [];
+  for (const q of queries) {
+    const url = await searchOneImage(q);
+    results.push(url || null);
+  }
+  return results;
+}
+
+async function searchOneImage(query) {
   if (!query) return null;
 
-  // Tentativa 1: DuckDuckGo Images API (sem autenticação)
+  // Tentativa 1: DuckDuckGo Images
   try {
     const vqd = await getDDGToken(query);
     if (vqd) {
@@ -34,10 +43,9 @@ async function searchProductImage(query) {
       });
       if (r.ok) {
         const json = await r.json();
-        const results = json?.results ?? [];
-        // Prefere imagem de fundo branco/transparente (produto isolado)
-        const best = results.find(x => x.image && /product|equip|lab|instrument|kit/i.test(x.url || ""))
-          ?? results[0];
+        const list = json?.results ?? [];
+        const best = list.find(x => x.image && /product|equip|lab|instrument|kit/i.test(x.url || ""))
+          ?? list[0];
         if (best?.image) return best.image;
       }
     }
@@ -45,7 +53,7 @@ async function searchProductImage(query) {
 
   // Tentativa 2: Bing Images scrape
   try {
-    const bingUrl = `https://www.bing.com/images/search?q=${encodeURIComponent(query + " produto fundo branco")}&form=HDRSC2&first=1&count=5&qft=+filterui:photo-photo`;
+    const bingUrl = `https://www.bing.com/images/search?q=${encodeURIComponent(query + " product white background")}&form=HDRSC2&first=1&count=5&qft=+filterui:photo-photo`;
     const r = await fetch(bingUrl, {
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -55,13 +63,9 @@ async function searchProductImage(query) {
     });
     if (r.ok) {
       const html = await r.text();
-      // Extrai murl (URL da imagem original) do JSON embutido no HTML
       const matches = [...html.matchAll(/"murl":"(https?:[^"]+)"/g)];
       if (matches.length > 0) {
-        // Filtra por extensões de imagem conhecidas
-        const imgUrl = matches
-          .map(m => m[1])
-          .find(u => /\.(jpg|jpeg|png|webp)/i.test(u));
+        const imgUrl = matches.map(m => m[1]).find(u => /\.(jpg|jpeg|png|webp)/i.test(u));
         if (imgUrl) return imgUrl;
       }
     }
@@ -93,25 +97,28 @@ function bannerTemplate(d) {
   const accent = d.accent || "#0057b8";
   const accentLight = accent === "#0057b8" ? "#4da6ff" : accent;
 
-  // Coluna central: imagem real ou placeholder SVG
-  const productCenter = d.product_image_url
-    ? `<div class="product-glow"></div>
-    <div class="product-frame product-frame--img">
-      <img src="${d.product_image_url}" alt="${d.brand || "Produto"}" class="product-img" />
-    </div>`
-    : `<div class="product-glow"></div>
-    <div class="product-frame">
-      <svg class="product-svg" width="64" height="64" viewBox="0 0 72 72" fill="none">
-        <rect x="16" y="28" width="40" height="28" rx="3" stroke="rgba(255,255,255,.5)" stroke-width="1.5"/>
-        <rect x="28" y="18" width="16" height="12" rx="2" stroke="rgba(255,255,255,.5)" stroke-width="1.5"/>
-        <line x1="36" y1="10" x2="36" y2="18" stroke="rgba(255,255,255,.5)" stroke-width="1.5"/>
-        <circle cx="36" cy="8" r="3" stroke="rgba(100,180,255,.7)" stroke-width="1.5"/>
-        <line x1="22" y1="38" x2="50" y2="38" stroke="rgba(100,180,255,.4)" stroke-width="1"/>
-        <line x1="22" y1="44" x2="44" y2="44" stroke="rgba(100,180,255,.4)" stroke-width="1"/>
-        <line x1="22" y1="50" x2="38" y2="50" stroke="rgba(100,180,255,.4)" stroke-width="1"/>
-      </svg>
-      <span class="product-label">[ Produto ]</span>
-    </div>`;
+  // Background de laboratório — usa URL buscada ou fallback de alta qualidade
+  const bgImg = d.bg_image_url
+    ? `url('${d.bg_image_url}')`
+    : `url('https://pplx-res.cloudinary.com/image/upload/pplx_search_images/9a019c8459d97b4ebfc8d000a89a29e9e175561c.jpg')`;
+
+  // 3 imagens de produto — usa URLs buscadas ou fallbacks reais Shimadzu
+  const FALLBACKS = [
+    "https://pplx-res.cloudinary.com/image/upload/pplx_search_images/ed15d7a7e425f0798f241a378da490563832b11b.jpg",
+    "https://pplx-res.cloudinary.com/image/upload/pplx_search_images/0c5fd1bf82083c866fc95ff2bc4bdd24c6ddbd80.jpg",
+    "https://pplx-res.cloudinary.com/image/upload/pplx_search_images/0228a5ba01bddffb53de21156e01f04080ce99a0.jpg",
+  ];
+
+  const imgs = [
+    d.product_img_1 || FALLBACKS[0],
+    d.product_img_2 || FALLBACKS[1],
+    d.product_img_3 || FALLBACKS[2],
+  ];
+
+  const productGrid = imgs.map((url, i) => `
+    <div class="prod-card${i === 1 ? " prod-card--main" : ""}">
+      <img src="${url}" alt="Produto ${i + 1}" class="prod-img" />
+    </div>`).join("\n");
 
   return `<!DOCTYPE html>
 <html lang="pt-BR">
@@ -123,52 +130,98 @@ function bannerTemplate(d) {
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{width:1200px;height:400px;overflow:hidden;font-family:'Montserrat',sans-serif}
-.banner{width:1200px;height:400px;background:linear-gradient(135deg,${bg1} 0%,${bg2} 100%);display:grid;grid-template-columns:1fr 300px 1fr;position:relative;overflow:hidden}
-.banner::before{content:'';position:absolute;inset:0;background-image:linear-gradient(rgba(255,255,255,.04) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.04) 1px,transparent 1px);background-size:44px 44px;pointer-events:none}
-.banner::after{content:'';position:absolute;top:-100px;left:-100px;width:440px;height:440px;background:radial-gradient(circle,rgba(0,120,255,.22) 0%,transparent 70%);pointer-events:none}
-/* LEFT */
-.col-left{padding:40px 28px 40px 52px;display:flex;flex-direction:column;justify-content:center;position:relative;z-index:2}
-.brand-tag{display:inline-flex;align-items:center;gap:8px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);border-radius:20px;padding:4px 14px;margin-bottom:18px;width:fit-content}
+
+/* BACKGROUND: foto de laboratório com overlay gradient escuro */
+.banner{
+  width:1200px;height:400px;
+  background-image:${bgImg};
+  background-size:cover;background-position:center;
+  display:grid;grid-template-columns:420px 1fr 300px;
+  position:relative;overflow:hidden
+}
+/* Overlay gradient direcional — escurece o BG para texto legível */
+.banner::before{
+  content:'';position:absolute;inset:0;
+  background:linear-gradient(
+    105deg,
+    ${bg1}f5 0%,
+    ${bg1}cc 35%,
+    ${bg1}88 55%,
+    ${bg2}66 75%,
+    ${bg2}cc 100%
+  );
+  z-index:0
+}
+/* Grid de pontos sutil */
+.banner::after{
+  content:'';position:absolute;inset:0;
+  background-image:linear-gradient(rgba(255,255,255,.03) 1px,transparent 1px),
+                   linear-gradient(90deg,rgba(255,255,255,.03) 1px,transparent 1px);
+  background-size:44px 44px;z-index:1;pointer-events:none
+}
+
+/* LEFT — copy */
+.col-left{padding:36px 24px 36px 48px;display:flex;flex-direction:column;justify-content:center;position:relative;z-index:3}
+.brand-tag{display:inline-flex;align-items:center;gap:8px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.18);border-radius:20px;padding:4px 14px;margin-bottom:16px;width:fit-content}
 .brand-tag .dot{width:7px;height:7px;background:#e8001c;border-radius:50%;box-shadow:0 0 8px #e8001c}
-.brand-tag span{font-size:11px;font-weight:600;color:rgba(255,255,255,.7);letter-spacing:1.5px;text-transform:uppercase}
-.headline{font-size:36px;font-weight:900;color:#fff;line-height:1.1;letter-spacing:-.5px;margin-bottom:8px}
+.brand-tag span{font-size:11px;font-weight:600;color:rgba(255,255,255,.75);letter-spacing:1.5px;text-transform:uppercase}
+.headline{font-size:34px;font-weight:900;color:#fff;line-height:1.1;letter-spacing:-.5px;margin-bottom:8px;text-shadow:0 2px 12px rgba(0,0,0,.6)}
 .headline em{font-style:normal;color:${accentLight}}
-.subline{font-size:14px;font-weight:600;color:rgba(255,255,255,.55);margin-bottom:10px;letter-spacing:.3px}
-.description{font-size:13px;font-weight:400;color:rgba(255,255,255,.5);line-height:1.6;max-width:300px}
-/* CENTER */
-.col-center{display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative;z-index:2}
-.product-glow{position:absolute;width:260px;height:260px;background:radial-gradient(circle,rgba(0,120,255,.15) 0%,transparent 70%);border-radius:50%}
-.product-frame{width:200px;height:200px;border:1.5px dashed rgba(255,255,255,.28);border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(255,255,255,.04);backdrop-filter:blur(4px);position:relative}
-.product-frame--img{background:rgba(255,255,255,.92);border:none;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.4),0 0 0 1px rgba(255,255,255,.2)}
-.product-img{width:100%;height:100%;object-fit:contain;border-radius:10px;padding:8px}
-.product-svg{opacity:.55;margin-bottom:10px}
-.product-label{font-size:11px;font-weight:600;color:rgba(255,255,255,.35);letter-spacing:2px;text-transform:uppercase}
-/* RIGHT */
-.col-right{padding:40px 52px 40px 28px;display:flex;flex-direction:column;align-items:flex-end;justify-content:center;position:relative;z-index:2}
-.col-right::before{content:'';position:absolute;bottom:-60px;right:-60px;width:300px;height:300px;background:radial-gradient(circle,rgba(232,0,28,.15) 0%,transparent 70%);pointer-events:none}
-.badge{background:linear-gradient(135deg,#e8001c 0%,#ff4d4d 100%);border-radius:14px;padding:18px 26px;text-align:center;margin-bottom:16px;box-shadow:0 8px 28px rgba(232,0,28,.45),0 0 0 1px rgba(255,255,255,.1);min-width:190px;position:relative;overflow:hidden}
-.badge::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,.4),transparent)}
-.badge-value{font-size:48px;font-weight:900;color:#fff;line-height:1;letter-spacing:-2px}
-.badge-value sup{font-size:20px;vertical-align:super;letter-spacing:0}
+.subline{font-size:13px;font-weight:600;color:rgba(255,255,255,.6);margin-bottom:10px;letter-spacing:.3px}
+.description{font-size:12px;font-weight:400;color:rgba(255,255,255,.45);line-height:1.65;max-width:280px}
+
+/* CENTER — 3 product cards */
+.col-center{
+  display:flex;align-items:center;justify-content:center;
+  gap:12px;padding:28px 16px;position:relative;z-index:3
+}
+.prod-card{
+  width:110px;height:110px;
+  background:rgba(255,255,255,.92);
+  border-radius:12px;
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:0 6px 24px rgba(0,0,0,.45),0 0 0 1px rgba(255,255,255,.15);
+  overflow:hidden;
+  flex-shrink:0;
+  transition:transform .2s
+}
+.prod-card--main{
+  width:148px;height:148px;
+  box-shadow:0 10px 36px rgba(0,90,220,.5),0 0 0 2px ${accentLight}55;
+}
+.prod-img{width:100%;height:100%;object-fit:contain;padding:8px}
+
+/* RIGHT — badge + CTA */
+.col-right{padding:36px 44px 36px 20px;display:flex;flex-direction:column;align-items:flex-end;justify-content:center;position:relative;z-index:3}
+.col-right::before{content:'';position:absolute;bottom:-60px;right:-60px;width:280px;height:280px;background:radial-gradient(circle,rgba(232,0,28,.18) 0%,transparent 70%);pointer-events:none;z-index:0}
+.badge{background:linear-gradient(135deg,#e8001c 0%,#ff4d4d 100%);border-radius:14px;padding:16px 22px;text-align:center;margin-bottom:14px;box-shadow:0 8px 28px rgba(232,0,28,.5),0 0 0 1px rgba(255,255,255,.12);min-width:175px;position:relative;overflow:hidden}
+.badge::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,.45),transparent)}
+.badge-value{font-size:44px;font-weight:900;color:#fff;line-height:1;letter-spacing:-2px}
+.badge-value sup{font-size:18px;vertical-align:super;letter-spacing:0}
 .badge-label{font-size:10px;font-weight:600;color:rgba(255,255,255,.85);letter-spacing:2px;text-transform:uppercase;margin-top:2px}
-.validity{font-size:10px;color:rgba(255,255,255,.5);margin-bottom:14px;text-align:right;letter-spacing:.4px}
-.cta{display:block;background:linear-gradient(135deg,${accent} 0%,${accent}cc 100%);color:#fff;font-family:'Montserrat',sans-serif;font-size:14px;font-weight:700;letter-spacing:.5px;padding:13px 26px;border-radius:8px;text-decoration:none;border:1.5px solid rgba(255,255,255,.2);box-shadow:0 4px 18px ${accent}88;text-align:center;width:100%}
-.dv{position:absolute;top:15%;bottom:15%;width:1px;background:linear-gradient(to bottom,transparent,rgba(255,255,255,.1),transparent);z-index:2}
+.validity{font-size:10px;color:rgba(255,255,255,.45);margin-bottom:12px;text-align:right;letter-spacing:.4px}
+.cta{display:block;background:linear-gradient(135deg,${accent} 0%,${accent}cc 100%);color:#fff;font-family:'Montserrat',sans-serif;font-size:13px;font-weight:700;letter-spacing:.5px;padding:12px 22px;border-radius:8px;text-decoration:none;border:1.5px solid rgba(255,255,255,.2);box-shadow:0 4px 18px ${accent}88;text-align:center;width:100%}
+
+/* Divisores verticais */
+.dv{position:absolute;top:12%;bottom:12%;width:1px;background:linear-gradient(to bottom,transparent,rgba(255,255,255,.12),transparent);z-index:2}
 </style>
 </head>
 <body>
 <div class="banner">
-  <div class="dv" style="left:33.33%"></div>
-  <div class="dv" style="left:66.66%"></div>
+  <div class="dv" style="left:35%"></div>
+  <div class="dv" style="left:74%"></div>
+
   <div class="col-left">
     <div class="brand-tag"><span class="dot"></span><span>${d.brand || "Marca"}</span></div>
     <h1 class="headline">${d.headline}<br><em>${d.highlight || ""}</em></h1>
     <p class="subline">${d.subline || ""}</p>
     <p class="description">${d.description || ""}</p>
   </div>
+
   <div class="col-center">
-    ${productCenter}
+    ${productGrid}
   </div>
+
   <div class="col-right">
     <div class="badge">
       <div class="badge-value">${d.badge_value || "3"}<sup>%</sup></div>
@@ -255,7 +308,10 @@ Campos obrigatórios:
   "bg1": "Cor hex do fundo início (ex: #030d1a)",
   "bg2": "Cor hex do fundo fim (ex: #0a2d5e)",
   "accent": "Cor hex de destaque/botão (ex: #0057b8)",
-  "search_query": "Query ideal para pesquisar imagem do produto (em inglês, ex: Shimadzu analytical balance white background)"
+  "bg_search_query": "Query para imagem de fundo/ambiente (ex: modern laboratory interior blue dark)",
+  "search_query_1": "Query produto 1 fundo branco (ex: DLAB pipette product white background isolated)",
+  "search_query_2": "Query produto 2 fundo branco (ex: laboratory micropipette set isolated)",
+  "search_query_3": "Query produto 3 fundo branco (ex: pipette tips rack laboratory white background)"
 }
 
 Retorne SOMENTE o JSON, começando com { e terminando com }.`,
@@ -329,12 +385,20 @@ app.post("/api/chat", async (req, res) => {
       return res.status(502).json({ error: `Erro ao gerar dados: ${err.message}` });
     }
 
-    // Para banners: tenta buscar imagem real do produto na internet
-    if (intent === "banner" && data.search_query) {
+    // Para banners: busca paralela de 4 imagens (1 background + 3 produtos)
+    if (intent === "banner") {
+      const bgQuery = data.bg_search_query || "modern laboratory interior dark blue";
+      const q1 = data.search_query_1 || (data.search_query + " product white background");
+      const q2 = data.search_query_2 || (data.search_query + " isolated white");
+      const q3 = data.search_query_3 || (data.search_query + " laboratory equipment");
+
       try {
-        const imgUrl = await searchProductImage(data.search_query);
-        if (imgUrl) data.product_image_url = imgUrl;
-      } catch { /* continua sem imagem */ }
+        const [bgUrl, img1, img2, img3] = await searchProductImages([bgQuery, q1, q2, q3]);
+        if (bgUrl)  data.bg_image_url   = bgUrl;
+        if (img1)   data.product_img_1  = img1;
+        if (img2)   data.product_img_2  = img2;
+        if (img3)   data.product_img_3  = img3;
+      } catch { /* continua com fallbacks */ }
     }
 
     const html = intent === "banner"
