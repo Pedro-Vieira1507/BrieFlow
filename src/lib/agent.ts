@@ -8,12 +8,19 @@
  * o Ollama inacessível pela internet.
  */
 
-export type Intent = "image" | "email" | "datasheet" | "text";
+export type Intent = "image" | "email" | "banner" | "instagram" | "datasheet" | "text";
 
 export function detectIntent(prompt: string): Intent {
   const p = prompt.toLowerCase();
-  if (/\b(imagem|imagens|foto|banner|ilustra|art\s?work|logo|visual|criativo)\b/.test(p))
+
+  // Banner e Instagram têm prioridade — chamam o template do servidor
+  if (/\b(banner|banners)\b/.test(p)) return "banner";
+  if (/\b(instagram|insta|post\s+ig|post\s+insta|reel)\b/.test(p)) return "instagram";
+
+  // Imagem genérica → Pollinations
+  if (/\b(imagem|imagens|foto|ilustra|art\s?work|logo|visual|criativo|gere\s+uma\s+imagem)\b/.test(p))
     return "image";
+
   if (/\b(e-?mail|email|newsletter|html|marketing direto|disparo)\b/.test(p)) return "email";
   if (/\b(ficha\s+t[eé]cnica|datasheet|especifica|spec|pdf|one[- ]?pager)\b/.test(p))
     return "datasheet";

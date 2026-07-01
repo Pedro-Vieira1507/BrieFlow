@@ -54,7 +54,7 @@ function ChatRoute() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingText, setStreamingText] = useState("");
   const [loadingIntent, setLoadingIntent] =
-    useState<"image" | "email" | "datasheet" | "text" | undefined>();
+    useState<"image" | "email" | "banner" | "instagram" | "datasheet" | "text" | undefined>();
   const abortRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
@@ -85,10 +85,19 @@ function ChatRoute() {
   // Artefacto ao vivo durante o streaming — actualizado token a token
   const streamingArtifact: Artifact | undefined = useMemo(() => {
     if (!isStreaming || !streamingText) return undefined;
-    if (loadingIntent === "email" || looksLikeHtml(streamingText)) {
-      return { kind: "html", html: extractHtml(streamingText), title: "E-mail (a gerar...)" };
+    if (
+      loadingIntent === "email" ||
+      loadingIntent === "banner" ||
+      loadingIntent === "instagram" ||
+      looksLikeHtml(streamingText)
+    ) {
+      return { kind: "html", html: extractHtml(streamingText), title: "A gerar..." };
     }
-    return { kind: "markdown", markdown: streamingText, title: loadingIntent === "datasheet" ? "Ficha Técnica (a gerar...)" : "Conteúdo (a gerar...)" };
+    return {
+      kind: "markdown",
+      markdown: streamingText,
+      title: loadingIntent === "datasheet" ? "Ficha Técnica (a gerar...)" : "Conteúdo (a gerar...)",
+    };
   }, [isStreaming, streamingText, loadingIntent]);
 
   // O painel direito mostra: streaming ao vivo → artefacto final guardado
@@ -124,6 +133,7 @@ function ChatRoute() {
 
       try {
         if (intent === "image") {
+          // Imagem genérica → Pollinations.ai
           const abortCtrl = new AbortController();
           abortRef.current = () => abortCtrl.abort();
 
@@ -146,7 +156,8 @@ function ChatRoute() {
           abortRef.current = null;
           refresh();
         } else {
-          // Texto/email/datasheet — streaming SSE; painel direito actualiza em tempo real
+          // Todos os outros intents (email, banner, instagram, datasheet, text)
+          // → streaming SSE via /api/chat
           const abort = callOllama(text, intent, {
             onToken: (token) => {
               setStreamingText((prev) => prev + token);
@@ -155,10 +166,21 @@ function ChatRoute() {
               let artifact: Artifact;
               let reply: string;
 
-              if (intent === "email" || looksLikeHtml(fullText)) {
+              if (
+                intent === "banner" ||
+                intent === "instagram" ||
+                intent === "email" ||
+                looksLikeHtml(fullText)
+              ) {
                 const html = extractHtml(fullText);
-                artifact = { kind: "html", html, title: "E-mail" };
-                reply = "✅ E-mail HTML pronto! Veja a prévia e copie o código no painel ao lado.";
+                const titles: Record<string, string> = {
+                  banner: "Banner",
+                  instagram: "Post Instagram",
+                  email: "E-mail HTML",
+                };
+                const title = titles[intent] ?? "HTML";
+                artifact = { kind: "html", html, title };
+                reply = `✅ ${title} pronto! Veja a prévia e copie o código no painel ao lado.`;
               } else if (intent === "datasheet") {
                 artifact = { kind: "markdown", markdown: fullText, title: "Ficha Técnica" };
                 reply = "✅ Ficha técnica gerada! Use **Exportar PDF** no painel ao lado.";
@@ -227,7 +249,6 @@ function ChatRoute() {
       />
       <main className="grid flex-1 grid-cols-1 lg:grid-cols-[minmax(380px,1fr)_minmax(420px,1.2fr)]">
         <section className="flex h-screen flex-col border-r border-border bg-background/40">
-          {/* Chat central: apenas mensagens de conversa — sem o texto gerado completo */}
           <ChatPanel
             messages={thread?.messages ?? []}
             streamingText=""
@@ -237,7 +258,6 @@ function ChatRoute() {
           />
         </section>
         <section className="hidden h-screen flex-col bg-card/30 lg:flex">
-          {/* Painel direito: preview ao vivo durante streaming + artefacto final */}
           <ArtifactPanel
             artifact={panelArtifact}
             loading={isStreaming && !streamingText}
@@ -253,5 +273,6 @@ function ChatRoute() {
 function extractHtml(raw: string): string {
   const fence = raw.match(/```(?:html)?\s*([\s\S]*?)```/i);
   if (fence) return fence[1].trim();
+  // Se não há fences, devolve directamente (já é HTML limpo do template)
   return raw.trim();
 }
