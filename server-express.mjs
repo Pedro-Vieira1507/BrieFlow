@@ -11,15 +11,108 @@ const DEFAULT_MODEL = process.env.OLLAMA_MODEL ?? "gemma3:4b";
 const HTML_INTENTS = new Set(["email", "banner", "instagram"]);
 
 // ─────────────────────────────────────────────────────────────────
+// IMAGE SEARCH — sem API Key obrigatória
+// Estratégia: Google Images via scrape simples → Bing fallback
+// ─────────────────────────────────────────────────────────────────
+async function searchProductImage(query) {
+  if (!query) return null;
+
+  // Tentativa 1: DuckDuckGo Images API (sem autenticação)
+  try {
+    const vqd = await getDDGToken(query);
+    if (vqd) {
+      const url = `https://duckduckgo.com/i.js?` +
+        `q=${encodeURIComponent(query)}&` +
+        `type=photo&layout=wide&vqd=${vqd}&l=pt-BR&p=2&o=json&f=,,,,,`;
+      const r = await fetch(url, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",
+          "Accept": "application/json",
+          "Referer": "https://duckduckgo.com/",
+        },
+        signal: AbortSignal.timeout(6000),
+      });
+      if (r.ok) {
+        const json = await r.json();
+        const results = json?.results ?? [];
+        // Prefere imagem de fundo branco/transparente (produto isolado)
+        const best = results.find(x => x.image && /product|equip|lab|instrument|kit/i.test(x.url || ""))
+          ?? results[0];
+        if (best?.image) return best.image;
+      }
+    }
+  } catch { /* ignora */ }
+
+  // Tentativa 2: Bing Images scrape
+  try {
+    const bingUrl = `https://www.bing.com/images/search?q=${encodeURIComponent(query + " produto fundo branco")}&form=HDRSC2&first=1&count=5&qft=+filterui:photo-photo`;
+    const r = await fetch(bingUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept-Language": "pt-BR,pt;q=0.9",
+      },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (r.ok) {
+      const html = await r.text();
+      // Extrai murl (URL da imagem original) do JSON embutido no HTML
+      const matches = [...html.matchAll(/"murl":"(https?:[^"]+)"/g)];
+      if (matches.length > 0) {
+        // Filtra por extensões de imagem conhecidas
+        const imgUrl = matches
+          .map(m => m[1])
+          .find(u => /\.(jpg|jpeg|png|webp)/i.test(u));
+        if (imgUrl) return imgUrl;
+      }
+    }
+  } catch { /* ignora */ }
+
+  return null;
+}
+
+async function getDDGToken(query) {
+  try {
+    const r = await fetch(`https://duckduckgo.com/?q=${encodeURIComponent(query)}&ia=images`, {
+      headers: { "User-Agent": "Mozilla/5.0 (X11; Linux x86_64)" },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!r.ok) return null;
+    const html = await r.text();
+    const m = html.match(/vqd=['"](\d-[\d\w-]+)['"]/);
+    return m ? m[1] : null;
+  } catch { return null; }
+}
+
+// ─────────────────────────────────────────────────────────────────
 // TEMPLATES PROFISSIONAIS
-// O Ollama gera apenas o JSON com os textos; o servidor monta o HTML.
 // ─────────────────────────────────────────────────────────────────
 
 function bannerTemplate(d) {
-  // d = { headline, highlight, subline, description, badge, cta, bg1, bg2, accent }
   const bg1    = d.bg1    || "#030d1a";
   const bg2    = d.bg2    || "#0a2d5e";
   const accent = d.accent || "#0057b8";
+  const accentLight = accent === "#0057b8" ? "#4da6ff" : accent;
+
+  // Coluna central: imagem real ou placeholder SVG
+  const productCenter = d.product_image_url
+    ? `<div class="product-glow"></div>
+    <div class="product-frame product-frame--img">
+      <img src="${d.product_image_url}" alt="${d.brand || "Produto"}" class="product-img" />
+    </div>`
+    : `<div class="product-glow"></div>
+    <div class="product-frame">
+      <svg class="product-svg" width="64" height="64" viewBox="0 0 72 72" fill="none">
+        <rect x="16" y="28" width="40" height="28" rx="3" stroke="rgba(255,255,255,.5)" stroke-width="1.5"/>
+        <rect x="28" y="18" width="16" height="12" rx="2" stroke="rgba(255,255,255,.5)" stroke-width="1.5"/>
+        <line x1="36" y1="10" x2="36" y2="18" stroke="rgba(255,255,255,.5)" stroke-width="1.5"/>
+        <circle cx="36" cy="8" r="3" stroke="rgba(100,180,255,.7)" stroke-width="1.5"/>
+        <line x1="22" y1="38" x2="50" y2="38" stroke="rgba(100,180,255,.4)" stroke-width="1"/>
+        <line x1="22" y1="44" x2="44" y2="44" stroke="rgba(100,180,255,.4)" stroke-width="1"/>
+        <line x1="22" y1="50" x2="38" y2="50" stroke="rgba(100,180,255,.4)" stroke-width="1"/>
+      </svg>
+      <span class="product-label">[ Produto ]</span>
+    </div>`;
+
   return `<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -39,13 +132,15 @@ body{width:1200px;height:400px;overflow:hidden;font-family:'Montserrat',sans-ser
 .brand-tag .dot{width:7px;height:7px;background:#e8001c;border-radius:50%;box-shadow:0 0 8px #e8001c}
 .brand-tag span{font-size:11px;font-weight:600;color:rgba(255,255,255,.7);letter-spacing:1.5px;text-transform:uppercase}
 .headline{font-size:36px;font-weight:900;color:#fff;line-height:1.1;letter-spacing:-.5px;margin-bottom:8px}
-.headline em{font-style:normal;color:${accent === "#0057b8" ? "#4da6ff" : accent}}
+.headline em{font-style:normal;color:${accentLight}}
 .subline{font-size:14px;font-weight:600;color:rgba(255,255,255,.55);margin-bottom:10px;letter-spacing:.3px}
 .description{font-size:13px;font-weight:400;color:rgba(255,255,255,.5);line-height:1.6;max-width:300px}
 /* CENTER */
 .col-center{display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative;z-index:2}
 .product-glow{position:absolute;width:260px;height:260px;background:radial-gradient(circle,rgba(0,120,255,.15) 0%,transparent 70%);border-radius:50%}
 .product-frame{width:200px;height:200px;border:1.5px dashed rgba(255,255,255,.28);border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(255,255,255,.04);backdrop-filter:blur(4px);position:relative}
+.product-frame--img{background:rgba(255,255,255,.92);border:none;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.4),0 0 0 1px rgba(255,255,255,.2)}
+.product-img{width:100%;height:100%;object-fit:contain;border-radius:10px;padding:8px}
 .product-svg{opacity:.55;margin-bottom:10px}
 .product-label{font-size:11px;font-weight:600;color:rgba(255,255,255,.35);letter-spacing:2px;text-transform:uppercase}
 /* RIGHT */
@@ -58,7 +153,6 @@ body{width:1200px;height:400px;overflow:hidden;font-family:'Montserrat',sans-ser
 .badge-label{font-size:10px;font-weight:600;color:rgba(255,255,255,.85);letter-spacing:2px;text-transform:uppercase;margin-top:2px}
 .validity{font-size:10px;color:rgba(255,255,255,.5);margin-bottom:14px;text-align:right;letter-spacing:.4px}
 .cta{display:block;background:linear-gradient(135deg,${accent} 0%,${accent}cc 100%);color:#fff;font-family:'Montserrat',sans-serif;font-size:14px;font-weight:700;letter-spacing:.5px;padding:13px 26px;border-radius:8px;text-decoration:none;border:1.5px solid rgba(255,255,255,.2);box-shadow:0 4px 18px ${accent}88;text-align:center;width:100%}
-/* dividers */
 .dv{position:absolute;top:15%;bottom:15%;width:1px;background:linear-gradient(to bottom,transparent,rgba(255,255,255,.1),transparent);z-index:2}
 </style>
 </head>
@@ -73,19 +167,7 @@ body{width:1200px;height:400px;overflow:hidden;font-family:'Montserrat',sans-ser
     <p class="description">${d.description || ""}</p>
   </div>
   <div class="col-center">
-    <div class="product-glow"></div>
-    <div class="product-frame">
-      <svg class="product-svg" width="64" height="64" viewBox="0 0 72 72" fill="none">
-        <rect x="16" y="28" width="40" height="28" rx="3" stroke="rgba(255,255,255,.5)" stroke-width="1.5"/>
-        <rect x="28" y="18" width="16" height="12" rx="2" stroke="rgba(255,255,255,.5)" stroke-width="1.5"/>
-        <line x1="36" y1="10" x2="36" y2="18" stroke="rgba(255,255,255,.5)" stroke-width="1.5"/>
-        <circle cx="36" cy="8" r="3" stroke="rgba(100,180,255,.7)" stroke-width="1.5"/>
-        <line x1="22" y1="38" x2="50" y2="38" stroke="rgba(100,180,255,.4)" stroke-width="1"/>
-        <line x1="22" y1="44" x2="44" y2="44" stroke="rgba(100,180,255,.4)" stroke-width="1"/>
-        <line x1="22" y1="50" x2="38" y2="50" stroke="rgba(100,180,255,.4)" stroke-width="1"/>
-      </svg>
-      <span class="product-label">[ Produto ]</span>
-    </div>
+    ${productCenter}
   </div>
   <div class="col-right">
     <div class="badge">
@@ -151,7 +233,7 @@ body{width:1080px;height:1080px;overflow:hidden;font-family:'Montserrat',sans-se
 }
 
 // ─────────────────────────────────────────────────────────────────
-// SYSTEM PROMPTS — Ollama gera APENAS JSON para banner/instagram
+// SYSTEM PROMPTS
 // ─────────────────────────────────────────────────────────────────
 
 const SYSTEM_PROMPTS = {
@@ -172,7 +254,8 @@ Campos obrigatórios:
   "cta": "Texto do botão CTA (máx 5 palavras)",
   "bg1": "Cor hex do fundo início (ex: #030d1a)",
   "bg2": "Cor hex do fundo fim (ex: #0a2d5e)",
-  "accent": "Cor hex de destaque/botão (ex: #0057b8)"
+  "accent": "Cor hex de destaque/botão (ex: #0057b8)",
+  "search_query": "Query ideal para pesquisar imagem do produto (em inglês, ex: Shimadzu analytical balance white background)"
 }
 
 Retorne SOMENTE o JSON, começando com { e terminando com }.`,
@@ -222,7 +305,6 @@ async function ollamaJSON(prompt, model) {
   });
   if (!res.ok) throw new Error(`Ollama ${res.status}`);
   const { response } = await res.json();
-  // Extrair o JSON mesmo que o modelo devolva ```json ... ```
   const match = response.match(/\{[\s\S]*\}/);
   if (!match) throw new Error("Modelo não devolveu JSON válido");
   return JSON.parse(match[0]);
@@ -247,11 +329,18 @@ app.post("/api/chat", async (req, res) => {
       return res.status(502).json({ error: `Erro ao gerar dados: ${err.message}` });
     }
 
+    // Para banners: tenta buscar imagem real do produto na internet
+    if (intent === "banner" && data.search_query) {
+      try {
+        const imgUrl = await searchProductImage(data.search_query);
+        if (imgUrl) data.product_image_url = imgUrl;
+      } catch { /* continua sem imagem */ }
+    }
+
     const html = intent === "banner"
       ? bannerTemplate(data)
       : instagramTemplate(data);
 
-    // Devolve em SSE para manter compatibilidade com o frontend
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache, no-transform");
     res.setHeader("Connection", "keep-alive");
@@ -334,7 +423,7 @@ app.post("/api/chat", async (req, res) => {
           } else {
             const trimmed = token.trim();
             if (trimmed && /^`+$/.test(trimmed)) {
-              // backticks de fecho do modelo — descartar
+              // backticks de fecho — descartar
             } else if (token) {
               sendToken(token);
             }
