@@ -24,6 +24,17 @@ import {
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 
+function generateId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
 export const Route = createFileRoute("/chat/$threadId")({
   head: () => ({
     meta: [
@@ -73,7 +84,9 @@ function ChatRoute() {
   }, [thread]);
 
   const handleSend = useCallback(
-    async (text: string) =>generateId() (!thread) return;
+    async (text: string) => {
+      if (!thread) return;
+
       const userMsg: Message = {
         id: generateId(),
         role: "user",
@@ -86,7 +99,7 @@ function ChatRoute() {
       const intent = detectIntent(text);
       setIsStreaming(true);
       setLoadingIntent(intent);
-      const contgenerateId() AbortController();
+      const controller = new AbortController();
       abortRef.current = controller;
 
       const assistantId = generateId();
