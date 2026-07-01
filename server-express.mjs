@@ -4,12 +4,66 @@ import { fileURLToPath } from "url";
 import { readdirSync } from "fs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PORT      = process.env.PORT        || 3000;
-const OLLAMA_URL= process.env.OLLAMA_URL  ?? "http://127.0.0.1:11434";
+const PORT       = process.env.PORT         || 3000;
+const OLLAMA_URL = process.env.OLLAMA_URL   ?? "http://127.0.0.1:11434";
 const DEFAULT_MODEL = process.env.OLLAMA_MODEL ?? "gemma3:4b";
 
-const HTML_INTENTS = new Set(["email","banner","instagram","linkedin","landing"]);
+// ═══════════════════════════════════════════════════════════════
+// FASE 1 — IMPORTS DO ENGINE
+// Os módulos TypeScript são transpilados para dist/ antes de usar.
+// Em dev (ts-node / tsx), importar direto de src/lib/.
+// ═══════════════════════════════════════════════════════════════
+let detectContentFormat, buildDesignSystemPrompt, buildSEOPromptBlock;
+let validateContentStructure, getExpectedJSONSchema, getContentTypeSpec;
+let validateSEO;
+
+try {
+  // Tenta import do build compilado (produção)
+  const dsp  = await import("./dist/lib/design-system-prompt.js");
+  const cts  = await import("./dist/lib/content-type-specs.js");
+  const seo  = await import("./dist/lib/seo-guidelines.js");
+  detectContentFormat    = dsp.detectContentFormat;
+  buildDesignSystemPrompt = dsp.buildDesignSystemPrompt;
+  buildSEOPromptBlock    = seo.buildSEOPromptBlock;
+  validateContentStructure = cts.validateContentStructure;
+  getExpectedJSONSchema  = cts.getExpectedJSONSchema;
+  getContentTypeSpec     = cts.getContentTypeSpec;
+  validateSEO            = seo.validateSEO;
+  console.log("[PHASE2] Engine carregado de dist/ (produção)");
+} catch {
+  // Fallback: stubs no-op para não quebrar em ambientes sem build
+  console.warn("[PHASE2] dist/ não encontrado — usando stubs. Rode 'npm run build' para ativar o engine completo.");
+  detectContentFormat     = (text) => ({ type: "generic", confidence: 0, platform: null });
+  buildDesignSystemPrompt = (opts) => "";
+  buildSEOPromptBlock     = (type) => "";
+  validateContentStructure = (data, type) => ({ valid: true, missingFields: [], warnings: [] });
+  getExpectedJSONSchema   = (type) => ({});
+  getContentTypeSpec      = (type) => null;
+  validateSEO             = (content, type) => ({ score: 0, warnings: [], suggestions: [] });
+}
+
+const HTML_INTENTS     = new Set(["email","banner","instagram","linkedin","landing"]);
 const TEMPLATE_INTENTS = new Set(["banner","instagram","linkedin"]);
+
+// ═══════════════════════════════════════════════════════════════
+// IN-MEMORY CONVERSATION + PAGE BUILDER STATE
+// Cada sessão mantém: histórico de mensagens + último conteúdo
+// editado no Page Builder (sincronizado via /api/state/sync)
+// ═══════════════════════════════════════════════════════════════
+const sessions = new Map();
+// sessions[sessionId] = {
+//   history:    [ { role, content } ],
+//   lastData:   { ...campos do último conteúdo gerado },
+//   lastType:   "banner" | "email" | ...,
+//   lastHtml:   "<html>...",
+// }
+
+function getSession(id) {
+  if (!sessions.has(id)) {
+    sessions.set(id, { history: [], lastData: null, lastType: null, lastHtml: null });
+  }
+  return sessions.get(id);
+}
 
 // ═══════════════════════════════════════════════════════════════
 // BRAND IDENTITIES
@@ -106,7 +160,7 @@ async function searchOneImage(query){
     );
     if(!vqdRes.ok) throw new Error("vqd fetch failed");
     const vqdHtml=await vqdRes.text();
-    const m=vqdHtml.match(/vqd=['"](\d-[\d\w-]+)['"]/);
+    const m=vqdHtml.match(/vqd=['"](\\d-[\\d\\w-]+)['"]/);
     if(!m) throw new Error("vqd not found");
     const imgRes=await fetch(
       `https://duckduckgo.com/i.js?q=${encodeURIComponent(query)}&type=photo&vqd=${m[1]}&o=json&p=1`,
@@ -115,7 +169,7 @@ async function searchOneImage(query){
     if(!imgRes.ok) throw new Error("img fetch failed");
     const json=await imgRes.json();
     const list=json?.results??[];
-    const best=list.find(x=>x.image&&/\.(jpg|jpeg|png|webp)/i.test(x.image))??list[0];
+    const best=list.find(x=>x.image&&/\\.(jpg|jpeg|png|webp)/i.test(x.image))??list[0];
     if(best?.image) return best.image;
     throw new Error("no results");
   }catch(e){
@@ -211,7 +265,6 @@ body{width:1200px;height:400px;overflow:hidden;font-family:'Montserrat',sans-ser
 
 // ═══════════════════════════════════════════════════════════════
 // TEMPLATE: INSTAGRAM  1080×1080
-// Mesmo nível do banner: produto flutuante + imagem real de fundo
 // ═══════════════════════════════════════════════════════════════
 function instagramTemplate(d){
   const bg1=d.bg1||"#030d1a",bg2=d.bg2||"#0a2d5e";
@@ -228,14 +281,10 @@ function instagramTemplate(d){
 *{margin:0;padding:0;box-sizing:border-box}
 body{width:1080px;height:1080px;overflow:hidden;font-family:'Montserrat',sans-serif}
 .post{width:1080px;height:1080px;position:relative;overflow:hidden;display:grid;grid-template-columns:1fr 380px;background:#000}
-/* Fundo */
 .bg{position:absolute;inset:0;background-image:${bgImg};background-size:cover;background-position:center;z-index:0}
 .bg::after{content:'';position:absolute;inset:0;background:linear-gradient(135deg,${bg1}f0 0%,${bg1}d0 40%,${bg2}99 70%,transparent 100%);z-index:1}
-/* Grade */
 .post::before{content:'';position:absolute;inset:0;background-image:linear-gradient(rgba(255,255,255,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.025) 1px,transparent 1px);background-size:54px 54px;z-index:2;pointer-events:none}
-/* Glow accent no canto esquerdo */
 .glow-l{position:absolute;top:-120px;left:-120px;width:500px;height:500px;background:radial-gradient(circle,${accent}30 0%,transparent 65%);z-index:2;pointer-events:none}
-/* Coluna esquerda — copy */
 .col-copy{padding:72px 56px;display:flex;flex-direction:column;justify-content:space-between;position:relative;z-index:4}
 .brand-pill{display:inline-flex;align-items:center;gap:9px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);border-radius:24px;padding:6px 18px;width:fit-content;margin-bottom:0}
 .brand-pill .dot{width:8px;height:8px;border-radius:50%;background:${dotColor};box-shadow:0 0 10px ${dotColor}cc}
@@ -251,15 +300,10 @@ body{width:1080px;height:1080px;overflow:hidden;font-family:'Montserrat',sans-se
 .offer-top{font-size:13px;font-weight:700;color:rgba(255,255,255,.85);letter-spacing:1px;text-transform:uppercase;display:block}
 .offer-main{font-size:28px;font-weight:900;color:#fff;letter-spacing:-.5px;line-height:1;display:block}
 .cta-btn{display:inline-flex;align-items:center;gap:10px;background:rgba(255,255,255,.12);border:1.5px solid rgba(255,255,255,.25);border-radius:10px;padding:14px 28px;color:#fff;font-size:14px;font-weight:700;letter-spacing:.5px;text-decoration:none;width:fit-content;backdrop-filter:blur(4px)}
-.cta-arrow{font-size:16px}
-/* Coluna direita — produto */
 .col-product{position:relative;z-index:4;display:flex;align-items:flex-end;justify-content:center;padding-bottom:0;overflow:hidden}
 .product-glow{position:absolute;bottom:-80px;left:50%;transform:translateX(-50%);width:340px;height:340px;background:radial-gradient(circle,${accent}40 0%,transparent 65%);z-index:0;pointer-events:none}
-.product-shadow{position:absolute;bottom:30px;left:50%;transform:translateX(-50%);width:180px;height:20px;background:radial-gradient(ellipse,rgba(0,0,0,.6) 0%,transparent 70%);z-index:1}
 .product-img{position:relative;z-index:2;width:340px;height:700px;object-fit:contain;mix-blend-mode:multiply;filter:drop-shadow(0 24px 48px rgba(0,0,0,.7)) drop-shadow(0 8px 16px rgba(0,0,0,.4));transform:translateY(20px)}
-/* Linha divisória vertical */
 .vdiv{position:absolute;top:8%;bottom:8%;left:calc(100% - 380px);width:1px;background:linear-gradient(to bottom,transparent,rgba(255,255,255,.15),transparent);z-index:3}
-/* Selo de validade */
 .validity-tag{position:absolute;top:56px;right:56px;background:rgba(0,0,0,.5);border:1px solid rgba(255,255,255,.15);border-radius:8px;padding:6px 14px;font-size:11px;color:rgba(255,255,255,.55);letter-spacing:.5px;z-index:5;backdrop-filter:blur(4px)}
 </style></head><body>
 <div class="post">
@@ -280,12 +324,11 @@ body{width:1080px;height:1080px;overflow:hidden;font-family:'Montserrat',sans-se
         <span class="offer-top">${d.badge_label||"Promoção"}</span>
         <span class="offer-main">${d.badge_value||""} ${d.badge_sup||""}</span>
       </div>
-      <a href="#" class="cta-btn"><span>${d.cta||"Saiba Mais"}</span><span class="cta-arrow">&#8594;</span></a>
+      <a href="#" class="cta-btn"><span>${d.cta||"Saiba Mais"}</span><span>&#8594;</span></a>
     </div>
   </div>
   <div class="col-product">
     <div class="product-glow"></div>
-    <div class="product-shadow"></div>
     <img src="${prodImg}" alt="Produto" class="product-img" onerror="this.style.opacity=0"/>
   </div>
 </div>
@@ -294,7 +337,6 @@ body{width:1080px;height:1080px;overflow:hidden;font-family:'Montserrat',sans-se
 
 // ═══════════════════════════════════════════════════════════════
 // TEMPLATE: LINKEDIN  1200×627
-// Landscape profissional com produto + copy estruturado
 // ═══════════════════════════════════════════════════════════════
 function linkedinTemplate(d){
   const bg1=d.bg1||"#030d1a",bg2=d.bg2||"#0a2d5e";
@@ -315,7 +357,6 @@ body{width:1200px;height:627px;overflow:hidden;font-family:'Montserrat',sans-ser
 .bg::after{content:'';position:absolute;inset:0;background:linear-gradient(100deg,${bg1}f8 0%,${bg1}e0 30%,${bg1}b0 55%,${bg2}80 75%,${bg2}d0 100%);z-index:1}
 .grid-overlay{position:absolute;inset:0;background-image:linear-gradient(rgba(255,255,255,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.025) 1px,transparent 1px);background-size:40px 40px;z-index:2;pointer-events:none}
 .layout{position:relative;z-index:3;width:100%;height:100%;display:grid;grid-template-columns:1fr 420px}
-/* Coluna copy */
 .copy{padding:52px 48px 52px 60px;display:flex;flex-direction:column;justify-content:space-between}
 .top-row{display:flex;align-items:center;gap:12px}
 .brand-chip{display:inline-flex;align-items:center;gap:8px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.18);border-radius:20px;padding:5px 16px}
@@ -331,15 +372,11 @@ body{width:1200px;height:627px;overflow:hidden;font-family:'Montserrat',sans-ser
 .bottom-row{display:flex;align-items:center;gap:16px}
 .cta-primary{background:${accent};color:#fff;font-size:13px;font-weight:700;padding:12px 28px;border-radius:8px;text-decoration:none;letter-spacing:.5px;box-shadow:0 4px 20px ${accent}66;border:1.5px solid rgba(255,255,255,.15)}
 .cta-secondary{color:rgba(255,255,255,.5);font-size:12px;font-weight:500;letter-spacing:.5px;border:1px solid rgba(255,255,255,.15);padding:12px 20px;border-radius:8px;text-decoration:none}
-/* Coluna produto */
 .product-col{position:relative;display:flex;align-items:flex-end;justify-content:center;overflow:hidden}
 .product-glow{position:absolute;bottom:-60px;right:-40px;width:400px;height:400px;background:radial-gradient(circle,${accent}35 0%,transparent 65%);pointer-events:none;z-index:0}
-.product-glow2{position:absolute;top:-40px;right:20px;width:200px;height:200px;background:radial-gradient(circle,${badgeColor}20 0%,transparent 70%);pointer-events:none;z-index:0}
 .product-img{position:relative;z-index:1;width:380px;height:540px;object-fit:contain;mix-blend-mode:multiply;filter:drop-shadow(0 20px 40px rgba(0,0,0,.7)) drop-shadow(0 6px 12px rgba(0,0,0,.4));transform:translateY(16px)}
 .vdiv{position:absolute;top:10%;bottom:10%;left:calc(100% - 420px);width:1px;background:linear-gradient(to bottom,transparent,rgba(255,255,255,.12),transparent);z-index:3}
-/* Badge de oferta — canto superior direito */
 .offer-badge{position:absolute;top:44px;right:44px;background:linear-gradient(135deg,${badgeColor},${badgeColor}bb);border-radius:12px;padding:12px 18px;text-align:center;box-shadow:0 6px 20px ${badgeColor}88;z-index:5;min-width:120px}
-.offer-badge::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,.4),transparent)}
 .offer-v{font-size:32px;font-weight:900;color:#fff;line-height:1;letter-spacing:-1px}
 .offer-l{font-size:9px;font-weight:600;color:rgba(255,255,255,.85);letter-spacing:2px;text-transform:uppercase;margin-top:2px}
 </style></head><body>
@@ -366,7 +403,6 @@ body{width:1200px;height:627px;overflow:hidden;font-family:'Montserrat',sans-ser
     </div>
     <div class="product-col">
       <div class="product-glow"></div>
-      <div class="product-glow2"></div>
       <img src="${prodImg}" alt="Produto" class="product-img" onerror="this.style.opacity=0"/>
       <div class="offer-badge">
         <div class="offer-v">${d.badge_value||""}<sup style="font-size:14px">${d.badge_sup||""}</sup></div>
@@ -379,7 +415,7 @@ body{width:1200px;height:627px;overflow:hidden;font-family:'Montserrat',sans-ser
 }
 
 // ═══════════════════════════════════════════════════════════════
-// TEMPLATE: E-MAIL MARKETING  (600px, CSS inline)
+// TEMPLATE: E-MAIL MARKETING  600px
 // ═══════════════════════════════════════════════════════════════
 function emailTemplate(d){
   const accent=d.accent||"#0057b8";
@@ -393,35 +429,25 @@ function emailTemplate(d){
 <title>${d.subject||"Oferta Especial"}</title>
 </head>
 <body style="margin:0;padding:0;background:#f1f1f1;font-family:Arial,sans-serif">
-<!-- Preheader -->
 <div style="display:none;max-height:0;overflow:hidden;color:#f1f1f1">${d.preheader||d.subline||""}</div>
-<!-- Wrapper -->
 <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f1f1f1">
 <tr><td align="center" style="padding:24px 12px">
-<!-- Container -->
 <table width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;border-radius:16px;overflow:hidden;box-shadow:0 4px 32px rgba(0,0,0,.12)">
-
-<!-- HERO HEADER -->
-<tr><td style="background:${bg1};padding:0;position:relative">
+<tr><td style="background:${bg1};padding:0">
   <table width="100%" cellpadding="0" cellspacing="0" border="0">
   <tr>
     <td width="340" style="padding:48px 36px 0 40px;vertical-align:top">
-      <!-- Brand chip -->
       <table cellpadding="0" cellspacing="0" border="0" style="margin-bottom:20px">
       <tr><td style="background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);border-radius:20px;padding:5px 16px">
         <span style="font-family:Arial,sans-serif;font-size:11px;font-weight:700;color:rgba(255,255,255,.75);letter-spacing:2px;text-transform:uppercase">${d.brand||"Marca"}</span>
       </td></tr></table>
-      <!-- Headline -->
       <h1 style="font-family:Arial,sans-serif;font-size:34px;font-weight:900;color:#ffffff;line-height:1.1;letter-spacing:-1px;margin:0 0 12px 0">${d.headline} <span style="color:${accent}">${d.highlight||""}</span></h1>
-      <!-- Subline -->
       <p style="font-family:Arial,sans-serif;font-size:14px;font-weight:600;color:rgba(255,255,255,.6);margin:0 0 20px 0;letter-spacing:.3px">${d.subline||""}</p>
-      <!-- Badge oferta -->
       <table cellpadding="0" cellspacing="0" border="0" style="margin-bottom:24px">
       <tr><td style="background:${badgeColor};border-radius:12px;padding:12px 20px;text-align:center;box-shadow:0 4px 16px ${badgeColor}88">
         <div style="font-family:Arial,sans-serif;font-size:28px;font-weight:900;color:#fff;line-height:1;letter-spacing:-1px">${d.badge_value||""} ${d.badge_sup||""}</div>
         <div style="font-family:Arial,sans-serif;font-size:10px;font-weight:700;color:rgba(255,255,255,.85);letter-spacing:2px;text-transform:uppercase;margin-top:4px">${d.badge_label||"Desconto"}</div>
       </td></tr></table>
-      <!-- CTA -->
       <table cellpadding="0" cellspacing="0" border="0">
       <tr><td style="background:${accent};border-radius:8px;box-shadow:0 4px 16px ${accent}88">
         <a href="#" style="display:inline-block;padding:14px 32px;font-family:Arial,sans-serif;font-size:14px;font-weight:700;color:#fff;text-decoration:none;letter-spacing:.5px">${d.cta||"Saiba Mais"} &#8594;</a>
@@ -431,18 +457,14 @@ function emailTemplate(d){
       <img src="${prodImg}" alt="Produto" width="240" style="display:block;width:240px;max-width:100%;margin:0 auto;object-fit:contain;mix-blend-mode:multiply;padding-top:24px" onerror="this.style.display='none'"/>
     </td>
   </tr>
-  <!-- Validity bar -->
   <tr><td colspan="2" style="background:rgba(255,255,255,.05);border-top:1px solid rgba(255,255,255,.08);padding:10px 40px">
     <p style="font-family:Arial,sans-serif;font-size:11px;color:rgba(255,255,255,.4);margin:0;letter-spacing:.5px">&#x23F1; ${d.validity||"Oferta por tempo limitado"}</p>
   </td></tr>
   </table>
 </td></tr>
-
-<!-- DESCRIPTION BLOCK -->
 <tr><td style="background:#fff;padding:36px 40px">
   <h2 style="font-family:Arial,sans-serif;font-size:20px;font-weight:700;color:#1a1a1a;margin:0 0 12px 0">${d.section_title||"Por que escolher?"}</h2>
   <p style="font-family:Arial,sans-serif;font-size:14px;color:#555;line-height:1.7;margin:0 0 20px 0">${d.description||""}</p>
-  <!-- Features -->
   <table width="100%" cellpadding="0" cellspacing="0" border="0">
   <tr>
     <td width="48%" style="vertical-align:top;padding:0 8px 0 0">
@@ -460,8 +482,6 @@ function emailTemplate(d){
   </tr>
   </table>
 </td></tr>
-
-<!-- SECONDARY CTA -->
 <tr><td style="background:${bg1};padding:28px 40px;text-align:center">
   <p style="font-family:Arial,sans-serif;font-size:14px;color:rgba(255,255,255,.6);margin:0 0 16px 0">${d.footer_text||"Fale com nosso time de especialistas"}</p>
   <table cellpadding="0" cellspacing="0" border="0" align="center">
@@ -469,19 +489,16 @@ function emailTemplate(d){
     <a href="#" style="display:inline-block;padding:12px 28px;font-family:Arial,sans-serif;font-size:13px;font-weight:600;color:rgba(255,255,255,.75);text-decoration:none;letter-spacing:.5px">${d.cta2||"Entre em Contato"}</a>
   </td></tr></table>
 </td></tr>
-
-<!-- FOOTER -->
 <tr><td style="background:#f8f8f8;padding:20px 40px;text-align:center;border-top:1px solid #e8e8e8">
   <p style="font-family:Arial,sans-serif;font-size:11px;color:#aaa;margin:0;line-height:1.6">${d.brand||"Marca"} &bull; ${d.address||""}<br>Para cancelar o recebimento deste e-mail, <a href="#" style="color:#aaa">clique aqui</a>.</p>
 </td></tr>
-
 </table>
 </td></tr></table>
 </body></html>`;
 }
 
 // ═══════════════════════════════════════════════════════════════
-// TEMPLATE: LANDING PAGE  full responsive
+// TEMPLATE: LANDING PAGE  responsive
 // ═══════════════════════════════════════════════════════════════
 function landingTemplate(d){
   const accent=d.accent||"#0057b8",accentLight=d.accentLight||"#4da6ff";
@@ -489,8 +506,6 @@ function landingTemplate(d){
   const badgeColor=d.badgeColor||"#cc0000",dotColor=d.dotColor||"#cc0000";
   const bgImg=d.bg_image_url?`url('${d.bg_image_url}')`:`url('https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?w=1600&q=80')`;
   const prodImg=d.product_img_1||"https://images.unsplash.com/photo-1532187863486-abf9dbad1b69?w=600&q=80";
-  const prodImg2=d.product_img_2||"https://images.unsplash.com/photo-1581092160607-ee22621dd758?w=600&q=80";
-  const prodImg3=d.product_img_3||"https://images.unsplash.com/photo-1554475901-4538ddfbccc2?w=600&q=80";
   return `<!DOCTYPE html>
 <html lang="pt-BR"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -498,456 +513,341 @@ function landingTemplate(d){
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;900&display=swap" rel="stylesheet">
 <style>
-*{margin:0;padding:0;box-sizing:border-box}
-html{scroll-behavior:smooth}
-body{font-family:'Montserrat',sans-serif;background:#fff;color:#1a1a1a;overflow-x:hidden}
-a{text-decoration:none;color:inherit}
-/* NAV */
+*{margin:0;padding:0;box-sizing:border-box}html{scroll-behavior:smooth}
+body{font-family:'Montserrat',sans-serif;background:#fff;color:#1a1a1a;overflow-x:hidden}a{text-decoration:none;color:inherit}
 nav{position:fixed;top:0;left:0;right:0;z-index:100;background:rgba(0,0,0,.7);backdrop-filter:blur(12px);border-bottom:1px solid rgba(255,255,255,.08)}
 .nav-inner{max-width:1160px;margin:0 auto;padding:0 32px;height:64px;display:flex;align-items:center;justify-content:space-between}
 .nav-brand{display:flex;align-items:center;gap:10px}
 .nav-dot{width:8px;height:8px;border-radius:50%;background:${dotColor};box-shadow:0 0 10px ${dotColor}}
 .nav-name{font-size:15px;font-weight:700;color:#fff;letter-spacing:1.5px;text-transform:uppercase}
-.nav-cta{background:${accent};color:#fff;font-size:13px;font-weight:700;padding:10px 24px;border-radius:8px;letter-spacing:.5px;box-shadow:0 4px 16px ${accent}66}
-/* HERO */
+.nav-cta{background:${accent};color:#fff;font-size:13px;font-weight:700;padding:10px 24px;border-radius:8px;letter-spacing:.5px}
 .hero{min-height:100vh;position:relative;display:flex;align-items:center;background-image:${bgImg};background-size:cover;background-position:center;padding-top:64px}
 .hero::before{content:'';position:absolute;inset:0;background:linear-gradient(105deg,${bg1}f8 0%,${bg1}d0 40%,${bg2}99 70%,transparent 100%)}
-.hero::after{content:'';position:absolute;inset:0;background-image:linear-gradient(rgba(255,255,255,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.025) 1px,transparent 1px);background-size:50px 50px;pointer-events:none}
 .hero-inner{position:relative;z-index:2;max-width:1160px;margin:0 auto;padding:80px 32px;display:grid;grid-template-columns:1fr 480px;gap:40px;align-items:center}
 .hero-copy{display:flex;flex-direction:column;gap:20px}
 .hero-chip{display:inline-flex;align-items:center;gap:9px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);border-radius:24px;padding:6px 18px;width:fit-content}
-.hero-chip .dot{width:8px;height:8px;border-radius:50%;background:${dotColor};box-shadow:0 0 10px ${dotColor}cc}
+.hero-chip .dot{width:8px;height:8px;border-radius:50%;background:${dotColor}}
 .hero-chip span{font-size:11px;font-weight:700;color:rgba(255,255,255,.8);letter-spacing:2px;text-transform:uppercase}
-.hero-eyebrow{font-size:13px;font-weight:600;color:${accentLight};letter-spacing:2px;text-transform:uppercase}
 .hero-h1{font-size:clamp(36px,4vw,64px);font-weight:900;color:#fff;line-height:1.05;letter-spacing:-2px}
 .hero-h1 em{font-style:normal;color:${accentLight}}
-.hero-bar{width:56px;height:3px;background:linear-gradient(90deg,${accent},${accentLight});border-radius:2px}
-.hero-desc{font-size:16px;color:rgba(255,255,255,.55);line-height:1.7;max-width:520px}
-.hero-actions{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
-.btn-primary{background:${accent};color:#fff;font-size:14px;font-weight:700;padding:14px 32px;border-radius:10px;letter-spacing:.5px;box-shadow:0 6px 24px ${accent}88;border:1.5px solid rgba(255,255,255,.15)}
-.btn-secondary{color:rgba(255,255,255,.6);font-size:13px;font-weight:500;padding:14px 24px;border:1.5px solid rgba(255,255,255,.15);border-radius:10px}
-.hero-badge{background:linear-gradient(135deg,${badgeColor},${badgeColor}cc);border-radius:12px;padding:14px 24px;display:inline-block;box-shadow:0 6px 24px ${badgeColor}88;border-top:1px solid rgba(255,255,255,.2)}
-.hero-badge-v{font-size:36px;font-weight:900;color:#fff;line-height:1;letter-spacing:-1px}
-.hero-badge-l{font-size:10px;font-weight:700;color:rgba(255,255,255,.85);letter-spacing:2px;text-transform:uppercase;margin-top:4px}
-.hero-validity{font-size:11px;color:rgba(255,255,255,.35);letter-spacing:.5px;margin-top:8px}
-/* Hero produto */
+.hero-desc{font-size:16px;color:rgba(255,255,255,.55);line-height:1.7}
+.btn-primary{background:${accent};color:#fff;font-size:14px;font-weight:700;padding:14px 32px;border-radius:10px;box-shadow:0 6px 24px ${accent}88}
 .hero-product{position:relative;display:flex;align-items:flex-end;justify-content:center;min-height:440px}
-.hero-product-glow{position:absolute;bottom:-40px;left:50%;transform:translateX(-50%);width:360px;height:360px;background:radial-gradient(circle,${accent}40 0%,transparent 65%);pointer-events:none}
-.hero-product-img{position:relative;z-index:1;max-width:400px;width:100%;object-fit:contain;mix-blend-mode:multiply;filter:drop-shadow(0 24px 48px rgba(0,0,0,.7))}
-/* FEATURES */
+.hero-product-img{max-width:400px;width:100%;object-fit:contain;mix-blend-mode:multiply;filter:drop-shadow(0 24px 48px rgba(0,0,0,.7))}
 .features{background:#f7f9fb;padding:80px 32px}
 .section-inner{max-width:1160px;margin:0 auto}
-.section-label{font-size:12px;font-weight:700;color:${accent};letter-spacing:2.5px;text-transform:uppercase;margin-bottom:10px}
 .section-title{font-size:clamp(28px,3vw,44px);font-weight:900;color:#1a1a1a;line-height:1.1;letter-spacing:-1px;margin-bottom:48px}
-.section-title em{font-style:normal;color:${accent}}
 .features-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:24px}
-.feat-card{background:#fff;border-radius:16px;padding:28px 24px;border:1px solid rgba(0,0,0,.06);box-shadow:0 2px 12px rgba(0,0,0,.04)}
-.feat-num{font-size:44px;font-weight:900;color:${accent};opacity:.15;line-height:1;margin-bottom:8px;letter-spacing:-2px}
+.feat-card{background:#fff;border-radius:16px;padding:28px 24px;border:1px solid rgba(0,0,0,.06)}
 .feat-title{font-size:16px;font-weight:700;color:#1a1a1a;margin-bottom:8px}
 .feat-desc{font-size:13px;color:#777;line-height:1.65}
-/* PRODUCTS */
-.products{padding:80px 32px;background:#fff}
-.products-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:28px;margin-top:48px}
-.prod-card{background:#fff;border:1px solid rgba(0,0,0,.07);border-radius:16px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.05)}
-.prod-card-img{height:220px;background:${bg1};display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}
-.prod-card-img::before{content:'';position:absolute;inset:0;background:linear-gradient(135deg,${bg1},${bg2})}
-.prod-card-img img{position:relative;z-index:1;max-width:80%;max-height:180px;object-fit:contain;mix-blend-mode:multiply;filter:drop-shadow(0 8px 20px rgba(0,0,0,.5))}
-.prod-card-body{padding:20px 20px 24px}
-.prod-card-tag{font-size:10px;font-weight:700;color:${accent};text-transform:uppercase;letter-spacing:1.5px;margin-bottom:6px}
-.prod-card-name{font-size:16px;font-weight:700;color:#1a1a1a;margin-bottom:8px}
-.prod-card-desc{font-size:12px;color:#888;line-height:1.6;margin-bottom:16px}
-.prod-card-cta{display:inline-block;background:${accent};color:#fff;font-size:12px;font-weight:700;padding:9px 20px;border-radius:7px;letter-spacing:.5px}
-/* CTA SECTION */
-.cta-section{background:${bg1};padding:80px 32px;text-align:center;position:relative;overflow:hidden}
-.cta-section::before{content:'';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:600px;height:600px;background:radial-gradient(circle,${accent}20 0%,transparent 65%);pointer-events:none}
-.cta-section .section-inner{position:relative;z-index:1}
-.cta-tagline{font-size:13px;font-weight:600;color:${accentLight};letter-spacing:2px;text-transform:uppercase;margin-bottom:16px}
-.cta-h2{font-size:clamp(28px,3.5vw,52px);font-weight:900;color:#fff;letter-spacing:-1.5px;line-height:1.05;margin-bottom:16px}
-.cta-h2 em{font-style:normal;color:${accentLight}}
-.cta-sub{font-size:15px;color:rgba(255,255,255,.5);margin-bottom:36px;line-height:1.6}
-.cta-btns{display:flex;gap:16px;justify-content:center;flex-wrap:wrap}
-/* FOOTER */
+.cta-section{background:${bg1};padding:80px 32px;text-align:center}
+.cta-h2{font-size:clamp(28px,3.5vw,52px);font-weight:900;color:#fff;letter-spacing:-1.5px;margin-bottom:16px}
 footer{background:#0a0a0a;padding:32px;text-align:center;border-top:1px solid rgba(255,255,255,.06)}
 footer p{font-size:12px;color:rgba(255,255,255,.3);letter-spacing:.5px}
-@media(max-width:768px){
-  .hero-inner,.features-grid,.products-grid{grid-template-columns:1fr}
-  .hero-product{min-height:260px}
-  .hero-product-img{max-width:260px}
-}
+@media(max-width:768px){.hero-inner,.features-grid{grid-template-columns:1fr}.hero-product{min-height:260px}.hero-product-img{max-width:260px}}
 </style></head><body>
 <nav><div class="nav-inner">
   <div class="nav-brand"><div class="nav-dot"></div><span class="nav-name">${d.brand||"Marca"}</span></div>
   <a href="#cta" class="nav-cta">${d.cta||"Solicitar Proposta"}</a>
 </div></nav>
-
 <section class="hero">
 <div class="hero-inner">
   <div class="hero-copy">
     <div class="hero-chip"><span class="dot"></span><span>${d.brand||"Marca"}</span></div>
-    <span class="hero-eyebrow">${d.eyebrow||d.tag||"Oferta Exclusiva"}</span>
     <h1 class="hero-h1">${d.headline}<br><em>${d.highlight||""}</em></h1>
-    <div class="hero-bar"></div>
     <p class="hero-desc">${d.description||d.subline||""}</p>
-    <div>
-      <div class="hero-badge">
-        <div class="hero-badge-v">${d.badge_value||""} ${d.badge_sup||""}</div>
-        <div class="hero-badge-l">${d.badge_label||"Promoção"}</div>
-      </div>
-      <p class="hero-validity">&#x23F1; ${d.validity||"Válido por tempo limitado"}</p>
-    </div>
-    <div class="hero-actions">
-      <a href="#cta" class="btn-primary">${d.cta||"Solicitar Proposta"}</a>
-      <a href="#products" class="btn-secondary">Ver Produtos &#8594;</a>
-    </div>
+    <a href="#cta" class="btn-primary">${d.cta||"Solicitar Proposta"}</a>
   </div>
   <div class="hero-product">
-    <div class="hero-product-glow"></div>
     <img src="${prodImg}" alt="Produto" class="hero-product-img" onerror="this.style.opacity=0"/>
   </div>
 </div>
 </section>
-
-<section class="features">
-<div class="section-inner">
-  <p class="section-label">Por Que ${d.brand||"Nós"}?</p>
-  <h2 class="section-title">Qualidade que você pode <em>confiar</em></h2>
+<section class="features"><div class="section-inner">
+  <h2 class="section-title">${d.section_title||"Por que nos escolher?"}</h2>
   <div class="features-grid">
-    <div class="feat-card"><div class="feat-num">01</div><h3 class="feat-title">${d.feat1_title||"Precisão"}</h3><p class="feat-desc">${d.feat1_desc||"Tecnologia de ponta para resultados precisos e repetíveis no seu laboratório."}</p></div>
-    <div class="feat-card"><div class="feat-num">02</div><h3 class="feat-title">${d.feat2_title||"Durabilidade"}</h3><p class="feat-desc">${d.feat2_desc||"Construção robusta e materiais de alta qualidade para uso intensivo."}</p></div>
-    <div class="feat-card"><div class="feat-num">03</div><h3 class="feat-title">${d.feat3_title||"Suporte Técnico"}</h3><p class="feat-desc">${d.feat3_desc||"Equipe especializada disponível para assistência técnica e treinamento."}</p></div>
+    <div class="feat-card"><div class="feat-title">${d.feat1_title||"Qualidade"}</div><p class="feat-desc">${d.feat1_desc||""}</p></div>
+    <div class="feat-card"><div class="feat-title">${d.feat2_title||"Suporte"}</div><p class="feat-desc">${d.feat2_desc||""}</p></div>
+    <div class="feat-card"><div class="feat-title">${d.feat3_title||"Entrega"}</div><p class="feat-desc">${d.feat3_desc||""}</p></div>
   </div>
-</div>
-</section>
-
-<section class="products" id="products">
-<div class="section-inner">
-  <p class="section-label">Linha de Produtos</p>
-  <h2 class="section-title">${d.products_title||"Equipamentos em <em>Destaque</em>"}</h2>
-  <div class="products-grid">
-    <div class="prod-card"><div class="prod-card-img"><img src="${prodImg}" alt="Produto 1" onerror="this.style.opacity=0"/></div><div class="prod-card-body"><p class="prod-card-tag">${d.brand||"Marca"}</p><h3 class="prod-card-name">${d.prod1_name||d.headline||"Produto"}</h3><p class="prod-card-desc">${d.prod1_desc||d.description||""}</p><a href="#cta" class="prod-card-cta">Solicitar</a></div></div>
-    <div class="prod-card"><div class="prod-card-img"><img src="${prodImg2}" alt="Produto 2" onerror="this.style.opacity=0"/></div><div class="prod-card-body"><p class="prod-card-tag">${d.brand||"Marca"}</p><h3 class="prod-card-name">${d.prod2_name||d.subline||"Produto"}</h3><p class="prod-card-desc">${d.prod2_desc||d.description||""}</p><a href="#cta" class="prod-card-cta">Solicitar</a></div></div>
-    <div class="prod-card"><div class="prod-card-img"><img src="${prodImg3}" alt="Produto 3" onerror="this.style.opacity=0"/></div><div class="prod-card-body"><p class="prod-card-tag">${d.brand||"Marca"}</p><h3 class="prod-card-name">${d.prod3_name||"Produto"}</h3><p class="prod-card-desc">${d.prod3_desc||d.description||""}</p><a href="#cta" class="prod-card-cta">Solicitar</a></div></div>
-  </div>
-</div>
-</section>
-
-<section class="cta-section" id="cta">
-<div class="section-inner">
-  <p class="cta-tagline">${d.eyebrow||"Aproveite Agora"}</p>
-  <h2 class="cta-h2">${d.headline} <em>${d.highlight||""}</em></h2>
-  <p class="cta-sub">${d.footer_text||"Entre em contato com nossa equipe e receba uma proposta personalizada."}</p>
-  <div class="cta-btns">
-    <a href="#" class="btn-primary" style="font-size:15px;padding:16px 40px">${d.cta||"Solicitar Proposta"}</a>
-    <a href="#" class="btn-secondary" style="font-size:13px;padding:16px 28px;color:rgba(255,255,255,.5)">${d.cta2||"WhatsApp"}</a>
-  </div>
-</div>
-</section>
-
-<footer><p>&copy; ${new Date().getFullYear()} ${d.brand||"Marca"} &bull; Todos os direitos reservados</p></footer>
+</div></section>
+<section id="cta" class="cta-section"><div class="section-inner">
+  <h2 class="cta-h2">${d.cta_title||"Pronto para começar?"}</h2>
+  <p style="color:rgba(255,255,255,.5);margin-bottom:32px;font-size:15px">${d.cta_sub||""}</p>
+  <a href="#" class="btn-primary">${d.cta||"Solicitar Proposta"}</a>
+</div></section>
+<footer><p>${d.brand||"Marca"} &copy; ${new Date().getFullYear()}</p></footer>
 </body></html>`;
 }
 
 // ═══════════════════════════════════════════════════════════════
-// SYSTEM PROMPTS
+// PIPELINE FASE 2 — NÚCLEO DO AGENTE
+// Orquestra: detect → enrich prompt → ollama → validate → template
 // ═══════════════════════════════════════════════════════════════
-const SYSTEM_PROMPTS={
-  email:(brandCtx)=>`Você é um especialista em e-mail marketing. A partir do briefing recebido, retorne APENAS um objeto JSON válido — sem explicações, sem markdown, sem texto extra.
-${brandCtx?`\nIDENTIDADE DA MARCA:\n${brandCtx}\n`:""}
-Campos:
-{
-  "brand":"Nome da marca",
-  "subject":"Assunto do e-mail (máx 60 chars)",
-  "preheader":"Texto de previsualização (máx 80 chars)",
-  "headline":"Título principal (máx 5 palavras)",
-  "highlight":"Palavra em destaque (máx 3 palavras)",
-  "subline":"Subtítulo (máx 10 palavras)",
-  "description":"Parágrafo principal (máx 35 palavras)",
-  "badge_value":"Número ou texto (ex: COMPRE 3)",
-  "badge_sup":"Sufixo (ex: % ou vazio)",
-  "badge_label":"Label badge (ex: LEVE 4)",
-  "validity":"Texto de validade",
-  "cta":"CTA primário (máx 4 palavras)",
-  "cta2":"CTA secundário (máx 4 palavras)",
-  "section_title":"Título da seção de features",
-  "feat1_title":"Feature 1 título","feat1_desc":"Feature 1 descrição",
-  "feat2_title":"Feature 2 título","feat2_desc":"Feature 2 descrição",
-  "footer_text":"Texto do rodapé (máx 12 palavras)",
-  "address":"Endereço ou cidade",
-  "bg_search_query":"Query fundo em inglês",
-  "search_query_1":"Query produto 1 em inglês"
+
+/**
+ * Constrói o system prompt enriquecido com os engines da Fase 1.
+ */
+function buildEnrichedSystemPrompt(contentType, platform) {
+  const dsBlock  = buildDesignSystemPrompt({ contentType, platform });
+  const seoBlock = buildSEOPromptBlock(contentType);
+  const schema   = JSON.stringify(getExpectedJSONSchema(contentType), null, 2);
+
+  return `Você é BrieFlow, um agente especialista em marketing de alta performance para o setor laboratorial/científico.
+Gere conteúdos persuasivos, técnicos e visualmente precisos.
+
+${dsBlock}
+
+${seoBlock}
+
+## SAÍDA OBRIGATÓRIA
+Responda SOMENTE com um objeto JSON válido (sem markdown, sem texto extra).
+Schema esperado:
+${schema}
+
+Regras críticas:
+- headline: máximo 8 palavras, impactante, focado no benefício
+- subline / description: copy persuasivo com argumento técnico
+- badge_value: apenas o número (ex: "15")
+- badge_sup: apenas a unidade (ex: "%")
+- cta: verbo de ação direto (ex: "Solicitar Proposta")
+- Se não houver oferta numérica no briefing, omita badge_value e badge_sup`;
 }
-Retorne SOMENTE o JSON.`,
 
-  banner:(brandCtx)=>`Você é um copywriter especialista em marketing visual. Retorne APENAS um objeto JSON válido.
-${brandCtx?`\nIDENTIDADE DA MARCA (CORES OBRIGATÓRIAS):\n${brandCtx}\n`:""}
-{
-  "brand":"Nome da marca",
-  "headline":"Título (máx 4 palavras)",
-  "highlight":"Destaque (máx 3 palavras)",
-  "subline":"Subtítulo (máx 8 palavras)",
-  "description":"Descrição (máx 20 palavras)",
-  "badge_value":"Ex: COMPRE 3",
-  "badge_sup":"Ex: % ou vazio",
-  "badge_label":"Ex: LEVE 4",
-  "validity":"Texto de validade",
-  "cta":"CTA (máx 5 palavras)",
-  "bg_search_query":"Query fundo em inglês",
-  "search_query_1":"Query produto 1",
-  "search_query_2":"Query produto 2",
-  "search_query_3":"Query produto 3"
-}
-Retorne SOMENTE o JSON.`,
+/**
+ * Chama a API do Ollama com o prompt montado.
+ */
+async function callOllama(systemPrompt, userMessage, history = [], model = DEFAULT_MODEL) {
+  const messages = [
+    { role: "system", content: systemPrompt },
+    ...history,
+    { role: "user",   content: userMessage },
+  ];
 
-  instagram:(brandCtx)=>`Você é copywriter de social media. Retorne APENAS um objeto JSON válido.
-${brandCtx?`\nIDENTIDADE DA MARCA:\n${brandCtx}\n`:""}
-{
-  "brand":"Nome da marca",
-  "tag":"Tag curta",
-  "headline":"Título (máx 3 palavras)",
-  "highlight":"Destaque (máx 2 palavras)",
-  "subline":"Subtítulo (máx 12 palavras)",
-  "badge_value":"Ex: COMPRE 3",
-  "badge_sup":"Ex: %",
-  "badge_label":"Ex: LEVE 4",
-  "validity":"Texto de validade",
-  "cta":"CTA (máx 4 palavras)",
-  "bg_search_query":"Query fundo em inglês",
-  "search_query_1":"Query produto em inglês"
-}
-Retorne SOMENTE o JSON.`,
-
-  linkedin:(brandCtx)=>`Você é copywriter de marketing B2B. Retorne APENAS um objeto JSON válido.
-${brandCtx?`\nIDENTIDADE DA MARCA:\n${brandCtx}\n`:""}
-{
-  "brand":"Nome da marca",
-  "category":"Categoria (ex: Equipamentos Laboratoriais)",
-  "eyebrow":"Eyebrow (máx 5 palavras)",
-  "headline":"Título (máx 5 palavras)",
-  "highlight":"Destaque (máx 2 palavras)",
-  "subline":"Subtítulo (máx 8 palavras)",
-  "description":"Corpo do texto (máx 25 palavras)",
-  "badge_value":"Ex: 15",
-  "badge_sup":"Ex: %",
-  "badge_label":"Ex: Desconto",
-  "validity":"Texto do CTA secundário (máx 4 palavras)",
-  "cta":"CTA principal (máx 4 palavras)",
-  "bg_search_query":"Query fundo em inglês",
-  "search_query_1":"Query produto em inglês"
-}
-Retorne SOMENTE o JSON.`,
-
-  landing:(brandCtx)=>`Você é especialista em landing pages de conversão. Retorne APENAS um objeto JSON válido.
-${brandCtx?`\nIDENTIDADE DA MARCA:\n${brandCtx}\n`:""}
-{
-  "brand":"Nome da marca",
-  "eyebrow":"Eyebrow (máx 5 palavras)",
-  "headline":"H1 principal (máx 5 palavras)",
-  "highlight":"Palavra de destaque (máx 3 palavras)",
-  "subline":"Subtítulo (máx 10 palavras)",
-  "description":"Parágrafo hero (máx 30 palavras)",
-  "badge_value":"Texto oferta","badge_sup":"","badge_label":"Label oferta",
-  "validity":"Validade da oferta",
-  "cta":"CTA principal","cta2":"CTA secundário",
-  "feat1_title":"Feature 1","feat1_desc":"Descrição feature 1 (máx 20 palavras)",
-  "feat2_title":"Feature 2","feat2_desc":"Descrição feature 2 (máx 20 palavras)",
-  "feat3_title":"Feature 3","feat3_desc":"Descrição feature 3 (máx 20 palavras)",
-  "products_title":"Título da seção de produtos",
-  "prod1_name":"Nome produto 1","prod1_desc":"Desc produto 1",
-  "prod2_name":"Nome produto 2","prod2_desc":"Desc produto 2",
-  "prod3_name":"Nome produto 3","prod3_desc":"Desc produto 3",
-  "footer_text":"Texto CTA final (máx 15 palavras)",
-  "bg_search_query":"Query fundo em inglês",
-  "search_query_1":"Query produto 1 em inglês",
-  "search_query_2":"Query produto 2 em inglês",
-  "search_query_3":"Query produto 3 em inglês"
-}
-Retorne SOMENTE o JSON.`,
-
-  datasheet:`Você é especialista em marketing técnico. Gere uma ficha técnica em Markdown com: Visão Geral, Características, Especificações (tabela), Benefícios, Casos de Uso, CTA. Português do Brasil.`,
-  text:`Você é copywriter sênior. Escreva conteúdo persuasivo em português do Brasil. Use Markdown quando ajudar.`,
-};
-
-// ═══════════════════════════════════════════════════════════════
-// EXPRESS
-// ═══════════════════════════════════════════════════════════════
-const app=express();
-app.use(express.json());
-app.use(express.static(path.join(__dirname,"dist/client")));
-
-async function ollamaJSON(prompt,model){
-  const res=await fetch(`${OLLAMA_URL}/api/generate`,{
-    method:"POST",
-    headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({model,prompt,stream:false,options:{num_predict:900,temperature:0.2}}),
+  const res = await fetch(`${OLLAMA_URL}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model, messages, stream: false }),
   });
-  if(!res.ok) throw new Error(`Ollama ${res.status}`);
-  const{response}=await res.json();
-  const match=response.match(/\{[\s\S]*\}/);
-  if(!match) throw new Error("JSON inválido: "+response.slice(0,200));
-  return JSON.parse(match[0]);
+
+  if (!res.ok) throw new Error(`Ollama HTTP ${res.status}: ${await res.text()}`);
+  const json = await res.json();
+  return json.message?.content ?? "";
 }
 
-app.post("/api/chat",async(req,res)=>{
-  const{prompt,intent="text",model=DEFAULT_MODEL}=req.body??{};
-  if(!prompt?.trim()) return res.status(400).json({error:"Campo 'prompt' é obrigatório"});
-  console.log(`[chat] intent=${intent} model=${model} prompt=${prompt.slice(0,80)}`);
+/**
+ * Extrai JSON da resposta do modelo (tolerante a markdown fences).
+ */
+function extractJSON(raw) {
+  const stripped = raw.replace(/```json\s*/gi, "").replace(/```/g, "").trim();
+  const start = stripped.indexOf("{");
+  const end   = stripped.lastIndexOf("}");
+  if (start === -1 || end === -1) throw new Error("JSON não encontrado na resposta do modelo");
+  return JSON.parse(stripped.slice(start, end + 1));
+}
 
-  // ── TEMPLATE INTENTS ──
-  if(TEMPLATE_INTENTS.has(intent)||intent==="email"||intent==="landing"){
-    const brandIdentity=detectBrand(prompt);
-    const brandCtx=[
-      `Marca: ${brandIdentity.displayName||("(genérica)")}`,
-      `Paleta: ${brandIdentity.palette}`,
-      `bg1: ${brandIdentity.bg1}`,
-      `bg2: ${brandIdentity.bg2}`,
-      `accent: ${brandIdentity.accent}`,
-    ].join("\n");
-    console.log(`[brand] ${brandIdentity.displayName||"genérica"} | ${brandIdentity.palette}`);
+/**
+ * Pipeline completo: dado um sessionId + mensagem → retorna HTML + metadados.
+ */
+async function runAgentPipeline(sessionId, userMessage, model) {
+  const session = getSession(sessionId);
 
-    const systemFn=SYSTEM_PROMPTS[intent];
-    const systemPrompt=typeof systemFn==="function"?systemFn(brandCtx):systemFn;
-    const fullPrompt=`${systemPrompt}\n\nBriefing:\n${prompt.trim()}`;
+  // 1. Detectar tipo de conteúdo
+  const detected  = detectContentFormat(userMessage);
+  const contentType = detected.type !== "generic" ? detected.type : "banner";
+  const platform    = detected.platform;
+  console.log(`[PHASE2] Sessão ${sessionId} | tipo: ${contentType} | plataforma: ${platform} | confiança: ${detected.confidence}`);
 
-    let data;
-    try{
-      data=await ollamaJSON(fullPrompt,model);
-      console.log(`[chat] JSON:`,JSON.stringify(data).slice(0,200));
-    }catch(err){
-      console.error(`[chat] ERRO JSON:`,err.message);
-      return res.status(502).json({error:`Erro ao gerar dados: ${err.message}`});
+  // 2. Detectar marca
+  const brand = detectBrand(userMessage);
+  console.log(`[PHASE2] Marca detectada: ${brand.displayName || "genérica"}`);
+
+  // 3. Buscar imagens em paralelo com o Ollama
+  let productImgs = [null, null, null];
+  let bgImg = null;
+  const imgPromise = (async () => {
+    bgImg = await searchOneImage(brand.bgSearchQuery);
+    if (brand.productQueries) {
+      productImgs = await searchProductImages(brand.productQueries);
     }
+  })();
 
-    // Aplica identidade da marca
-    data.bg1=brandIdentity.bg1;
-    data.bg2=brandIdentity.bg2;
-    data.accent=brandIdentity.accent;
-    data.accentLight=brandIdentity.accentLight;
-    data.badgeColor=brandIdentity.badgeColor;
-    data.dotColor=brandIdentity.dotColor;
+  // 4. Montar system prompt enriquecido (Fase 1)
+  const systemPrompt = buildEnrichedSystemPrompt(contentType, platform);
 
-    // Busca imagens
-    const needsImages=["banner","instagram","linkedin","landing"].includes(intent);
-    if(needsImages){
-      const bgQuery=data.bg_search_query||brandIdentity.bgSearchQuery;
-      let q1,q2,q3;
-      if(brandIdentity.productQueries){
-        [q1,q2,q3]=brandIdentity.productQueries;
-        console.log(`[img] productQueries "${brandIdentity.displayName}":`,brandIdentity.productQueries);
-      }else{
-        q1=data.search_query_1||"laboratory equipment product white background";
-        q2=data.search_query_2||"scientific instrument isolated";
-        q3=data.search_query_3||"laboratory product professional";
-        console.log(`[img] queries LLM:`, [q1,q2,q3]);
-      }
-      try{
-        const[bgUrl,img1,img2,img3]=await searchProductImages([bgQuery,q1,q2,q3]);
-        if(bgUrl) data.bg_image_url=bgUrl;
-        if(img1)  data.product_img_1=img1;
-        if(img2)  data.product_img_2=img2;
-        if(img3)  data.product_img_3=img3;
-      }catch(e){console.log(`[img] fallback:`,e.message);}
-    }
-
-    // Para email: busca 1 imagem de produto
-    if(intent==="email"){
-      const bgQuery=data.bg_search_query||brandIdentity.bgSearchQuery;
-      const pQ=brandIdentity.productQueries?brandIdentity.productQueries[0]:data.search_query_1||"laboratory equipment professional";
-      try{
-        const[bgUrl,img1]=await searchProductImages([bgQuery,pQ]);
-        if(bgUrl) data.bg_image_url=bgUrl;
-        if(img1)  data.product_img_1=img1;
-      }catch(e){console.log(`[img email] fallback:`,e.message);}
-    }
-
-    const TEMPLATES={banner:bannerTemplate,instagram:instagramTemplate,linkedin:linkedinTemplate,email:emailTemplate,landing:landingTemplate};
-    const templateFn=TEMPLATES[intent]||bannerTemplate;
-    const html=templateFn(data);
-    console.log(`[chat] HTML ${intent} bytes=${html.length}`);
-
-    res.setHeader("Content-Type","text/event-stream");
-    res.setHeader("Cache-Control","no-cache, no-transform");
-    res.setHeader("Connection","keep-alive");
-    res.setHeader("X-Accel-Buffering","no");
-    res.write(`data: ${JSON.stringify(html)}\n\n`);
-    res.write("data: [DONE]\n\n");
-    res.end();
-    return;
+  // 5. Chamar Ollama com contexto de conversa
+  const contextHistory = session.history.slice(-6); // últimas 3 trocas
+  let rawResponse;
+  try {
+    rawResponse = await callOllama(systemPrompt, userMessage, contextHistory, model);
+  } catch (e) {
+    console.error(`[PHASE2] Erro Ollama:`, e.message);
+    throw e;
   }
 
-  // ── STREAMING (datasheet, text) ──
-  const systemRaw=SYSTEM_PROMPTS[intent]??SYSTEM_PROMPTS.text;
-  const systemPrompt=typeof systemRaw==="function"?systemRaw(""):systemRaw;
-  const fullPrompt=`${systemPrompt}\n\nPedido:\n${prompt.trim()}`;
-  const isHtml=HTML_INTENTS.has(intent);
-
-  let ollamaRes;
-  try{
-    ollamaRes=await fetch(`${OLLAMA_URL}/api/generate`,{
-      method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({model,prompt:fullPrompt,stream:true,options:{num_predict:isHtml?2048:1024,temperature:isHtml?0.3:0.7}}),
-    });
-  }catch(err){return res.status(502).json({error:`Ollama inacessível: ${err.message}`});}
-
-  if(!ollamaRes.ok||!ollamaRes.body){
-    const text=await ollamaRes.text().catch(()=>"");
-    return res.status(502).json({error:`Ollama ${ollamaRes.status}: ${text}`});
+  // 6. Parsear JSON da resposta
+  let contentData;
+  try {
+    contentData = extractJSON(rawResponse);
+  } catch (e) {
+    console.warn(`[PHASE2] Parse JSON falhou, usando fallback:`, e.message);
+    contentData = {
+      headline:    "Equipamentos de Precisão",
+      highlight:   "Qualidade Superior",
+      subline:     userMessage.slice(0, 80),
+      description: rawResponse.slice(0, 200),
+      badge_value: "",
+      badge_sup:   "",
+      badge_label: "Oferta",
+      cta:         "Solicitar Proposta",
+      validity:    "Oferta por tempo limitado",
+    };
   }
 
-  res.setHeader("Content-Type","text/event-stream");
-  res.setHeader("Cache-Control","no-cache, no-transform");
-  res.setHeader("Connection","keep-alive");
-  res.setHeader("X-Accel-Buffering","no");
-
-  const reader=ollamaRes.body.getReader();
-  const decoder=new TextDecoder();
-  let lineBuffer="",htmlAccum="",htmlStarted=false;
-  const sendToken=(t)=>res.write(`data: ${JSON.stringify(t)}\n\n`);
-  const finish=()=>{if(isHtml&&!htmlStarted&&htmlAccum)sendToken(stripMarkdownWrapper(htmlAccum));res.write("data: [DONE]\n\n");res.end();};
-  const pump=async()=>{
-    try{
-      const{done,value}=await reader.read();
-      if(done){finish();return;}
-      lineBuffer+=decoder.decode(value,{stream:true});
-      const lines=lineBuffer.split("\n");
-      lineBuffer=lines.pop()??"";
-      for(const line of lines){
-        if(!line.trim()) continue;
-        let parsed;try{parsed=JSON.parse(line);}catch{continue;}
-        const token=parsed.response??"";
-        if(isHtml){
-          if(!htmlStarted){htmlAccum+=token;const idx=htmlAccum.toLowerCase().indexOf("<!doctype");if(idx!==-1){htmlStarted=true;sendToken(htmlAccum.slice(idx));htmlAccum="";}}
-          else{if(token&&!/^`+$/.test(token.trim()))sendToken(token);}
-        }else{if(token)sendToken(token);}
-        if(parsed.done){finish();return;}
-      }
-      pump();
-    }catch(err){res.write(`data: ${JSON.stringify({error:err.message})}\n\n`);finish();}
+  // 7. Aguardar imagens e injetar nos dados
+  await imgPromise;
+  const enriched = {
+    ...brand,
+    ...contentData,
+    bg_image_url:   bgImg,
+    product_img_1:  productImgs[0],
+    product_img_2:  productImgs[1],
+    product_img_3:  productImgs[2],
   };
-  req.on("close",()=>reader.cancel());
-  pump();
-});
 
-function stripMarkdownWrapper(text){
-  return text.replace(/^```(?:html)?\s*/i,"").replace(/\s*```\s*$/i,"").trim();
+  // 8. Validação Fase 1
+  const structValidation = validateContentStructure(enriched, contentType);
+  const seoValidation    = validateSEO(enriched, contentType);
+  if (!structValidation.valid) {
+    console.warn(`[PHASE2] Validação estrutural:`, structValidation.missingFields);
+  }
+  console.log(`[PHASE2] Score SEO: ${seoValidation.score}/100`);
+
+  // 9. Renderizar template HTML
+  const templateMap = { banner: bannerTemplate, instagram: instagramTemplate, linkedin: linkedinTemplate, email: emailTemplate, landing: landingTemplate };
+  const renderer    = templateMap[contentType] ?? bannerTemplate;
+  const html        = renderer(enriched);
+
+  // 10. Atualizar estado da sessão
+  session.history.push({ role: "user",      content: userMessage  });
+  session.history.push({ role: "assistant", content: rawResponse   });
+  session.lastData  = enriched;
+  session.lastType  = contentType;
+  session.lastHtml  = html;
+
+  return {
+    html,
+    contentType,
+    data:           enriched,
+    seoScore:       seoValidation.score,
+    seoWarnings:    seoValidation.warnings,
+    structWarnings: structValidation.warnings,
+  };
 }
 
-const assetsDir=path.join(__dirname,"dist/server/assets");
-const serverFile=readdirSync(assetsDir).find(f=>f.startsWith("server-")&&f.endsWith(".js"));
-if(!serverFile) throw new Error("server-*.js não encontrado em dist/server/assets/");
-console.log(`📦 Handler SSR: ${serverFile}`);
-const{default:handler}=await import(`./dist/server/assets/${serverFile}`);
+// ═══════════════════════════════════════════════════════════════
+// EXPRESS APP
+// ═══════════════════════════════════════════════════════════════
+const app = express();
+app.use(express.json({ limit: "4mb" }));
+app.use(express.static(path.join(__dirname, "dist")));
 
-app.use(async(req,res)=>{
-  try{
-    const url=new URL(req.url,`http://localhost:${PORT}`);
-    const headers={};
-    for(const[k,v] of Object.entries(req.headers)){if(v!=null) headers[k]=Array.isArray(v)?v.join(", "):v;}
-    const response=await handler.fetch(new Request(url.toString(),{headers}));
-    res.status(response.status);
-    response.headers.forEach((v,k)=>res.setHeader(k,v));
-    res.end(await response.text());
-  }catch(err){res.status(500).send(`<pre>SSR Error: ${err.message}</pre>`);}
+// ── FASE 2: ROTA PRINCIPAL DE CHAT ────────────────────────────
+// POST /api/chat
+// Body: { message, sessionId?, model? }
+// Response: { html, contentType, data, seoScore, seoWarnings, structWarnings, sessionId }
+app.post("/api/chat", async (req, res) => {
+  const { message, sessionId = "default", model } = req.body;
+  if (!message?.trim()) return res.status(400).json({ error: "Mensagem vazia" });
+
+  try {
+    const result = await runAgentPipeline(sessionId, message.trim(), model || DEFAULT_MODEL);
+    res.json({ ...result, sessionId });
+  } catch (e) {
+    console.error("[PHASE2] /api/chat erro:", e.message);
+    res.status(500).json({ error: e.message });
+  }
 });
 
-app.listen(PORT,"0.0.0.0",()=>console.log(`✅ BrieFlow on :${PORT}`));
+// ── FASE 2: SINCRONIZAÇÃO DO PAGE BUILDER ─────────────────────
+// POST /api/state/sync
+// Body: { sessionId, editedData }
+// Atualiza o estado da sessão com as edições manuais do Page Builder
+// para que o LLM conheça a versão atual ao receber próximos refinamentos.
+app.post("/api/state/sync", (req, res) => {
+  const { sessionId = "default", editedData } = req.body;
+  if (!editedData) return res.status(400).json({ error: "editedData obrigatório" });
+
+  const session = getSession(sessionId);
+  const prev    = session.lastData ?? {};
+  session.lastData = { ...prev, ...editedData };
+
+  // Injeta resumo das edições no histórico para contexto do LLM
+  const editedFields = Object.keys(editedData).join(", ");
+  session.history.push({
+    role:    "system",
+    content: `[Page Builder] O utilizador editou manualmente os campos: ${editedFields}. Versão atual: ${JSON.stringify(session.lastData)}`,
+  });
+
+  console.log(`[PHASE2] State sync | sessão ${sessionId} | campos: ${editedFields}`);
+  res.json({ ok: true, syncedFields: Object.keys(editedData) });
+});
+
+// ── FASE 2: VALIDAÇÃO SOB DEMANDA ─────────────────────────────
+// POST /api/validate
+// Body: { data, contentType }
+app.post("/api/validate", (req, res) => {
+  const { data, contentType } = req.body;
+  if (!data || !contentType) return res.status(400).json({ error: "data e contentType obrigatórios" });
+
+  const struct = validateContentStructure(data, contentType);
+  const seo    = validateSEO(data, contentType);
+  res.json({ struct, seo });
+});
+
+// ── FASE 2: SPECS DO CONTENT TYPE ─────────────────────────────
+// GET /api/content-specs/:type
+// Retorna dimensões, campos editáveis e schema para o frontend
+app.get("/api/content-specs/:type", (req, res) => {
+  const spec = getContentTypeSpec(req.params.type);
+  if (!spec) return res.status(404).json({ error: "Tipo não encontrado" });
+  res.json(spec);
+});
+
+// ── FASE 2: ESTADO DA SESSÃO ──────────────────────────────────
+// GET /api/state/:sessionId
+app.get("/api/state/:sessionId", (req, res) => {
+  const session = sessions.get(req.params.sessionId);
+  if (!session) return res.status(404).json({ error: "Sessão não encontrada" });
+  res.json({ lastType: session.lastType, lastData: session.lastData, historyLength: session.history.length });
+});
+
+// ── ROTA LEGADA: PREVIEW DIRETO ───────────────────────────────
+// POST /api/generate  (mantida para compatibilidade retroativa)
+app.post("/api/generate", async (req, res) => {
+  const { prompt = "", sessionId = "default", model } = req.body;
+  if (!prompt.trim()) return res.status(400).json({ error: "Prompt vazio" });
+
+  try {
+    const result = await runAgentPipeline(sessionId, prompt, model || DEFAULT_MODEL);
+    // Resposta no formato antigo para não quebrar clientes existentes
+    res.json({ html: result.html, intent: result.contentType, data: result.data, sessionId });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── SPA FALLBACK ──────────────────────────────────────────────
+app.get("*", (req, res) => {
+  res.sendFile(path.join(__dirname, "dist", "index.html"));
+});
+
+app.listen(PORT, () => {
+  console.log(`\n╔══════════════════════════════════════╗`);
+  console.log(`║  BrieFlow Server — Fase 2 Ativa      ║`);
+  console.log(`║  http://localhost:${PORT}               ║`);
+  console.log(`║  Ollama: ${OLLAMA_URL}  ║`);
+  console.log(`║  Modelo: ${DEFAULT_MODEL}              ║`);
+  console.log(`╚══════════════════════════════════════╝\n`);
+});
