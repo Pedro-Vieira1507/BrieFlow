@@ -76,7 +76,7 @@ function ChatRoute() {
     async (text: string) => {
       if (!thread) return;
       const userMsg: Message = {
-        id: crypto.randomUUID(),
+        id: generateId(),
         role: "user",
         content: text,
         createdAt: Date.now(),
@@ -90,7 +90,7 @@ function ChatRoute() {
       const controller = new AbortController();
       abortRef.current = controller;
 
-      const assistantId = crypto.randomUUID();
+      const assistantId = generateId();
       const placeholder: Message = {
         id: assistantId,
         role: "assistant",

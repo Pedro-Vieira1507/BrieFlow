@@ -59,7 +59,7 @@ export function getThread(id: string): Thread | undefined {
 export function createThread(): Thread {
   const now = Date.now();
   const thread: Thread = {
-    id: crypto.randomUUID(),
+    id: generateId(),
     title: "Nova conversa",
     createdAt: now,
     updatedAt: now,
