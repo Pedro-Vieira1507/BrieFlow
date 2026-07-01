@@ -8,7 +8,6 @@ const PORT = process.env.PORT || 3000;
 const OLLAMA_URL = process.env.OLLAMA_URL ?? "http://127.0.0.1:11434";
 const DEFAULT_MODEL = process.env.OLLAMA_MODEL ?? "gemma3:4b";
 
-// Intents que devolvem HTML — precisam de mais tokens e strip do wrapper markdown
 const HTML_INTENTS = new Set(["email", "banner", "instagram"]);
 
 const SYSTEM_PROMPTS = {
@@ -18,7 +17,7 @@ const SYSTEM_PROMPTS = {
 
 REGRAS OBRIGATÓRIAS:
 - Retorne APENAS o bloco HTML — sem explicações, sem markdown, sem backticks, sem código fora do HTML.
-- Comece DIRETAMENTE com <!DOCTYPE html> — a primeira linha deve ser exatamente isso.
+- Comece DIRETAMENTE com <!DOCTYPE html>.
 - Use CSS inline em todos os elementos (style="..."). NUNCA use <style> ou <link>.
 - Dimensões padrão: width:1200px; height:400px (banner horizontal).
 - Layout em 3 colunas: [copy principal + subtítulo à esq] [placeholder de produto ao centro] [oferta + CTA à dir].
@@ -53,7 +52,6 @@ const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "dist/client")));
 
-// POST /api/chat
 app.post("/api/chat", async (req, res) => {
   const { prompt, intent = "text", model = DEFAULT_MODEL } = req.body ?? {};
   if (!prompt?.trim()) return res.status(400).json({ error: "Campo 'prompt' é obrigatório" });
@@ -93,57 +91,66 @@ app.post("/api/chat", async (req, res) => {
 
   const reader = ollamaRes.body.getReader();
   const decoder = new TextDecoder();
-  let buffer = "";
-  let fullText = "";         // acumula para strip do wrapper no final
-  let headerSent = false;    // para HTML: só envia após detectar <!DOCTYPE
+  let lineBuffer = "";
+  let htmlAccum = "";     // acumula tokens HTML até encontrar <!DOCTYPE
+  let htmlStarted = false; // true após encontrar e enviar o início <!DOCTYPE
+
+  // Envia um token SSE — único ponto de saída para dados
+  const sendToken = (token) => res.write(`data: ${JSON.stringify(token)}\n\n`);
+
+  // Flush final: chamado UMA vez quando o stream termina
+  const finish = () => {
+    // Se acumulámos HTML mas nunca encontrámos <!DOCTYPE, envia tudo limpo
+    if (isHtml && !htmlStarted && htmlAccum) {
+      sendToken(stripMarkdownWrapper(htmlAccum));
+    }
+    res.write("data: [DONE]\n\n");
+    res.end();
+  };
 
   const pump = async () => {
     try {
       const { done, value } = await reader.read();
-      if (done) {
-        // Para HTML: se ainda não enviou (pequena resposta), strip e envia tudo agora
-        if (isHtml && !headerSent && fullText) {
-          const clean = stripMarkdownWrapper(fullText);
-          res.write(`data: ${JSON.stringify(clean)}\n\n`);
-        }
-        res.write("data: [DONE]\n\n");
-        res.end();
-        return;
-      }
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? "";
+      if (done) { finish(); return; }
+
+      lineBuffer += decoder.decode(value, { stream: true });
+      const lines = lineBuffer.split("\n");
+      lineBuffer = lines.pop() ?? "";
+
       for (const line of lines) {
         if (!line.trim()) continue;
-        try {
-          const json = JSON.parse(line);
-          if (json.response) {
-            if (isHtml) {
-              // Acumula e envia token a token apenas após encontrar <!DOCTYPE
-              fullText += json.response;
-              if (!headerSent) {
-                const idx = fullText.indexOf("<!DOCTYPE");
-                if (idx !== -1) {
-                  headerSent = true;
-                  // Envia tudo a partir do <!DOCTYPE
-                  const startChunk = fullText.slice(idx);
-                  res.write(`data: ${JSON.stringify(startChunk)}\n\n`);
-                  fullText = ""; // já enviado
-                }
-              } else {
-                res.write(`data: ${JSON.stringify(json.response)}\n\n`);
-              }
-            } else {
-              res.write(`data: ${JSON.stringify(json.response)}\n\n`);
+        let parsed;
+        try { parsed = JSON.parse(line); } catch { continue; }
+
+        const token = parsed.response ?? "";
+
+        if (isHtml) {
+          if (!htmlStarted) {
+            // Acumula até encontrar <!DOCTYPE (case-insensitive)
+            htmlAccum += token;
+            const idx = htmlAccum.toLowerCase().indexOf("<!doctype");
+            if (idx !== -1) {
+              htmlStarted = true;
+              // Envia tudo desde <!DOCTYPE em diante
+              sendToken(htmlAccum.slice(idx));
+              htmlAccum = ""; // limpar — já enviado
             }
+          } else {
+            // Já encontrámos o início — envia cada token directamente
+            if (token) sendToken(token);
           }
-          if (json.done) { res.write("data: [DONE]\n\n"); res.end(); return; }
-        } catch {}
+        } else {
+          if (token) sendToken(token);
+        }
+
+        // Último chunk do Ollama — termina aqui
+        if (parsed.done) { finish(); return; }
       }
+
       pump();
     } catch (err) {
-      res.write(`data: {"error":"${err.message}"}\n\n`);
-      res.end();
+      res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`);
+      finish();
     }
   };
 
@@ -151,7 +158,6 @@ app.post("/api/chat", async (req, res) => {
   pump();
 });
 
-// Remove ```html ... ``` wrapper que alguns modelos insistem em adicionar
 function stripMarkdownWrapper(text) {
   return text
     .replace(/^```(?:html)?\s*/i, "")
@@ -159,14 +165,13 @@ function stripMarkdownWrapper(text) {
     .trim();
 }
 
-// SSR — detecta automaticamente o ficheiro server-*.js
+// SSR
 const assetsDir = path.join(__dirname, "dist/server/assets");
 const serverFile = readdirSync(assetsDir).find(f => f.startsWith("server-") && f.endsWith(".js"));
 if (!serverFile) throw new Error("Ficheiro server-*.js não encontrado em dist/server/assets/");
 console.log(`📦 Handler SSR: ${serverFile}`);
 const { default: handler } = await import(`./dist/server/assets/${serverFile}`);
 
-// Fallback SSR para todas as rotas (SPA + SSR)
 app.use(async (req, res) => {
   try {
     const url = new URL(req.url, `http://localhost:${PORT}`);
