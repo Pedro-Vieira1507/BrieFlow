@@ -11,84 +11,66 @@ const DEFAULT_MODEL = process.env.OLLAMA_MODEL ?? "gemma3:4b";
 const HTML_INTENTS = new Set(["email", "banner", "instagram"]);
 
 // ─────────────────────────────────────────────────────────────────
-// IMAGE SEARCH — DDG + Bing fallback
+// IMAGE SEARCH — paralelo, timeout total 10 s, nunca bloqueia
 // ─────────────────────────────────────────────────────────────────
-async function searchProductImages(queries) {
-  // Retorna array de até N URLs (uma por query)
-  const results = [];
-  for (const q of queries) {
-    const url = await searchOneImage(q);
-    results.push(url || null);
-  }
-  return results;
-}
 
+/** Busca UMA imagem, timeout interno 8 s */
 async function searchOneImage(query) {
   if (!query) return null;
-
-  // Tentativa 1: DuckDuckGo Images
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 8000);
   try {
-    const vqd = await getDDGToken(query);
-    if (vqd) {
-      const url = `https://duckduckgo.com/i.js?` +
-        `q=${encodeURIComponent(query)}&` +
-        `type=photo&layout=wide&vqd=${vqd}&l=pt-BR&p=2&o=json&f=,,,,,`;
-      const r = await fetch(url, {
+    // DuckDuckGo token
+    const vqdRes = await fetch(
+      `https://duckduckgo.com/?q=${encodeURIComponent(query)}&ia=images`,
+      { headers: { "User-Agent": "Mozilla/5.0" }, signal: ctrl.signal }
+    );
+    if (!vqdRes.ok) throw new Error("vqd fetch failed");
+    const vqdHtml = await vqdRes.text();
+    const m = vqdHtml.match(/vqd=['"](\d-[\d\w-]+)['"]/);
+    if (!m) throw new Error("vqd not found");
+
+    const imgRes = await fetch(
+      `https://duckduckgo.com/i.js?q=${encodeURIComponent(query)}&type=photo&vqd=${m[1]}&o=json&p=1`,
+      {
         headers: {
-          "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",
+          "User-Agent": "Mozilla/5.0",
           "Accept": "application/json",
           "Referer": "https://duckduckgo.com/",
         },
-        signal: AbortSignal.timeout(6000),
-      });
-      if (r.ok) {
-        const json = await r.json();
-        const list = json?.results ?? [];
-        const best = list.find(x => x.image && /product|equip|lab|instrument|kit/i.test(x.url || ""))
-          ?? list[0];
-        if (best?.image) return best.image;
+        signal: ctrl.signal,
       }
-    }
-  } catch { /* ignora */ }
-
-  // Tentativa 2: Bing Images scrape
-  try {
-    const bingUrl = `https://www.bing.com/images/search?q=${encodeURIComponent(query + " product white background")}&form=HDRSC2&first=1&count=5&qft=+filterui:photo-photo`;
-    const r = await fetch(bingUrl, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept-Language": "pt-BR,pt;q=0.9",
-      },
-      signal: AbortSignal.timeout(8000),
-    });
-    if (r.ok) {
-      const html = await r.text();
-      const matches = [...html.matchAll(/"murl":"(https?:[^"]+)"/g)];
-      if (matches.length > 0) {
-        const imgUrl = matches.map(m => m[1]).find(u => /\.(jpg|jpeg|png|webp)/i.test(u));
-        if (imgUrl) return imgUrl;
-      }
-    }
-  } catch { /* ignora */ }
-
-  return null;
+    );
+    if (!imgRes.ok) throw new Error("img fetch failed");
+    const json = await imgRes.json();
+    const list = json?.results ?? [];
+    const best = list.find(x => x.image && /\.(jpg|jpeg|png|webp)/i.test(x.image)) ?? list[0];
+    if (best?.image) return best.image;
+    throw new Error("no results");
+  } catch (e) {
+    console.log(`[img] FALHOU "${query}": ${e.message}`);
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
-async function getDDGToken(query) {
-  try {
-    const r = await fetch(`https://duckduckgo.com/?q=${encodeURIComponent(query)}&ia=images`, {
-      headers: { "User-Agent": "Mozilla/5.0 (X11; Linux x86_64)" },
-      signal: AbortSignal.timeout(5000),
-    });
-    if (!r.ok) return null;
-    const html = await r.text();
-    const m = html.match(/vqd=['"](\d-[\d\w-]+)['"]/);
-    return m ? m[1] : null;
-  } catch { return null; }
+/** Busca N imagens em PARALELO, abandona o lote ao fim de 12 s */
+async function searchProductImages(queries) {
+  const promises = queries.map(q => searchOneImage(q));
+  const timeout  = new Promise(resolve =>
+    setTimeout(() => resolve(queries.map(() => null)), 12000)
+  );
+  const results = await Promise.race([
+    Promise.all(promises),
+    timeout,
+  ]);
+  console.log(`[img] resultados:`, results.map(r => r ? r.slice(0, 60) : null));
+  return results;
 }
 
 // ─────────────────────────────────────────────────────────────────
-// TEMPLATES PROFISSIONAIS
+// TEMPLATES
 // ─────────────────────────────────────────────────────────────────
 
 function bannerTemplate(d) {
@@ -97,16 +79,15 @@ function bannerTemplate(d) {
   const accent = d.accent || "#0057b8";
   const accentLight = accent === "#0057b8" ? "#4da6ff" : accent;
 
-  // Background de laboratório — usa URL buscada ou fallback de alta qualidade
   const bgImg = d.bg_image_url
     ? `url('${d.bg_image_url}')`
-    : `url('https://pplx-res.cloudinary.com/image/upload/pplx_search_images/9a019c8459d97b4ebfc8d000a89a29e9e175561c.jpg')`;
+    : `url('https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?w=1400&q=80')`;
 
-  // 3 imagens de produto — usa URLs buscadas ou fallbacks reais Shimadzu
+  // Fallbacks: pipetas/kit de laboratório (Unsplash, sem autenticação)
   const FALLBACKS = [
-    "https://pplx-res.cloudinary.com/image/upload/pplx_search_images/ed15d7a7e425f0798f241a378da490563832b11b.jpg",
-    "https://pplx-res.cloudinary.com/image/upload/pplx_search_images/0c5fd1bf82083c866fc95ff2bc4bdd24c6ddbd80.jpg",
-    "https://pplx-res.cloudinary.com/image/upload/pplx_search_images/0228a5ba01bddffb53de21156e01f04080ce99a0.jpg",
+    "https://images.unsplash.com/photo-1532187863486-abf9dbad1b69?w=400&q=80",
+    "https://images.unsplash.com/photo-1581092160607-ee22621dd758?w=400&q=80",
+    "https://images.unsplash.com/photo-1554475901-4538ddfbccc2?w=400&q=80",
   ];
 
   const imgs = [
@@ -115,10 +96,11 @@ function bannerTemplate(d) {
     d.product_img_3 || FALLBACKS[2],
   ];
 
-  const productGrid = imgs.map((url, i) => `
-    <div class="prod-card${i === 1 ? " prod-card--main" : ""}">
-      <img src="${url}" alt="Produto ${i + 1}" class="prod-img" />
-    </div>`).join("\n");
+  const productGrid = imgs.map((url, i) =>
+    `<div class="prod-card${i === 1 ? " prod-card--main" : ""}">
+      <img src="${url}" alt="Produto ${i + 1}" class="prod-img" loading="lazy" />
+    </div>`
+  ).join("\n    ");
 
   return `<!DOCTYPE html>
 <html lang="pt-BR">
@@ -130,8 +112,6 @@ function bannerTemplate(d) {
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{width:1200px;height:400px;overflow:hidden;font-family:'Montserrat',sans-serif}
-
-/* BACKGROUND: foto de laboratório com overlay gradient escuro */
 .banner{
   width:1200px;height:400px;
   background-image:${bgImg};
@@ -139,28 +119,16 @@ body{width:1200px;height:400px;overflow:hidden;font-family:'Montserrat',sans-ser
   display:grid;grid-template-columns:420px 1fr 300px;
   position:relative;overflow:hidden
 }
-/* Overlay gradient direcional — escurece o BG para texto legível */
 .banner::before{
   content:'';position:absolute;inset:0;
-  background:linear-gradient(
-    105deg,
-    ${bg1}f5 0%,
-    ${bg1}cc 35%,
-    ${bg1}88 55%,
-    ${bg2}66 75%,
-    ${bg2}cc 100%
-  );
+  background:linear-gradient(105deg,${bg1}f5 0%,${bg1}cc 35%,${bg1}88 55%,${bg2}66 75%,${bg2}cc 100%);
   z-index:0
 }
-/* Grid de pontos sutil */
 .banner::after{
   content:'';position:absolute;inset:0;
-  background-image:linear-gradient(rgba(255,255,255,.03) 1px,transparent 1px),
-                   linear-gradient(90deg,rgba(255,255,255,.03) 1px,transparent 1px);
+  background-image:linear-gradient(rgba(255,255,255,.03) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.03) 1px,transparent 1px);
   background-size:44px 44px;z-index:1;pointer-events:none
 }
-
-/* LEFT — copy */
 .col-left{padding:36px 24px 36px 48px;display:flex;flex-direction:column;justify-content:center;position:relative;z-index:3}
 .brand-tag{display:inline-flex;align-items:center;gap:8px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.18);border-radius:20px;padding:4px 14px;margin-bottom:16px;width:fit-content}
 .brand-tag .dot{width:7px;height:7px;background:#e8001c;border-radius:50%;box-shadow:0 0 8px #e8001c}
@@ -169,29 +137,10 @@ body{width:1200px;height:400px;overflow:hidden;font-family:'Montserrat',sans-ser
 .headline em{font-style:normal;color:${accentLight}}
 .subline{font-size:13px;font-weight:600;color:rgba(255,255,255,.6);margin-bottom:10px;letter-spacing:.3px}
 .description{font-size:12px;font-weight:400;color:rgba(255,255,255,.45);line-height:1.65;max-width:280px}
-
-/* CENTER — 3 product cards */
-.col-center{
-  display:flex;align-items:center;justify-content:center;
-  gap:12px;padding:28px 16px;position:relative;z-index:3
-}
-.prod-card{
-  width:110px;height:110px;
-  background:rgba(255,255,255,.92);
-  border-radius:12px;
-  display:flex;align-items:center;justify-content:center;
-  box-shadow:0 6px 24px rgba(0,0,0,.45),0 0 0 1px rgba(255,255,255,.15);
-  overflow:hidden;
-  flex-shrink:0;
-  transition:transform .2s
-}
-.prod-card--main{
-  width:148px;height:148px;
-  box-shadow:0 10px 36px rgba(0,90,220,.5),0 0 0 2px ${accentLight}55;
-}
+.col-center{display:flex;align-items:center;justify-content:center;gap:12px;padding:28px 16px;position:relative;z-index:3}
+.prod-card{width:110px;height:110px;background:rgba(255,255,255,.92);border-radius:12px;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 24px rgba(0,0,0,.45),0 0 0 1px rgba(255,255,255,.15);overflow:hidden;flex-shrink:0}
+.prod-card--main{width:148px;height:148px;box-shadow:0 10px 36px rgba(0,90,220,.5),0 0 0 2px ${accentLight}55}
 .prod-img{width:100%;height:100%;object-fit:contain;padding:8px}
-
-/* RIGHT — badge + CTA */
 .col-right{padding:36px 44px 36px 20px;display:flex;flex-direction:column;align-items:flex-end;justify-content:center;position:relative;z-index:3}
 .col-right::before{content:'';position:absolute;bottom:-60px;right:-60px;width:280px;height:280px;background:radial-gradient(circle,rgba(232,0,28,.18) 0%,transparent 70%);pointer-events:none;z-index:0}
 .badge{background:linear-gradient(135deg,#e8001c 0%,#ff4d4d 100%);border-radius:14px;padding:16px 22px;text-align:center;margin-bottom:14px;box-shadow:0 8px 28px rgba(232,0,28,.5),0 0 0 1px rgba(255,255,255,.12);min-width:175px;position:relative;overflow:hidden}
@@ -201,8 +150,6 @@ body{width:1200px;height:400px;overflow:hidden;font-family:'Montserrat',sans-ser
 .badge-label{font-size:10px;font-weight:600;color:rgba(255,255,255,.85);letter-spacing:2px;text-transform:uppercase;margin-top:2px}
 .validity{font-size:10px;color:rgba(255,255,255,.45);margin-bottom:12px;text-align:right;letter-spacing:.4px}
 .cta{display:block;background:linear-gradient(135deg,${accent} 0%,${accent}cc 100%);color:#fff;font-family:'Montserrat',sans-serif;font-size:13px;font-weight:700;letter-spacing:.5px;padding:12px 22px;border-radius:8px;text-decoration:none;border:1.5px solid rgba(255,255,255,.2);box-shadow:0 4px 18px ${accent}88;text-align:center;width:100%}
-
-/* Divisores verticais */
 .dv{position:absolute;top:12%;bottom:12%;width:1px;background:linear-gradient(to bottom,transparent,rgba(255,255,255,.12),transparent);z-index:2}
 </style>
 </head>
@@ -210,24 +157,21 @@ body{width:1200px;height:400px;overflow:hidden;font-family:'Montserrat',sans-ser
 <div class="banner">
   <div class="dv" style="left:35%"></div>
   <div class="dv" style="left:74%"></div>
-
   <div class="col-left">
     <div class="brand-tag"><span class="dot"></span><span>${d.brand || "Marca"}</span></div>
     <h1 class="headline">${d.headline}<br><em>${d.highlight || ""}</em></h1>
     <p class="subline">${d.subline || ""}</p>
     <p class="description">${d.description || ""}</p>
   </div>
-
   <div class="col-center">
     ${productGrid}
   </div>
-
   <div class="col-right">
     <div class="badge">
-      <div class="badge-value">${d.badge_value || "3"}<sup>%</sup></div>
+      <div class="badge-value">${d.badge_value || "3"}<sup>${d.badge_sup || "%"}</sup></div>
       <div class="badge-label">${d.badge_label || "de Desconto"}</div>
     </div>
-    <p class="validity">⏱ ${d.validity || "Oferta por tempo limitado"}</p>
+    <p class="validity">&#x23F1; ${d.validity || "Oferta por tempo limitado"}</p>
     <a href="#" class="cta">${d.cta || "Saiba Mais"}</a>
   </div>
 </div>
@@ -272,7 +216,7 @@ body{width:1080px;height:1080px;overflow:hidden;font-family:'Montserrat',sans-se
     <span class="tag">${d.tag || "Oferta Especial"}</span>
   </div>
   <div class="mid">
-    <div class="emoji-icon">${d.emoji || "🚀"}</div>
+    <div class="emoji-icon">${d.emoji || "\uD83D\uDE80"}</div>
     <h1 class="headline">${d.headline}<br><em>${d.highlight || ""}</em></h1>
     <p class="subline">${d.subline || ""}</p>
   </div>
@@ -288,7 +232,6 @@ body{width:1080px;height:1080px;overflow:hidden;font-family:'Montserrat',sans-se
 // ─────────────────────────────────────────────────────────────────
 // SYSTEM PROMPTS
 // ─────────────────────────────────────────────────────────────────
-
 const SYSTEM_PROMPTS = {
   email: `Você é um especialista em e-mail marketing. Gere um e-mail HTML completo, responsivo, com CSS inline em todos os elementos (sem <style> ou <link> externos), pronto para envio. Comece DIRETAMENTE com <!DOCTYPE html> — sem nenhuma explicação antes ou depois. Use português do Brasil.`,
 
@@ -301,17 +244,18 @@ Campos obrigatórios:
   "highlight": "Palavra ou frase em destaque (máx 3 palavras)",
   "subline": "Subtítulo secundário (máx 8 palavras)",
   "description": "Descrição curta (máx 20 palavras)",
-  "badge_value": "Número ou texto do desconto (ex: 3 ou COMPRE 3)",
-  "badge_label": "Label do badge (ex: % de Desconto ou LEVE 4)",
-  "validity": "Texto de validade (ex: Oferta por tempo limitado)",
+  "badge_value": "Número ou texto do desconto (ex: COMPRE 3)",
+  "badge_sup": "Sufixo do badge (ex: % ou vazio)",
+  "badge_label": "Label do badge (ex: LEVE 4)",
+  "validity": "Texto de validade",
   "cta": "Texto do botão CTA (máx 5 palavras)",
-  "bg1": "Cor hex do fundo início (ex: #030d1a)",
-  "bg2": "Cor hex do fundo fim (ex: #0a2d5e)",
-  "accent": "Cor hex de destaque/botão (ex: #0057b8)",
-  "bg_search_query": "Query para imagem de fundo/ambiente (ex: modern laboratory interior blue dark)",
-  "search_query_1": "Query produto 1 fundo branco (ex: DLAB pipette product white background isolated)",
-  "search_query_2": "Query produto 2 fundo branco (ex: laboratory micropipette set isolated)",
-  "search_query_3": "Query produto 3 fundo branco (ex: pipette tips rack laboratory white background)"
+  "bg1": "Cor hex fundo início (ex: #030d1a)",
+  "bg2": "Cor hex fundo fim (ex: #0a2d5e)",
+  "accent": "Cor hex de destaque (ex: #0057b8)",
+  "bg_search_query": "Query para fundo de laboratório (em inglês, ex: modern laboratory interior dark blue)",
+  "search_query_1": "Query produto 1 em inglês (ex: DLAB pipette isolated white background)",
+  "search_query_2": "Query produto 2 em inglês (ex: laboratory micropipette set white background)",
+  "search_query_3": "Query produto 3 em inglês (ex: pipette tips rack white background)"
 }
 
 Retorne SOMENTE o JSON, começando com { e terminando com }.`,
@@ -328,10 +272,10 @@ Campos obrigatórios:
   "subline": "Subtítulo motivacional (máx 15 palavras)",
   "offer": "Texto da pílula de oferta (ex: 3% OFF)",
   "cta": "Call to action final (máx 6 palavras)",
-  "bg1": "Hex fundo cor 1 (ex: #0f0c29)",
-  "bg2": "Hex fundo cor 2 (ex: #302b63)",
-  "bg3": "Hex fundo cor 3 (ex: #24243e)",
-  "accent": "Hex cor de destaque (ex: #f59e0b)"
+  "bg1": "Hex fundo cor 1",
+  "bg2": "Hex fundo cor 2",
+  "bg3": "Hex fundo cor 3",
+  "accent": "Hex cor de destaque"
 }
 
 Retorne SOMENTE o JSON, começando com { e terminando com }.`,
@@ -346,7 +290,7 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, "dist/client")));
 
 // ─────────────────────────────────────────────────────────────────
-// HELPER: chama Ollama de forma não-streaming e extrai JSON
+// HELPER: Ollama não-streaming → JSON
 // ─────────────────────────────────────────────────────────────────
 async function ollamaJSON(prompt, model) {
   const res = await fetch(`${OLLAMA_URL}/api/generate`, {
@@ -356,13 +300,13 @@ async function ollamaJSON(prompt, model) {
       model,
       prompt,
       stream: false,
-      options: { num_predict: 512, temperature: 0.2 },
+      options: { num_predict: 600, temperature: 0.2 },
     }),
   });
   if (!res.ok) throw new Error(`Ollama ${res.status}`);
   const { response } = await res.json();
   const match = response.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error("Modelo não devolveu JSON válido");
+  if (!match) throw new Error("Modelo não devolveu JSON válido: " + response.slice(0, 200));
   return JSON.parse(match[0]);
 }
 
@@ -373,6 +317,8 @@ app.post("/api/chat", async (req, res) => {
   const { prompt, intent = "text", model = DEFAULT_MODEL } = req.body ?? {};
   if (!prompt?.trim()) return res.status(400).json({ error: "Campo 'prompt' é obrigatório" });
 
+  console.log(`[chat] intent=${intent} model=${model} prompt=${prompt.slice(0,80)}`);
+
   // ── TEMPLATE INTENTS (banner / instagram) ──
   if (intent === "banner" || intent === "instagram") {
     const systemPrompt = SYSTEM_PROMPTS[intent];
@@ -380,30 +326,35 @@ app.post("/api/chat", async (req, res) => {
 
     let data;
     try {
+      console.log(`[chat] chamando ollamaJSON...`);
       data = await ollamaJSON(fullPrompt, model);
+      console.log(`[chat] JSON obtido:`, JSON.stringify(data).slice(0, 200));
     } catch (err) {
+      console.error(`[chat] ERRO ollamaJSON:`, err.message);
       return res.status(502).json({ error: `Erro ao gerar dados: ${err.message}` });
     }
 
-    // Para banners: busca paralela de 4 imagens (1 background + 3 produtos)
+    // Busca paralela de imagens com timeout total 12 s
     if (intent === "banner") {
-      const bgQuery = data.bg_search_query || "modern laboratory interior dark blue";
-      const q1 = data.search_query_1 || (data.search_query + " product white background");
-      const q2 = data.search_query_2 || (data.search_query + " isolated white");
-      const q3 = data.search_query_3 || (data.search_query + " laboratory equipment");
+      const bgQuery = data.bg_search_query  || "modern laboratory interior dark blue";
+      const q1      = data.search_query_1   || "laboratory pipette product white background";
+      const q2      = data.search_query_2   || "micropipette set isolated white";
+      const q3      = data.search_query_3   || "pipette tips rack laboratory";
 
+      console.log(`[img] iniciando busca paralela: ["${bgQuery}","${q1}","${q2}","${q3}"]`);
       try {
         const [bgUrl, img1, img2, img3] = await searchProductImages([bgQuery, q1, q2, q3]);
-        if (bgUrl)  data.bg_image_url   = bgUrl;
-        if (img1)   data.product_img_1  = img1;
-        if (img2)   data.product_img_2  = img2;
-        if (img3)   data.product_img_3  = img3;
-      } catch { /* continua com fallbacks */ }
+        if (bgUrl) data.bg_image_url  = bgUrl;
+        if (img1)  data.product_img_1 = img1;
+        if (img2)  data.product_img_2 = img2;
+        if (img3)  data.product_img_3 = img3;
+      } catch (e) {
+        console.log(`[img] busca falhou, usando fallbacks:`, e.message);
+      }
     }
 
-    const html = intent === "banner"
-      ? bannerTemplate(data)
-      : instagramTemplate(data);
+    const html = intent === "banner" ? bannerTemplate(data) : instagramTemplate(data);
+    console.log(`[chat] HTML gerado, bytes=${html.length}, enviando...`);
 
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache, no-transform");
@@ -446,11 +397,11 @@ app.post("/api/chat", async (req, res) => {
   res.setHeader("Connection", "keep-alive");
   res.setHeader("X-Accel-Buffering", "no");
 
-  const reader     = ollamaRes.body.getReader();
-  const decoder    = new TextDecoder();
-  let lineBuffer   = "";
-  let htmlAccum    = "";
-  let htmlStarted  = false;
+  const reader    = ollamaRes.body.getReader();
+  const decoder   = new TextDecoder();
+  let lineBuffer  = "";
+  let htmlAccum   = "";
+  let htmlStarted = false;
 
   const sendToken = (token) => res.write(`data: ${JSON.stringify(token)}\n\n`);
   const finish    = () => {
@@ -472,30 +423,18 @@ app.post("/api/chat", async (req, res) => {
         if (!line.trim()) continue;
         let parsed;
         try { parsed = JSON.parse(line); } catch { continue; }
-
         const token = parsed.response ?? "";
-
         if (isHtml) {
           if (!htmlStarted) {
             htmlAccum += token;
             const idx = htmlAccum.toLowerCase().indexOf("<!doctype");
-            if (idx !== -1) {
-              htmlStarted = true;
-              sendToken(htmlAccum.slice(idx));
-              htmlAccum = "";
-            }
+            if (idx !== -1) { htmlStarted = true; sendToken(htmlAccum.slice(idx)); htmlAccum = ""; }
           } else {
-            const trimmed = token.trim();
-            if (trimmed && /^`+$/.test(trimmed)) {
-              // backticks de fecho — descartar
-            } else if (token) {
-              sendToken(token);
-            }
+            if (token && !/^`+$/.test(token.trim())) sendToken(token);
           }
         } else {
           if (token) sendToken(token);
         }
-
         if (parsed.done) { finish(); return; }
       }
       pump();
@@ -510,16 +449,13 @@ app.post("/api/chat", async (req, res) => {
 });
 
 function stripMarkdownWrapper(text) {
-  return text
-    .replace(/^```(?:html)?\s*/i, "")
-    .replace(/\s*```\s*$/i, "")
-    .trim();
+  return text.replace(/^```(?:html)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
 }
 
 // SSR
 const assetsDir  = path.join(__dirname, "dist/server/assets");
 const serverFile = readdirSync(assetsDir).find(f => f.startsWith("server-") && f.endsWith(".js"));
-if (!serverFile) throw new Error("Ficheiro server-*.js não encontrado em dist/server/assets/");
+if (!serverFile) throw new Error("server-*.js não encontrado em dist/server/assets/");
 console.log(`📦 Handler SSR: ${serverFile}`);
 const { default: handler } = await import(`./dist/server/assets/${serverFile}`);
 
