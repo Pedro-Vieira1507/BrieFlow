@@ -11,16 +11,96 @@ const DEFAULT_MODEL = process.env.OLLAMA_MODEL ?? "gemma3:4b";
 const HTML_INTENTS = new Set(["email", "banner", "instagram"]);
 
 // ─────────────────────────────────────────────────────────────────
-// IMAGE SEARCH — paralelo, timeout total 10 s, nunca bloqueia
+// BRAND IDENTITIES — paletas e tipografia oficiais por marca
+// Adicione novas marcas aqui. A chave é lowercase sem acentos.
+// O objeto é injetado diretamente no briefing enviado ao Ollama.
 // ─────────────────────────────────────────────────────────────────
+const BRAND_IDENTITIES = {
+  forlab: {
+    displayName: "FORLAB",
+    bg1: "#001f5b",          // azul navy profundo
+    bg2: "#003399",          // azul Forlab principal
+    accent: "#0055cc",       // azul vivo para CTA
+    accentLight: "#4d90fe",  // azul claro para destaques em texto
+    badgeColor: "#0055cc",   // cor do badge de oferta
+    dotColor: "#4d90fe",
+    font: "Montserrat",
+    palette: "azul corporativo — #001f5b, #003399, accent #0055cc",
+    bgSearchQuery: "modern blue laboratory interior professional",
+  },
+  shimadzu: {
+    displayName: "SHIMADZU",
+    bg1: "#001433",
+    bg2: "#002d6b",
+    accent: "#006bb6",
+    accentLight: "#5ab4f0",
+    badgeColor: "#006bb6",
+    dotColor: "#5ab4f0",
+    font: "Montserrat",
+    palette: "azul Shimadzu — #001433, #002d6b, accent #006bb6",
+    bgSearchQuery: "scientific analytical laboratory instruments blue",
+  },
+  dlab: {
+    displayName: "DLAB",
+    bg1: "#1a0000",
+    bg2: "#5c0000",
+    accent: "#cc0000",
+    accentLight: "#ff4d4d",
+    badgeColor: "#cc0000",
+    dotColor: "#ff4d4d",
+    font: "Montserrat",
+    palette: "vermelho DLAB — #1a0000, #5c0000, accent #cc0000",
+    bgSearchQuery: "laboratory pipettes dark red professional background",
+  },
+  eppendorf: {
+    displayName: "EPPENDORF",
+    bg1: "#002e1f",
+    bg2: "#005c3f",
+    accent: "#00884a",
+    accentLight: "#33cc7a",
+    badgeColor: "#00884a",
+    dotColor: "#33cc7a",
+    font: "Montserrat",
+    palette: "verde Eppendorf — #002e1f, #005c3f, accent #00884a",
+    bgSearchQuery: "eppendorf laboratory green professional background",
+  },
+  brand_generic: {
+    displayName: "",
+    bg1: "#030d1a",
+    bg2: "#0a2d5e",
+    accent: "#0057b8",
+    accentLight: "#4da6ff",
+    badgeColor: "#e8001c",
+    dotColor: "#e8001c",
+    font: "Montserrat",
+    palette: "azul padrão",
+    bgSearchQuery: "modern laboratory interior dark blue",
+  },
+};
 
-/** Busca UMA imagem, timeout interno 8 s */
+/**
+ * Detecta qual marca está sendo mencionada no prompt (case-insensitive).
+ * Retorna o objeto de identidade da marca ou o genérico.
+ */
+function detectBrand(prompt) {
+  const lower = prompt.toLowerCase();
+  for (const [key, identity] of Object.entries(BRAND_IDENTITIES)) {
+    if (key === "brand_generic") continue;
+    if (lower.includes(key)) return identity;
+    // Tenta também o displayName em lowercase
+    if (lower.includes(identity.displayName.toLowerCase())) return identity;
+  }
+  return BRAND_IDENTITIES.brand_generic;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// IMAGE SEARCH — paralelo, timeout total 12 s, nunca bloqueia
+// ─────────────────────────────────────────────────────────────────
 async function searchOneImage(query) {
   if (!query) return null;
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 8000);
   try {
-    // DuckDuckGo token
     const vqdRes = await fetch(
       `https://duckduckgo.com/?q=${encodeURIComponent(query)}&ia=images`,
       { headers: { "User-Agent": "Mozilla/5.0" }, signal: ctrl.signal }
@@ -29,7 +109,6 @@ async function searchOneImage(query) {
     const vqdHtml = await vqdRes.text();
     const m = vqdHtml.match(/vqd=['"](\d-[\d\w-]+)['"]/);
     if (!m) throw new Error("vqd not found");
-
     const imgRes = await fetch(
       `https://duckduckgo.com/i.js?q=${encodeURIComponent(query)}&type=photo&vqd=${m[1]}&o=json&p=1`,
       {
@@ -55,16 +134,12 @@ async function searchOneImage(query) {
   }
 }
 
-/** Busca N imagens em PARALELO, abandona o lote ao fim de 12 s */
 async function searchProductImages(queries) {
   const promises = queries.map(q => searchOneImage(q));
   const timeout  = new Promise(resolve =>
     setTimeout(() => resolve(queries.map(() => null)), 12000)
   );
-  const results = await Promise.race([
-    Promise.all(promises),
-    timeout,
-  ]);
+  const results = await Promise.race([Promise.all(promises), timeout]);
   console.log(`[img] resultados:`, results.map(r => r ? r.slice(0, 60) : null));
   return results;
 }
@@ -72,24 +147,23 @@ async function searchProductImages(queries) {
 // ─────────────────────────────────────────────────────────────────
 // TEMPLATES
 // ─────────────────────────────────────────────────────────────────
-
 function bannerTemplate(d) {
-  const bg1    = d.bg1    || "#030d1a";
-  const bg2    = d.bg2    || "#0a2d5e";
-  const accent = d.accent || "#0057b8";
-  const accentLight = accent === "#0057b8" ? "#4da6ff" : accent;
+  const bg1         = d.bg1         || "#030d1a";
+  const bg2         = d.bg2         || "#0a2d5e";
+  const accent      = d.accent      || "#0057b8";
+  const accentLight = d.accentLight || (accent === "#0057b8" ? "#4da6ff" : accent);
+  const badgeColor  = d.badgeColor  || "#e8001c";
+  const dotColor    = d.dotColor    || "#e8001c";
 
   const bgImg = d.bg_image_url
     ? `url('${d.bg_image_url}')`
     : `url('https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?w=1400&q=80')`;
 
-  // Fallbacks: pipetas/kit de laboratório (Unsplash, sem autenticação)
   const FALLBACKS = [
     "https://images.unsplash.com/photo-1532187863486-abf9dbad1b69?w=400&q=80",
     "https://images.unsplash.com/photo-1581092160607-ee22621dd758?w=400&q=80",
     "https://images.unsplash.com/photo-1554475901-4538ddfbccc2?w=400&q=80",
   ];
-
   const imgs = [
     d.product_img_1 || FALLBACKS[0],
     d.product_img_2 || FALLBACKS[1],
@@ -101,6 +175,11 @@ function bannerTemplate(d) {
       <img src="${url}" alt="Produto ${i + 1}" class="prod-img" loading="lazy" />
     </div>`
   ).join("\n    ");
+
+  // badge cor da marca
+  const badgeGrad = `linear-gradient(135deg,${badgeColor} 0%,${badgeColor}cc 100%)`;
+  const badgeShadow = `0 8px 28px ${badgeColor}88,0 0 0 1px rgba(255,255,255,.12)`;
+  const glowRight = `radial-gradient(circle,${badgeColor}22 0%,transparent 70%)`;
 
   return `<!DOCTYPE html>
 <html lang="pt-BR">
@@ -131,7 +210,7 @@ body{width:1200px;height:400px;overflow:hidden;font-family:'Montserrat',sans-ser
 }
 .col-left{padding:36px 24px 36px 48px;display:flex;flex-direction:column;justify-content:center;position:relative;z-index:3}
 .brand-tag{display:inline-flex;align-items:center;gap:8px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.18);border-radius:20px;padding:4px 14px;margin-bottom:16px;width:fit-content}
-.brand-tag .dot{width:7px;height:7px;background:#e8001c;border-radius:50%;box-shadow:0 0 8px #e8001c}
+.brand-tag .dot{width:7px;height:7px;background:${dotColor};border-radius:50%;box-shadow:0 0 8px ${dotColor}}
 .brand-tag span{font-size:11px;font-weight:600;color:rgba(255,255,255,.75);letter-spacing:1.5px;text-transform:uppercase}
 .headline{font-size:34px;font-weight:900;color:#fff;line-height:1.1;letter-spacing:-.5px;margin-bottom:8px;text-shadow:0 2px 12px rgba(0,0,0,.6)}
 .headline em{font-style:normal;color:${accentLight}}
@@ -139,11 +218,11 @@ body{width:1200px;height:400px;overflow:hidden;font-family:'Montserrat',sans-ser
 .description{font-size:12px;font-weight:400;color:rgba(255,255,255,.45);line-height:1.65;max-width:280px}
 .col-center{display:flex;align-items:center;justify-content:center;gap:12px;padding:28px 16px;position:relative;z-index:3}
 .prod-card{width:110px;height:110px;background:rgba(255,255,255,.92);border-radius:12px;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 24px rgba(0,0,0,.45),0 0 0 1px rgba(255,255,255,.15);overflow:hidden;flex-shrink:0}
-.prod-card--main{width:148px;height:148px;box-shadow:0 10px 36px rgba(0,90,220,.5),0 0 0 2px ${accentLight}55}
+.prod-card--main{width:148px;height:148px;box-shadow:0 10px 36px ${accent}88,0 0 0 2px ${accentLight}55}
 .prod-img{width:100%;height:100%;object-fit:contain;padding:8px}
 .col-right{padding:36px 44px 36px 20px;display:flex;flex-direction:column;align-items:flex-end;justify-content:center;position:relative;z-index:3}
-.col-right::before{content:'';position:absolute;bottom:-60px;right:-60px;width:280px;height:280px;background:radial-gradient(circle,rgba(232,0,28,.18) 0%,transparent 70%);pointer-events:none;z-index:0}
-.badge{background:linear-gradient(135deg,#e8001c 0%,#ff4d4d 100%);border-radius:14px;padding:16px 22px;text-align:center;margin-bottom:14px;box-shadow:0 8px 28px rgba(232,0,28,.5),0 0 0 1px rgba(255,255,255,.12);min-width:175px;position:relative;overflow:hidden}
+.col-right::before{content:'';position:absolute;bottom:-60px;right:-60px;width:280px;height:280px;background:${glowRight};pointer-events:none;z-index:0}
+.badge{background:${badgeGrad};border-radius:14px;padding:16px 22px;text-align:center;margin-bottom:14px;box-shadow:${badgeShadow};min-width:175px;position:relative;overflow:hidden}
 .badge::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,.45),transparent)}
 .badge-value{font-size:44px;font-weight:900;color:#fff;line-height:1;letter-spacing:-2px}
 .badge-value sup{font-size:18px;vertical-align:super;letter-spacing:0}
@@ -168,7 +247,7 @@ body{width:1200px;height:400px;overflow:hidden;font-family:'Montserrat',sans-ser
   </div>
   <div class="col-right">
     <div class="badge">
-      <div class="badge-value">${d.badge_value || "3"}<sup>${d.badge_sup || "%"}</sup></div>
+      <div class="badge-value">${d.badge_value || "3"}<sup>${d.badge_sup || ""}</sup></div>
       <div class="badge-label">${d.badge_label || "de Desconto"}</div>
     </div>
     <p class="validity">&#x23F1; ${d.validity || "Oferta por tempo limitado"}</p>
@@ -205,7 +284,7 @@ body{width:1080px;height:1080px;overflow:hidden;font-family:'Montserrat',sans-se
 .headline em{font-style:normal;color:${accent}}
 .subline{font-size:22px;font-weight:400;color:rgba(255,255,255,.65);max-width:680px;line-height:1.5}
 .bottom{width:100%;display:flex;flex-direction:column;align-items:center;gap:20px}
-.offer-pill{background:${accent};border-radius:50px;padding:16px 48px;font-size:22px;font-weight:900;color:#000;letter-spacing:.5px;box-shadow:0 8px 32px ${accent}66}
+.offer-pill{background:${accent};border-radius:50px;padding:16px 48px;font-size:22px;font-weight:900;color:#fff;letter-spacing:.5px;box-shadow:0 8px 32px ${accent}66}
 .cta-line{font-size:14px;font-weight:600;color:rgba(255,255,255,.45);letter-spacing:2px;text-transform:uppercase}
 </style>
 </head>
@@ -235,8 +314,11 @@ body{width:1080px;height:1080px;overflow:hidden;font-family:'Montserrat',sans-se
 const SYSTEM_PROMPTS = {
   email: `Você é um especialista em e-mail marketing. Gere um e-mail HTML completo, responsivo, com CSS inline em todos os elementos (sem <style> ou <link> externos), pronto para envio. Comece DIRETAMENTE com <!DOCTYPE html> — sem nenhuma explicação antes ou depois. Use português do Brasil.`,
 
-  banner: `Você é um copywriter especialista em marketing visual. A partir do briefing recebido, extraia os dados e retorne APENAS um objeto JSON válido — sem explicações, sem markdown, sem texto extra.
+  banner: (brandCtx) => `Você é um copywriter especialista em marketing visual. A partir do briefing recebido, extraia os dados e retorne APENAS um objeto JSON válido — sem explicações, sem markdown, sem texto extra.
 
+${brandCtx ? `IDENTIDADE VISUAL DA MARCA (USE EXATAMENTE ESTAS CORES — NÃO ALTERE):
+${brandCtx}
+` : ""}
 Campos obrigatórios:
 {
   "brand": "Nome da marca ou produto",
@@ -245,23 +327,23 @@ Campos obrigatórios:
   "subline": "Subtítulo secundário (máx 8 palavras)",
   "description": "Descrição curta (máx 20 palavras)",
   "badge_value": "Número ou texto do desconto (ex: COMPRE 3)",
-  "badge_sup": "Sufixo do badge (ex: % ou vazio)",
+  "badge_sup": "Sufixo do badge (ex: % ou deixar vazio)",
   "badge_label": "Label do badge (ex: LEVE 4)",
   "validity": "Texto de validade",
   "cta": "Texto do botão CTA (máx 5 palavras)",
-  "bg1": "Cor hex fundo início (ex: #030d1a)",
-  "bg2": "Cor hex fundo fim (ex: #0a2d5e)",
-  "accent": "Cor hex de destaque (ex: #0057b8)",
-  "bg_search_query": "Query para fundo de laboratório (em inglês, ex: modern laboratory interior dark blue)",
-  "search_query_1": "Query produto 1 em inglês (ex: DLAB pipette isolated white background)",
-  "search_query_2": "Query produto 2 em inglês (ex: laboratory micropipette set white background)",
-  "search_query_3": "Query produto 3 em inglês (ex: pipette tips rack white background)"
+  "bg_search_query": "Query para imagem de fundo (em inglês)",
+  "search_query_1": "Query produto 1 em inglês",
+  "search_query_2": "Query produto 2 em inglês",
+  "search_query_3": "Query produto 3 em inglês"
 }
 
 Retorne SOMENTE o JSON, começando com { e terminando com }.`,
 
-  instagram: `Você é um copywriter especialista em redes sociais. A partir do briefing recebido, extraia os dados e retorne APENAS um objeto JSON válido — sem explicações, sem markdown, sem texto extra.
+  instagram: (brandCtx) => `Você é um copywriter especialista em redes sociais. A partir do briefing recebido, extraia os dados e retorne APENAS um objeto JSON válido — sem explicações, sem markdown, sem texto extra.
 
+${brandCtx ? `IDENTIDADE VISUAL DA MARCA (USE EXATAMENTE ESTAS CORES — NÃO ALTERE):
+${brandCtx}
+` : ""}
 Campos obrigatórios:
 {
   "brand": "Nome da marca",
@@ -270,12 +352,8 @@ Campos obrigatórios:
   "headline": "Título principal (máx 3 palavras)",
   "highlight": "Palavra de destaque (máx 2 palavras)",
   "subline": "Subtítulo motivacional (máx 15 palavras)",
-  "offer": "Texto da pílula de oferta (ex: 3% OFF)",
-  "cta": "Call to action final (máx 6 palavras)",
-  "bg1": "Hex fundo cor 1",
-  "bg2": "Hex fundo cor 2",
-  "bg3": "Hex fundo cor 3",
-  "accent": "Hex cor de destaque"
+  "offer": "Texto da pílula de oferta (ex: COMPRE 3 LEVE 4)",
+  "cta": "Call to action final (máx 6 palavras)"
 }
 
 Retorne SOMENTE o JSON, começando com { e terminando com }.`,
@@ -321,7 +399,22 @@ app.post("/api/chat", async (req, res) => {
 
   // ── TEMPLATE INTENTS (banner / instagram) ──
   if (intent === "banner" || intent === "instagram") {
-    const systemPrompt = SYSTEM_PROMPTS[intent];
+
+    // 1. Detecta marca e prepara contexto de cores
+    const brandIdentity = detectBrand(prompt);
+    const brandCtx = [
+      `Marca: ${brandIdentity.displayName || "(genérica)"}`,
+      `Paleta: ${brandIdentity.palette}`,
+      `bg1: ${brandIdentity.bg1}`,
+      `bg2: ${brandIdentity.bg2}`,
+      `accent: ${brandIdentity.accent}`,
+    ].join("\n");
+
+    console.log(`[brand] detectada: ${brandIdentity.displayName || "genérica"} | paleta: ${brandIdentity.palette}`);
+
+    // 2. Gera prompt com system + contexto de marca
+    const systemFn    = SYSTEM_PROMPTS[intent];
+    const systemPrompt = typeof systemFn === "function" ? systemFn(brandCtx) : systemFn;
     const fullPrompt   = `${systemPrompt}\n\nBriefing:\n${prompt.trim()}`;
 
     let data;
@@ -334,9 +427,17 @@ app.post("/api/chat", async (req, res) => {
       return res.status(502).json({ error: `Erro ao gerar dados: ${err.message}` });
     }
 
-    // Busca paralela de imagens com timeout total 12 s
+    // 3. Garante que as cores da identidade SEMPRE sobrescrevem o JSON do modelo
+    data.bg1         = brandIdentity.bg1;
+    data.bg2         = brandIdentity.bg2;
+    data.accent      = brandIdentity.accent;
+    data.accentLight = brandIdentity.accentLight;
+    data.badgeColor  = brandIdentity.badgeColor;
+    data.dotColor    = brandIdentity.dotColor;
+
+    // 4. Busca paralela de imagens com timeout total 12 s
     if (intent === "banner") {
-      const bgQuery = data.bg_search_query  || "modern laboratory interior dark blue";
+      const bgQuery = data.bg_search_query  || brandIdentity.bgSearchQuery;
       const q1      = data.search_query_1   || "laboratory pipette product white background";
       const q2      = data.search_query_2   || "micropipette set isolated white";
       const q3      = data.search_query_3   || "pipette tips rack laboratory";
@@ -367,7 +468,8 @@ app.post("/api/chat", async (req, res) => {
   }
 
   // ── STREAMING INTENTS (email, datasheet, text) ──
-  const systemPrompt = SYSTEM_PROMPTS[intent] ?? SYSTEM_PROMPTS.text;
+  const systemRaw    = SYSTEM_PROMPTS[intent] ?? SYSTEM_PROMPTS.text;
+  const systemPrompt = typeof systemRaw === "function" ? systemRaw("") : systemRaw;
   const fullPrompt   = `${systemPrompt}\n\nPedido do usuário:\n${prompt.trim()}`;
   const isHtml       = HTML_INTENTS.has(intent);
 
