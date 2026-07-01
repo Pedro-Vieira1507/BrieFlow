@@ -82,6 +82,18 @@ function ChatRoute() {
     return undefined;
   }, [thread]);
 
+  // Artefacto ao vivo durante o streaming — actualizado token a token
+  const streamingArtifact: Artifact | undefined = useMemo(() => {
+    if (!isStreaming || !streamingText) return undefined;
+    if (loadingIntent === "email" || looksLikeHtml(streamingText)) {
+      return { kind: "html", html: extractHtml(streamingText), title: "E-mail (a gerar...)" };
+    }
+    return { kind: "markdown", markdown: streamingText, title: loadingIntent === "datasheet" ? "Ficha Técnica (a gerar...)" : "Conteúdo (a gerar...)" };
+  }, [isStreaming, streamingText, loadingIntent]);
+
+  // O painel direito mostra: streaming ao vivo → artefacto final guardado
+  const panelArtifact = isStreaming ? streamingArtifact : lastArtifact;
+
   const handleSend = useCallback(
     async (text: string) => {
       if (!thread) return;
@@ -112,7 +124,6 @@ function ChatRoute() {
 
       try {
         if (intent === "image") {
-          // Imagens ainda usam Pollinations (gratuito) — sem streaming necessário
           const abortCtrl = new AbortController();
           abortRef.current = () => abortCtrl.abort();
 
@@ -127,7 +138,7 @@ function ChatRoute() {
           });
 
           updateMessage(thread.id, assistantId, {
-            content: "Aqui está a imagem que você pediu! Use o botão **Baixar imagem** no painel ao lado.",
+            content: "🖼️ Imagem gerada! Veja a prévia no painel ao lado.",
             artifact: { kind: "image", url, prompt: englishPrompt },
           });
           setIsStreaming(false);
@@ -135,7 +146,7 @@ function ChatRoute() {
           abortRef.current = null;
           refresh();
         } else {
-          // Texto/email/datasheet — streaming via SSE
+          // Texto/email/datasheet — streaming SSE; painel direito actualiza em tempo real
           const abort = callOllama(text, intent, {
             onToken: (token) => {
               setStreamingText((prev) => prev + token);
@@ -147,13 +158,13 @@ function ChatRoute() {
               if (intent === "email" || looksLikeHtml(fullText)) {
                 const html = extractHtml(fullText);
                 artifact = { kind: "html", html, title: "E-mail" };
-                reply = "Aqui está o e-mail HTML pronto. Veja a prévia ao lado e copie o código quando quiser.";
+                reply = "✅ E-mail HTML pronto! Veja a prévia e copie o código no painel ao lado.";
               } else if (intent === "datasheet") {
-                artifact = { kind: "markdown", markdown: fullText, title: "Ficha técnica" };
-                reply = "Ficha técnica gerada! Use **Exportar PDF** no painel ao lado.";
+                artifact = { kind: "markdown", markdown: fullText, title: "Ficha Técnica" };
+                reply = "✅ Ficha técnica gerada! Use **Exportar PDF** no painel ao lado.";
               } else {
                 artifact = { kind: "markdown", markdown: fullText };
-                reply = "Pronto! Conteúdo gerado no painel ao lado.";
+                reply = "✅ Conteúdo pronto! Veja o resultado completo no painel ao lado.";
               }
 
               updateMessage(thread.id, assistantId, { content: reply, artifact });
@@ -216,18 +227,20 @@ function ChatRoute() {
       />
       <main className="grid flex-1 grid-cols-1 lg:grid-cols-[minmax(380px,1fr)_minmax(420px,1.2fr)]">
         <section className="flex h-screen flex-col border-r border-border bg-background/40">
+          {/* Chat central: apenas mensagens de conversa — sem o texto gerado completo */}
           <ChatPanel
             messages={thread?.messages ?? []}
-            streamingText={streamingText}
+            streamingText=""
             onSend={handleSend}
             onStop={handleStop}
             isStreaming={isStreaming}
           />
         </section>
         <section className="hidden h-screen flex-col bg-card/30 lg:flex">
+          {/* Painel direito: preview ao vivo durante streaming + artefacto final */}
           <ArtifactPanel
-            artifact={isStreaming ? undefined : lastArtifact}
-            loading={isStreaming}
+            artifact={panelArtifact}
+            loading={isStreaming && !streamingText}
             loadingIntent={loadingIntent}
           />
         </section>
