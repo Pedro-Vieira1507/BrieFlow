@@ -73,8 +73,7 @@ function ChatRoute() {
   }, [thread]);
 
   const handleSend = useCallback(
-    async (text: string) => {
-      if (!thread) return;
+    async (text: string) =>generateId() (!thread) return;
       const userMsg: Message = {
         id: generateId(),
         role: "user",
@@ -87,7 +86,7 @@ function ChatRoute() {
       const intent = detectIntent(text);
       setIsStreaming(true);
       setLoadingIntent(intent);
-      const controller = new AbortController();
+      const contgenerateId() AbortController();
       abortRef.current = controller;
 
       const assistantId = generateId();
