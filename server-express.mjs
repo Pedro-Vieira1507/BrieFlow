@@ -12,17 +12,15 @@ const HTML_INTENTS = new Set(["email", "banner", "instagram"]);
 
 // ─────────────────────────────────────────────────────────────────
 // BRAND IDENTITIES — paletas e tipografia oficiais por marca
-// Adicione novas marcas aqui. A chave é lowercase sem acentos.
-// O objeto é injetado diretamente no briefing enviado ao Ollama.
 // ─────────────────────────────────────────────────────────────────
 const BRAND_IDENTITIES = {
   forlab: {
     displayName: "FORLAB",
-    bg1: "#001f5b",          // azul navy profundo
-    bg2: "#003399",          // azul Forlab principal
-    accent: "#0055cc",       // azul vivo para CTA
-    accentLight: "#4d90fe",  // azul claro para destaques em texto
-    badgeColor: "#0055cc",   // cor do badge de oferta
+    bg1: "#001f5b",
+    bg2: "#003399",
+    accent: "#0055cc",
+    accentLight: "#4d90fe",
+    badgeColor: "#0055cc",
     dotColor: "#4d90fe",
     font: "Montserrat",
     palette: "azul corporativo — #001f5b, #003399, accent #0055cc",
@@ -78,23 +76,18 @@ const BRAND_IDENTITIES = {
   },
 };
 
-/**
- * Detecta qual marca está sendo mencionada no prompt (case-insensitive).
- * Retorna o objeto de identidade da marca ou o genérico.
- */
 function detectBrand(prompt) {
   const lower = prompt.toLowerCase();
   for (const [key, identity] of Object.entries(BRAND_IDENTITIES)) {
     if (key === "brand_generic") continue;
     if (lower.includes(key)) return identity;
-    // Tenta também o displayName em lowercase
     if (lower.includes(identity.displayName.toLowerCase())) return identity;
   }
   return BRAND_IDENTITIES.brand_generic;
 }
 
 // ─────────────────────────────────────────────────────────────────
-// IMAGE SEARCH — paralelo, timeout total 12 s, nunca bloqueia
+// IMAGE SEARCH
 // ─────────────────────────────────────────────────────────────────
 async function searchOneImage(query) {
   if (!query) return null;
@@ -170,16 +163,24 @@ function bannerTemplate(d) {
     d.product_img_3 || FALLBACKS[2],
   ];
 
-  const productGrid = imgs.map((url, i) =>
-    `<div class="prod-card${i === 1 ? " prod-card--main" : ""}">
-      <img src="${url}" alt="Produto ${i + 1}" class="prod-img" loading="lazy" />
-    </div>`
-  ).join("\n    ");
+  // Produto central maior e em destaque; laterais ligeiramente menores e rotacionados
+  const productItems = `
+    <div class="prod-float prod-float--left">
+      <img src="${imgs[0]}" alt="Produto 1" class="prod-img"
+           loading="lazy" onerror="this.style.opacity=0" />
+    </div>
+    <div class="prod-float prod-float--center">
+      <img src="${imgs[1]}" alt="Produto 2" class="prod-img"
+           loading="lazy" onerror="this.style.opacity=0" />
+    </div>
+    <div class="prod-float prod-float--right">
+      <img src="${imgs[2]}" alt="Produto 3" class="prod-img"
+           loading="lazy" onerror="this.style.opacity=0" />
+    </div>`;
 
-  // badge cor da marca
-  const badgeGrad = `linear-gradient(135deg,${badgeColor} 0%,${badgeColor}cc 100%)`;
+  const badgeGrad   = `linear-gradient(135deg,${badgeColor} 0%,${badgeColor}cc 100%)`;
   const badgeShadow = `0 8px 28px ${badgeColor}88,0 0 0 1px rgba(255,255,255,.12)`;
-  const glowRight = `radial-gradient(circle,${badgeColor}22 0%,transparent 70%)`;
+  const glowRight   = `radial-gradient(circle,${badgeColor}22 0%,transparent 70%)`;
 
   return `<!DOCTYPE html>
 <html lang="pt-BR">
@@ -208,6 +209,8 @@ body{width:1200px;height:400px;overflow:hidden;font-family:'Montserrat',sans-ser
   background-image:linear-gradient(rgba(255,255,255,.03) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.03) 1px,transparent 1px);
   background-size:44px 44px;z-index:1;pointer-events:none
 }
+
+/* ── COLUNA ESQUERDA ── */
 .col-left{padding:36px 24px 36px 48px;display:flex;flex-direction:column;justify-content:center;position:relative;z-index:3}
 .brand-tag{display:inline-flex;align-items:center;gap:8px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.18);border-radius:20px;padding:4px 14px;margin-bottom:16px;width:fit-content}
 .brand-tag .dot{width:7px;height:7px;background:${dotColor};border-radius:50%;box-shadow:0 0 8px ${dotColor}}
@@ -216,10 +219,49 @@ body{width:1200px;height:400px;overflow:hidden;font-family:'Montserrat',sans-ser
 .headline em{font-style:normal;color:${accentLight}}
 .subline{font-size:13px;font-weight:600;color:rgba(255,255,255,.6);margin-bottom:10px;letter-spacing:.3px}
 .description{font-size:12px;font-weight:400;color:rgba(255,255,255,.45);line-height:1.65;max-width:280px}
-.col-center{display:flex;align-items:center;justify-content:center;gap:12px;padding:28px 16px;position:relative;z-index:3}
-.prod-card{width:110px;height:110px;background:rgba(255,255,255,.92);border-radius:12px;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 24px rgba(0,0,0,.45),0 0 0 1px rgba(255,255,255,.15);overflow:hidden;flex-shrink:0}
-.prod-card--main{width:148px;height:148px;box-shadow:0 10px 36px ${accent}88,0 0 0 2px ${accentLight}55}
-.prod-img{width:100%;height:100%;object-fit:contain;padding:8px}
+
+/* ── COLUNA CENTRAL — produtos flutuando ── */
+.col-center{
+  display:flex;align-items:flex-end;justify-content:center;
+  gap:0;padding:0 8px 0 8px;
+  position:relative;z-index:3;overflow:visible
+}
+/* Sombra projetada que segue o contorno do produto (não um retângulo) */
+.prod-float{
+  position:relative;display:flex;align-items:flex-end;justify-content:center;
+  flex-shrink:0
+}
+.prod-float--left{
+  width:160px;height:340px;
+  margin-right:-20px;   /* sobreposição leve com o central */
+  transform:rotate(-4deg) translateY(8px);
+  z-index:4
+}
+.prod-float--center{
+  width:220px;height:380px;
+  z-index:6            /* produto central à frente */
+}
+.prod-float--right{
+  width:160px;height:340px;
+  margin-left:-20px;
+  transform:rotate(4deg) translateY(8px);
+  z-index:4
+}
+.prod-img{
+  width:100%;height:100%;
+  object-fit:contain;
+  /* Remove fundo branco de JPGs sem transparência */
+  mix-blend-mode:multiply;
+  /* Sombra que segue o contorno real do objeto */
+  filter:
+    drop-shadow(0 16px 32px rgba(0,0,0,.55))
+    drop-shadow(0  4px  8px rgba(0,0,0,.35))
+    drop-shadow(0  0   1px rgba(0,0,0,.2));
+  /* Leve brilho para integrar ao ambiente azul do banner */
+  transition:filter .3s
+}
+
+/* ── COLUNA DIREITA ── */
 .col-right{padding:36px 44px 36px 20px;display:flex;flex-direction:column;align-items:flex-end;justify-content:center;position:relative;z-index:3}
 .col-right::before{content:'';position:absolute;bottom:-60px;right:-60px;width:280px;height:280px;background:${glowRight};pointer-events:none;z-index:0}
 .badge{background:${badgeGrad};border-radius:14px;padding:16px 22px;text-align:center;margin-bottom:14px;box-shadow:${badgeShadow};min-width:175px;position:relative;overflow:hidden}
@@ -243,7 +285,7 @@ body{width:1200px;height:400px;overflow:hidden;font-family:'Montserrat',sans-ser
     <p class="description">${d.description || ""}</p>
   </div>
   <div class="col-center">
-    ${productGrid}
+    ${productItems}
   </div>
   <div class="col-right">
     <div class="badge">
@@ -316,9 +358,7 @@ const SYSTEM_PROMPTS = {
 
   banner: (brandCtx) => `Você é um copywriter especialista em marketing visual. A partir do briefing recebido, extraia os dados e retorne APENAS um objeto JSON válido — sem explicações, sem markdown, sem texto extra.
 
-${brandCtx ? `IDENTIDADE VISUAL DA MARCA (USE EXATAMENTE ESTAS CORES — NÃO ALTERE):
-${brandCtx}
-` : ""}
+${brandCtx ? `IDENTIDADE VISUAL DA MARCA (USE EXATAMENTE ESTAS CORES — NÃO ALTERE):\n${brandCtx}\n` : ""}
 Campos obrigatórios:
 {
   "brand": "Nome da marca ou produto",
@@ -341,9 +381,7 @@ Retorne SOMENTE o JSON, começando com { e terminando com }.`,
 
   instagram: (brandCtx) => `Você é um copywriter especialista em redes sociais. A partir do briefing recebido, extraia os dados e retorne APENAS um objeto JSON válido — sem explicações, sem markdown, sem texto extra.
 
-${brandCtx ? `IDENTIDADE VISUAL DA MARCA (USE EXATAMENTE ESTAS CORES — NÃO ALTERE):
-${brandCtx}
-` : ""}
+${brandCtx ? `IDENTIDADE VISUAL DA MARCA (USE EXATAMENTE ESTAS CORES — NÃO ALTERE):\n${brandCtx}\n` : ""}
 Campos obrigatórios:
 {
   "brand": "Nome da marca",
@@ -400,7 +438,6 @@ app.post("/api/chat", async (req, res) => {
   // ── TEMPLATE INTENTS (banner / instagram) ──
   if (intent === "banner" || intent === "instagram") {
 
-    // 1. Detecta marca e prepara contexto de cores
     const brandIdentity = detectBrand(prompt);
     const brandCtx = [
       `Marca: ${brandIdentity.displayName || "(genérica)"}`,
@@ -412,8 +449,7 @@ app.post("/api/chat", async (req, res) => {
 
     console.log(`[brand] detectada: ${brandIdentity.displayName || "genérica"} | paleta: ${brandIdentity.palette}`);
 
-    // 2. Gera prompt com system + contexto de marca
-    const systemFn    = SYSTEM_PROMPTS[intent];
+    const systemFn     = SYSTEM_PROMPTS[intent];
     const systemPrompt = typeof systemFn === "function" ? systemFn(brandCtx) : systemFn;
     const fullPrompt   = `${systemPrompt}\n\nBriefing:\n${prompt.trim()}`;
 
@@ -427,7 +463,6 @@ app.post("/api/chat", async (req, res) => {
       return res.status(502).json({ error: `Erro ao gerar dados: ${err.message}` });
     }
 
-    // 3. Garante que as cores da identidade SEMPRE sobrescrevem o JSON do modelo
     data.bg1         = brandIdentity.bg1;
     data.bg2         = brandIdentity.bg2;
     data.accent      = brandIdentity.accent;
@@ -435,7 +470,6 @@ app.post("/api/chat", async (req, res) => {
     data.badgeColor  = brandIdentity.badgeColor;
     data.dotColor    = brandIdentity.dotColor;
 
-    // 4. Busca paralela de imagens com timeout total 12 s
     if (intent === "banner") {
       const bgQuery = data.bg_search_query  || brandIdentity.bgSearchQuery;
       const q1      = data.search_query_1   || "laboratory pipette product white background";
