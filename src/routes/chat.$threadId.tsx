@@ -52,16 +52,15 @@ function ChatRoute() {
   const [threads, setThreads] = useState<Thread[]>([]);
   const [thread, setThread] = useState<Thread | undefined>();
   const [isStreaming, setIsStreaming] = useState(false);
+  const [streamingText, setStreamingText] = useState("");
   const [loadingIntent, setLoadingIntent] =
     useState<"image" | "email" | "datasheet" | "text" | undefined>();
-  const abortRef = useRef<AbortController | null>(null);
+  const abortRef = useRef<(() => void) | null>(null);
 
-  // Hydrate on mount and when route changes
   useEffect(() => {
     setThreads(listThreads());
     const t = getThread(threadId);
     if (!t) {
-      // Unknown threadId — create one and replace
       const fresh = createThread();
       navigate({ to: "/chat/$threadId", params: { threadId: fresh.id }, replace: true });
       return;
@@ -98,9 +97,8 @@ function ChatRoute() {
 
       const intent = detectIntent(text);
       setIsStreaming(true);
+      setStreamingText("");
       setLoadingIntent(intent);
-      const controller = new AbortController();
-      abortRef.current = controller;
 
       const assistantId = generateId();
       const placeholder: Message = {
@@ -114,46 +112,75 @@ function ChatRoute() {
 
       try {
         if (intent === "image") {
-          const englishPrompt = await translatePromptForImage(text, controller.signal);
+          // Imagens ainda usam Pollinations (gratuito) — sem streaming necessário
+          const abortCtrl = new AbortController();
+          abortRef.current = () => abortCtrl.abort();
+
+          const englishPrompt = await translatePromptForImage(text, abortCtrl.signal);
           const url = buildPollinationsUrl(englishPrompt, { seed: Math.floor(Math.random() * 1e6) });
-          // Pre-load before declaring success
+
           await new Promise<void>((resolve, reject) => {
             const img = new Image();
             img.onload = () => resolve();
             img.onerror = () => reject(new Error("Falha ao carregar imagem do Pollinations"));
             img.src = url;
           });
+
           updateMessage(thread.id, assistantId, {
             content: "Aqui está a imagem que você pediu! Use o botão **Baixar imagem** no painel ao lado.",
             artifact: { kind: "image", url, prompt: englishPrompt },
           });
+          setIsStreaming(false);
+          setLoadingIntent(undefined);
+          abortRef.current = null;
+          refresh();
         } else {
-          const raw = await callOllama(text, intent, controller.signal);
-          let artifact: Artifact;
-          let reply: string;
+          // Texto/email/datasheet — streaming via SSE
+          const abort = callOllama(text, intent, {
+            onToken: (token) => {
+              setStreamingText((prev) => prev + token);
+            },
+            onDone: (fullText) => {
+              let artifact: Artifact;
+              let reply: string;
 
-          if (intent === "email" || looksLikeHtml(raw)) {
-            const html = extractHtml(raw);
-            artifact = { kind: "html", html, title: "E-mail" };
-            reply = "Aqui está o e-mail HTML pronto. Veja a prévia ao lado e copie o código quando quiser.";
-          } else if (intent === "datasheet") {
-            artifact = { kind: "markdown", markdown: raw, title: "Ficha técnica" };
-            reply = "Ficha técnica gerada! Use **Exportar PDF** no painel ao lado.";
-          } else {
-            artifact = { kind: "markdown", markdown: raw };
-            reply = "Pronto! Conteúdo gerado no painel ao lado.";
-          }
+              if (intent === "email" || looksLikeHtml(fullText)) {
+                const html = extractHtml(fullText);
+                artifact = { kind: "html", html, title: "E-mail" };
+                reply = "Aqui está o e-mail HTML pronto. Veja a prévia ao lado e copie o código quando quiser.";
+              } else if (intent === "datasheet") {
+                artifact = { kind: "markdown", markdown: fullText, title: "Ficha técnica" };
+                reply = "Ficha técnica gerada! Use **Exportar PDF** no painel ao lado.";
+              } else {
+                artifact = { kind: "markdown", markdown: fullText };
+                reply = "Pronto! Conteúdo gerado no painel ao lado.";
+              }
 
-          updateMessage(thread.id, assistantId, { content: reply, artifact });
+              updateMessage(thread.id, assistantId, { content: reply, artifact });
+              setIsStreaming(false);
+              setStreamingText("");
+              setLoadingIntent(undefined);
+              abortRef.current = null;
+              refresh();
+            },
+            onError: (msg) => {
+              updateMessage(thread.id, assistantId, { content: `⚠️ ${msg}` });
+              toast.error(msg);
+              setIsStreaming(false);
+              setStreamingText("");
+              setLoadingIntent(undefined);
+              abortRef.current = null;
+              refresh();
+            },
+          });
+          abortRef.current = abort;
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Erro desconhecido";
-        updateMessage(thread.id, assistantId, {
-          content: `⚠️ ${msg}`,
-        });
+        updateMessage(thread.id, assistantId, { content: `⚠️ ${msg}` });
         toast.error(msg);
-      } finally {
         setIsStreaming(false);
+        setStreamingText("");
         setLoadingIntent(undefined);
         abortRef.current = null;
         refresh();
@@ -163,7 +190,7 @@ function ChatRoute() {
   );
 
   const handleStop = useCallback(() => {
-    abortRef.current?.abort();
+    abortRef.current?.();
   }, []);
 
   const handleNew = useCallback(() => {
@@ -191,6 +218,7 @@ function ChatRoute() {
         <section className="flex h-screen flex-col border-r border-border bg-background/40">
           <ChatPanel
             messages={thread?.messages ?? []}
+            streamingText={streamingText}
             onSend={handleSend}
             onStop={handleStop}
             isStreaming={isStreaming}

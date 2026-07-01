@@ -1,76 +1,133 @@
-// Lightweight Ollama client + intent detection for marketing artifacts.
-
-export const OLLAMA_URL =
-  (typeof window !== "undefined" && window.localStorage.getItem("ollama:url")) ||
-  "http://localhost:11434";
-
-export const OLLAMA_MODEL =
-  (typeof window !== "undefined" && window.localStorage.getItem("ollama:model")) ||
-  "llama3";
+/**
+ * agent.ts — cliente leve do agente de marketing.
+ *
+ * IMPORTANTE: callOllama e translatePromptForImage agora
+ * chamam Server Functions internas (/api/chat, /api/translate)
+ * em vez de bater direto em localhost:11434 do browser.
+ * Isso resolve o problema de CORS em produção e mantém
+ * o Ollama inacessível pela internet.
+ */
 
 export type Intent = "image" | "email" | "datasheet" | "text";
 
 export function detectIntent(prompt: string): Intent {
   const p = prompt.toLowerCase();
-  if (/\b(imagem|imagens|foto|banner|ilustra|art\s?work|logo|visual|criativo)\b/.test(p)) return "image";
+  if (/\b(imagem|imagens|foto|banner|ilustra|art\s?work|logo|visual|criativo)\b/.test(p))
+    return "image";
   if (/\b(e-?mail|email|newsletter|html|marketing direto|disparo)\b/.test(p)) return "email";
-  if (/\b(ficha\s+t[eé]cnica|datasheet|especifica|spec|pdf|one[- ]?pager)\b/.test(p)) return "datasheet";
+  if (/\b(ficha\s+t[eé]cnica|datasheet|especifica|spec|pdf|one[- ]?pager)\b/.test(p))
+    return "datasheet";
   return "text";
 }
 
-const SYSTEM_PROMPTS: Record<Exclude<Intent, "image">, string> = {
-  email: `Você é um especialista em e-mail marketing. Gere um e-mail HTML completo, responsivo, inline-styled (sem <link> externos), pronto para envio. Comece DIRETAMENTE com <!DOCTYPE html> ou <html>. Não inclua explicações fora do HTML. Use português do Brasil.`,
-  datasheet: `Você é um especialista em conteúdo de marketing técnico. Gere uma ficha técnica de produto em Markdown bem estruturado, com seções: Visão Geral, Características, Especificações (tabela), Benefícios, Casos de Uso e CTA. Use apenas Markdown válido. Português do Brasil.`,
-  text: `Você é um copywriter sênior de marketing. Escreva conteúdo persuasivo, claro e direto em português do Brasil. Use Markdown quando ajudar a leitura.`,
-};
-
-export interface OllamaResult {
-  text: string;
-  intent: Intent;
+export interface StreamCallbacks {
+  onToken: (token: string) => void;
+  onDone: (fullText: string) => void;
+  onError: (message: string) => void;
 }
 
-export async function callOllama(prompt: string, intent: Exclude<Intent, "image">, signal?: AbortSignal): Promise<string> {
-  const res = await fetch(`${OLLAMA_URL}/api/generate`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: OLLAMA_MODEL,
-      prompt: `${SYSTEM_PROMPTS[intent]}\n\nPedido do usuário:\n${prompt}`,
-      stream: false,
-    }),
-    signal,
-  });
+/**
+ * callOllama — chama a Server Function /api/chat com streaming.
+ * Cada token recebido dispara onToken; ao final dispara onDone.
+ * Retorna uma função de cancelamento (abort).
+ */
+export function callOllama(
+  prompt: string,
+  intent: Exclude<Intent, "image">,
+  callbacks: StreamCallbacks,
+  signal?: AbortSignal,
+): () => void {
+  const controller = new AbortController();
+  if (signal) signal.addEventListener("abort", () => controller.abort());
 
-  if (!res.ok) {
-    throw new Error(`Ollama respondeu ${res.status}. Verifique se o serviço está rodando em ${OLLAMA_URL} com CORS habilitado.`);
-  }
+  let fullText = "";
 
-  const data = (await res.json()) as { response?: string };
-  return (data.response ?? "").trim();
+  (async () => {
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt, intent }),
+        signal: controller.signal,
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+        callbacks.onError((err as { error: string }).error ?? `HTTP ${res.status}`);
+        return;
+      }
+
+      if (!res.body) {
+        callbacks.onError("Resposta sem corpo do servidor.");
+        return;
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const payload = line.slice(6).trim();
+          if (payload === "[DONE]") {
+            callbacks.onDone(fullText);
+            return;
+          }
+          try {
+            const token = JSON.parse(payload) as string;
+            fullText += token;
+            callbacks.onToken(token);
+          } catch {
+            // payload inválido — ignora
+          }
+        }
+      }
+
+      callbacks.onDone(fullText);
+    } catch (err) {
+      if ((err as Error).name === "AbortError") return; // cancelamento normal
+      callbacks.onError(err instanceof Error ? err.message : "Erro desconhecido");
+    }
+  })();
+
+  return () => controller.abort();
 }
 
-/** Naive prompt translation hint — Pollinations prefers English prompts. */
-export async function translatePromptForImage(prompt: string, signal?: AbortSignal): Promise<string> {
+/**
+ * translatePromptForImage — chama /api/translate para converter
+ * o briefing em PT para um prompt em inglês antes do Pollinations.
+ */
+export async function translatePromptForImage(
+  prompt: string,
+  signal?: AbortSignal,
+): Promise<string> {
   try {
-    const res = await fetch(`${OLLAMA_URL}/api/generate`, {
+    const res = await fetch("/api/translate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: OLLAMA_MODEL,
-        prompt: `Translate the following marketing image brief into a concise, vivid English prompt for an image generator. Return only the prompt, no quotes, no preface.\n\n${prompt}`,
-        stream: false,
-      }),
+      body: JSON.stringify({ prompt }),
       signal,
     });
     if (!res.ok) return prompt;
-    const data = (await res.json()) as { response?: string };
-    return (data.response ?? prompt).trim().replace(/^["']|["']$/g, "");
+    const { englishPrompt } = (await res.json()) as { englishPrompt: string };
+    return englishPrompt ?? prompt;
   } catch {
     return prompt;
   }
 }
 
-export function buildPollinationsUrl(prompt: string, opts: { width?: number; height?: number; seed?: number } = {}) {
+export function buildPollinationsUrl(
+  prompt: string,
+  opts: { width?: number; height?: number; seed?: number } = {},
+) {
   const { width = 1024, height = 1024, seed } = opts;
   const encoded = encodeURIComponent(prompt);
   const params = new URLSearchParams({
