@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import type { Artifact } from "@/lib/chat-storage";
 import { Copy, Download, FileText, ImageIcon, Mail, Printer, Sparkles, Code2 } from "lucide-react";
@@ -32,7 +32,6 @@ export function ArtifactPanel({ artifact, loading, loadingIntent }: Props) {
         <Toolbar artifact={artifact} view={view} onViewChange={setView} />
       </header>
 
-      {/* Área de preview: escala o conteúdo para caber no painel sem cortar */}
       <div className="thin-scroll flex-1 overflow-auto">
         {artifact.kind === "html" && view === "preview" && (
           <ScaledHtmlPreview html={artifact.html} />
@@ -67,29 +66,53 @@ export function ArtifactPanel({ artifact, loading, loadingIntent }: Props) {
 }
 
 /**
- * Renderiza HTML num iframe invisível de tamanho padrão (1200×900),
- * depois escala via CSS transform para caber no painel sem scroll horizontal.
- * O export continua usando o HTML original no tamanho real.
+ * Renderiza o HTML num iframe de tamanho real (REAL_W × REAL_H),
+ * depois aplica transform: scale() calculado via ResizeObserver para que
+ * caiba exatamente na largura do painel — sem scroll horizontal.
+ * O export/download usa sempre o HTML original no tamanho real.
  */
+const REAL_W = 1200;
+const REAL_H = 900;
+
 function ScaledHtmlPreview({ html }: { html: string }) {
-  // Dimensões reais do documento gerado
-  const REAL_W = 1200;
-  const REAL_H = 900;
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const [scale, setScale] = useState(1);
+
+  useEffect(() => {
+    const el = wrapperRef.current;
+    if (!el) return;
+
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width ?? el.clientWidth;
+      if (width > 0) setScale(width / REAL_W);
+    });
+
+    observer.observe(el);
+    // Cálculo inicial imediato
+    const w = el.clientWidth;
+    if (w > 0) setScale(w / REAL_W);
+
+    return () => observer.disconnect();
+  }, []);
+
+  const scaledH = Math.round(REAL_H * scale);
 
   return (
     <div
-      className="relative w-full overflow-hidden bg-white"
-      style={{ paddingBottom: `${(REAL_H / REAL_W) * 100}%` }}
+      ref={wrapperRef}
+      className="w-full overflow-hidden bg-white"
+      style={{ height: scaledH }}
     >
       <iframe
         title="Preview"
         sandbox="allow-same-origin"
-        className="absolute inset-0 origin-top-left"
         style={{
           width: REAL_W,
           height: REAL_H,
-          transform: `scale(calc(100cqw / ${REAL_W}))`,
+          transform: `scale(${scale})`,
           transformOrigin: "top left",
+          border: "none",
+          display: "block",
         }}
         srcDoc={html}
       />
