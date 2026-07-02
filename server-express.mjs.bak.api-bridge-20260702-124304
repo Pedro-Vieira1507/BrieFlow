@@ -809,24 +809,26 @@ async function sendWebResponseToExpress(webResponse, res) {
 
 const app = express();
 app.use(express.json({ limit: "4mb" }));
+app.use(express.static(path.join(__dirname, "dist")));
 
 // ── FASE 2: ROTA PRINCIPAL DE CHAT ────────────────────────────
 // POST /api/chat
 // Body: { message, sessionId?, model? }
 // Response: { html, contentType, data, seoScore, seoWarnings, structWarnings, sessionId }
+/* PATCH_DISABLED_OLD_EXPRESS_CHAT_ROUTE
 app.post("/api/chat", async (req, res) => {
-  const { message, prompt, sessionId = "default", model, intent } = req.body;
-  const userText = (prompt || message || "").trim();
-  if (!userText) return res.status(400).json({ error: "Mensagem vazia" });
+  const { message, sessionId = "default", model } = req.body;
+  if (!message?.trim()) return res.status(400).json({ error: "Mensagem vazia" });
 
   try {
-    const result = await runAgentPipeline(sessionId, userText, model || DEFAULT_MODEL, intent);
+    const result = await runAgentPipeline(sessionId, message.trim(), model || DEFAULT_MODEL);
     res.json({ ...result, sessionId });
   } catch (e) {
     console.error("[PHASE2] /api/chat erro:", e.message);
     res.status(500).json({ error: e.message });
   }
 });
+*/
 
 // ── FASE 2: SINCRONIZAÇÃO DO PAGE BUILDER ─────────────────────
 // POST /api/state/sync
@@ -907,18 +909,9 @@ app.get("/{*splat}", (req, res) => {
 
 app.use("/assets", express.static(path.join(__dirname, "dist", "client", "assets")));
 
-app.use(express.static(path.join(__dirname, "dist")));
 app.use(async (req, res, next) => {
   try {
-    const expressOwnedApiRoutes = new Set([
-      "/api/state/sync",
-      "/api/validate",
-      "/api/generate",
-    ]);
-
-    if (req.path.startsWith("/api/") && expressOwnedApiRoutes.has(req.path)) {
-      return next();
-    }
+    if (req.path.startsWith("/api/")) return next();
 
     const webRequest = await expressToWebRequest(req);
     const webResponse = await startServer.fetch(webRequest, {}, {});
