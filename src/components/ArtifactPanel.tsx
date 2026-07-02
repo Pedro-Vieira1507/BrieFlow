@@ -34,7 +34,7 @@ export function ArtifactPanel({ artifact, loading, loadingIntent }: Props) {
 
       <div className="thin-scroll flex-1 overflow-auto">
         {artifact.kind === "html" && view === "preview" && (
-          <ScaledHtmlPreview html={artifact.html} />
+          <ScaledHtmlPreview html={artifact.html} prompt={artifact.prompt ?? ""} />
         )}
         {artifact.kind === "html" && view === "code" && (
           <pre className="thin-scroll m-0 h-full overflow-auto bg-[oklch(0.14_0.01_270)] p-5 text-xs leading-relaxed text-foreground">
@@ -65,16 +65,41 @@ export function ArtifactPanel({ artifact, loading, loadingIntent }: Props) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Sanitiza o HTML gerado pelo LLM antes de renderizar no iframe:
+// - Remove qualquer <script> inline (não precisamos de JS no preview)
+// - Substitui <img src> que NÃO sejam do Pollinations por uma URL Pollinations
+//   derivada do prompt do usuário — evita ERR_BLOCKED_BY_RESPONSE.NotSameOrigin
+// ---------------------------------------------------------------------------
+function sanitizeHtml(html: string, userPrompt: string): string {
+  // Extrai palavras-chave do prompt para montar fallback Pollinations
+  const keywords = userPrompt
+    .toLowerCase()
+    .replace(/[^a-záéíóúãâêôçàüñ\s]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length > 3)
+    .slice(0, 8)
+    .join("+");
+  const fallbackImg = `https://image.pollinations.ai/prompt/${encodeURIComponent(keywords)}?width=800&height=500&nologo=true`;
+
+  return html
+    // Remove scripts inline (evita o erro sandbox allow-scripts para scripts desnecessários)
+    // Mantém o HTML puramente CSS+HTML para o preview funcionar com allow-same-origin
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
+    // Substitui qualquer img src que não seja Pollinations por fallback Pollinations
+    .replace(/(<img[^>]*\ssrc=["'])(?!https:\/\/image\.pollinations\.ai)([^"']*?)(["'])/gi,
+      `$1${fallbackImg}$3`);
+}
+
 /**
  * Renderiza o HTML num iframe de tamanho real (REAL_W × REAL_H),
  * depois aplica transform: scale() calculado via ResizeObserver para que
  * caiba exatamente na largura do painel — sem scroll horizontal.
- * O export/download usa sempre o HTML original no tamanho real.
  */
 const REAL_W = 1200;
 const REAL_H = 900;
 
-function ScaledHtmlPreview({ html }: { html: string }) {
+function ScaledHtmlPreview({ html, prompt }: { html: string; prompt: string }) {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
 
@@ -88,7 +113,6 @@ function ScaledHtmlPreview({ html }: { html: string }) {
     });
 
     observer.observe(el);
-    // Cálculo inicial imediato
     const w = el.clientWidth;
     if (w > 0) setScale(w / REAL_W);
 
@@ -96,6 +120,7 @@ function ScaledHtmlPreview({ html }: { html: string }) {
   }, []);
 
   const scaledH = Math.round(REAL_H * scale);
+  const cleanHtml = sanitizeHtml(html, prompt);
 
   return (
     <div
@@ -105,6 +130,10 @@ function ScaledHtmlPreview({ html }: { html: string }) {
     >
       <iframe
         title="Preview"
+        // allow-same-origin: permite que o iframe acesse recursos de mesma origem (fontes, etc.)
+        // allow-scripts foi removido intencionalmente — scripts inline são removidos pelo sanitizer.
+        // Se o conteúdo gerado não precisar de JS para renderizar, isso é mais seguro.
+        // Caso o modelo gere animações CSS puras, elas continuam funcionando sem allow-scripts.
         sandbox="allow-same-origin"
         style={{
           width: REAL_W,
@@ -114,7 +143,7 @@ function ScaledHtmlPreview({ html }: { html: string }) {
           border: "none",
           display: "block",
         }}
-        srcDoc={html}
+        srcDoc={cleanHtml}
       />
     </div>
   );
@@ -154,7 +183,7 @@ function Toolbar({
           <Button size="sm" variant="secondary" onClick={() => copy(artifact.html, "HTML copiado")}>
             <Copy className="mr-1 h-4 w-4" /> Copiar
           </Button>
-          <Button size="sm" onClick={() => download(artifact.html, "email.html", "text/html")}>
+          <Button size="sm" onClick={() => download(artifact.html, "banner.html", "text/html")}>
             <Download className="mr-1 h-4 w-4" /> Baixar
           </Button>
         </>
