@@ -1,17 +1,10 @@
 /**
  * Server Function — POST /api/chat
  *
- * Recebe o prompt e o intent do cliente, chama o Ollama
- * INTERNAMENTE (sem expor a porta 11434 publicamente) e
- * retorna um ReadableStream de Server-Sent Events para que
- * o frontend renderize tokens em tempo real.
- *
- * Body esperado:
- *   { prompt: string, intent: "email" | "banner" | "instagram" | "datasheet" | "text", model?: string }
- *
- * Resposta: text/event-stream
- *   data: <token>\n\n
- *   data: [DONE]\n\n
+ * Usa o campo `system` da API do Ollama (separado do `prompt`) para que
+ * as regras do sistema tenham prioridade máxima sobre o pedido do usuário.
+ * Antes de gerar HTML, o modelo é forçado a um bloco de raciocínio explícito
+ * (chain-of-thought) que extrai cores, produto e descrição da imagem.
  */
 import { createAPIFileRoute } from "@tanstack/start/api";
 
@@ -19,80 +12,82 @@ const OLLAMA_INTERNAL_URL = process.env.OLLAMA_URL ?? "http://127.0.0.1:11434";
 const DEFAULT_MODEL = process.env.OLLAMA_MODEL ?? "qwen2.5:14b";
 
 // ─────────────────────────────────────────────────────────────────────────────
-const COLOR_RULES = `
-REGRAS ABSOLUTAS DE COR — NUNCA IGNORE:
-1. PROIBIDO usar azul (#0000ff, #003366, #1a73e8, navy, blue, #00008b, #1e40af, etc) como cor primária ou de fundo, a não ser que o usuário EXPLICITAMENTE peça.
-2. OBRIGATÓRIO usar EXATAMENTE as cores pedidas pelo usuário. Se o usuário pediu "rosa e dourado", o fundo principal e os textos de destaque DEVEM ser rosa (#f9a8d4, #ec4899 ou similar) e dourado (#f59e0b, #d97706 ou similar).
-3. Se o usuário não especificou cores, use neutros escuros (cinza escuro #1a1a1a ou off-white #fafafa) como base e um ÚNICO tom de destaque quente (laranja #f97316, vinho #7f1d1d, verde musgo #3f6212 — NUNCA azul por padrão).
-4. Gradientes só podem usar as cores pedidas pelo usuário. NUNCA crie gradientes azul/roxo sem pedido explícito.
-5. Antes de escrever qualquer CSS, identifique as cores exatas pedidas. Use APENAS essas.`.trim();
-
+// SYSTEM PROMPTS — enviados no campo `system` da API do Ollama
+// Isso garante que as regras não sejam tratadas como parte do pedido do usuário
 // ─────────────────────────────────────────────────────────────────────────────
-const IMAGE_RULES = `
-REGRAS PARA IMAGENS — SIGA EXATAMENTE:
-1. Para imagens de produto ou fundo, use EXCLUSIVAMENTE o formato Pollinations.ai:
-   <img src="https://image.pollinations.ai/prompt/DESCRIÇÃO_EM_INGLÊS?width=800&height=500&nologo=true" ...>
-2. A DESCRIÇÃO deve ser em inglês, descritiva e diretamente relacionada ao produto/ramo mencionado pelo usuário.
-   Exemplos corretos:
-   - Empresa de confeitaria, produto brownie: "close-up delicious chocolate brownie cake with strawberries professional food photography"
-   - Empresa de instrumentos científicos: "modern laboratory analytical instrument equipment scientific professional"
-   - Empresa de cosméticos: "luxury cosmetics products flat lay elegant beauty photography"
-3. NUNCA use URLs inventadas, endereços de outros sites, ou src vazio.
-4. NUNCA use image.pollinations.ai com URLs diferentes do formato acima.
-5. A imagem de produto deve sempre ter object-fit:cover e preencher o espaço definido.`.trim();
 
 const SYSTEM_PROMPTS: Record<string, string> = {
   // ── E-MAIL ──────────────────────────────────────────────────────────────────
-  email: `Você é um especialista em e-mail marketing. Gere um e-mail HTML completo, responsivo, inline-styled (sem <link> externos), pronto para envio. Comece DIRETAMENTE com <!DOCTYPE html> ou <html>. Não inclua explicações fora do HTML. Use português do Brasil.
-
-${COLOR_RULES}
-
-${IMAGE_RULES}`,
+  email: `Você é um especialista em e-mail marketing que gera HTML inline-styled responsivo.
+Regras inviolaveis:
+- Comece DIRETAMENTE com <!DOCTYPE html>. Zero texto fora do HTML.
+- Sem <link> externos, sem @import.
+- Português do Brasil.
+- Cor: use SOMENTE as cores explicitamente pedidas pelo usuário. Se não especificou, use #1a1a1a de fundo e #f97316 como destaque. NUNCA use azul como cor principal sem pedido.
+- Imagem: se precisar de imagem, use EXCLUSIVAMENTE: <img src="https://image.pollinations.ai/prompt/DESCRICAO_EM_INGLES?width=600&height=300&nologo=true" style="width:100%;display:block">. A DESCRICAO deve descrever exatamente o produto mencionado pelo usuário em inglês.`,
 
   // ── BANNER ──────────────────────────────────────────────────────────────────
-  banner: `Você é um designer de banners digitais especializado em marketing. Gere um banner HTML/CSS completo, autossuficiente (sem imports externos de CSS), com dimensões 1200×500px.
+  banner: `Você é um designer de banners HTML/CSS. Gere um banner 1200x500px completo e autossuficiente.
+
+PROCESSO OBRIGATÓRIO antes de escrever qualquer HTML:
+Passo 1 — Extraia do pedido do usuário e escreva num comentário HTML no início do código:
+  <!-- ANALISE:
+  Cores pedidas: [liste as cores exatas mencionadas pelo usuário]
+  Cor primária (fundo/base): [hex exato]
+  Cor secundária: [hex exato]
+  Cor de destaque (textos de promoção/desconto): [hex exato]
+  Produto: [nome do produto]
+  Descrição da imagem Pollinations (inglês): [descrição detalhada e específica do produto]
+  -->
+Passo 2 — Construa o HTML usando EXATAMENTE os valores definidos no Passo 1.
 
 ESTRUTURA DO BANNER:
-- Div raiz: width:1200px; height:500px; position:relative; overflow:hidden; display:flex
-- Lado esquerdo (~60% da largura): fundo colorido com as cores do usuário, todos os textos e CTA
-- Lado direito (~40% da largura): imagem do produto via Pollinations (veja REGRAS DE IMAGEM)
-- Hierarquia de texto (lado esquerdo): nome da marca (pequeno), título principal (grande bold), oferta/subtítulo (médio), botão CTA
-- CTA: border-radius:8px; padding:14px 32px; font-weight:bold; cor contrastante com o fundo
+- Div raiz: width:1200px; height:500px; position:relative; overflow:hidden; display:flex; font-family:Arial,sans-serif
+- Painel esquerdo (~680px): background com a COR PRIMARIA pedida; padding:50px 60px; display:flex; flex-direction:column; justify-content:center; gap:16px
+  - Tag da marca: font-size:12px; letter-spacing:2px; text-transform:uppercase; opacity:0.8; cor contrastante com o fundo
+  - Título principal: font-size:48px; font-weight:900; line-height:1.1; cor branca ou contrastante
+  - Subtexto de oferta/desconto: font-size:22px; font-weight:700; color: COR DE DESTAQUE (vermelho, dourado, etc — o que o usuário pediu)
+  - Descrição: font-size:15px; opacity:0.85; max-width:400px
+  - Botão CTA: display:inline-block; padding:16px 40px; border-radius:8px; font-weight:900; font-size:16px; background: COR SECUNDÁRIA ou destaque; cursor:pointer
+- Painel direito (~520px): position:relative; overflow:hidden
+  - <img src="https://image.pollinations.ai/prompt/DESCRICAO_EM_INGLES_DO_PRODUTO?width=520&height=500&nologo=true" style="width:100%;height:100%;object-fit:cover;display:block">
+- Badge de desconto (opcional): position:absolute; top:30px; right:30px; background: COR DE DESTAQUE; color:#fff; border-radius:50%; width:90px; height:90px; display:flex; flex-direction:column; align-items:center; justify-content:center; font-weight:900
 
-${COLOR_RULES}
-
-${IMAGE_RULES}
-
-ANTES DE ESCREVER O HTML, responda internamente:
-- Quais cores o usuário pediu? (use APENAS essas no CSS)
-- Qual é o produto/ramo da empresa? (use para descrever a imagem Pollinations em inglês)
-
-Comece DIRETAMENTE com <!DOCTYPE html>. Sem explicações fora do HTML. Use português do Brasil.`,
+REGRAS ABSOLUTAS:
+- A COR DO FUNDO do painel esquerdo é a cor primária que o usuário pediu. Se pediu rosa, é rosa. Se pediu marrom, é marrom.
+- NUNCA use background azul (#0000ff, #003366, #1a73e8, navy, blue, #1e40af, #2563eb, #3b82f6 ou qualquer tom de azul) a não ser que o usuário tenha pedido explicitamente a palavra "azul".
+- A descrição Pollinations DEVE descrever o produto específico mencionado (ex: brownie recheado sanduiche quadrado = "square layered chocolate brownie sandwich cut in half showing filling close-up food photography").
+- Comece DIRETAMENTE com <!-- ANALISE: (o comentário do Passo 1) seguido de <!DOCTYPE html>.
+- ZERO texto explicativo fora do HTML.
+- Português do Brasil nos textos do banner.`,
 
   // ── INSTAGRAM ───────────────────────────────────────────────────────────────
-  instagram: `Você é um designer de posts para Instagram especializado em marketing. Gere um post HTML/CSS completo, autossuficiente (sem imports externos de CSS), em formato quadrado 1080×1080px.
+  instagram: `Você é um designer de posts para Instagram especializado em marketing. Gere um post HTML/CSS 1080x1080px completo.
 
-ESTRUTURA DO POST:
-- Div raiz: width:1080px; height:1080px; position:relative; overflow:hidden
-- Opção A (imagem dominante): imagem Pollinations cobrindo todo o fundo (position:absolute; inset:0; object-fit:cover; z-index:0) + overlay semi-transparente nas cores do usuário + textos por cima (z-index:1)
-- Opção B (sem imagem): fundo sólido ou gradiente nas cores do usuário + elementos geométricos decorativos
-- Hierarquia: headline principal (grande bold centro), subtítulo/oferta (menor), nome da marca (canto)
-- Tipografia: Arial Black ou Impact para headlines; sans-serif para subtítulos
+PROCESSO OBRIGATÓRIO antes de escrever qualquer HTML:
+Escreva um comentário HTML no início:
+  <!-- ANALISE:
+  Cores pedidas: [liste]
+  Cor primária: [hex]
+  Cor secundária: [hex]
+  Produto/ramo: [nome]
+  Descrição Pollinations (inglês, específica): [descrição]
+  -->
 
-${COLOR_RULES}
+ESTRUTURA:
+- Div raiz: width:1080px; height:1080px; position:relative; overflow:hidden; font-family:Arial,sans-serif
+- Fundo: imagem Pollinations (position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:0) + overlay com as cores pedidas (z-index:1)
+- Textos (z-index:2): headline grande bold centrada, subtítulo, nome da marca no canto
 
-${IMAGE_RULES}
+REGRAS:
+- Cores: use SOMENTE as cores que o usuário pediu. NUNCA azul como padrão.
+- Imagem: use https://image.pollinations.ai/prompt/DESCRICAO?width=1080&height=1080&nologo=true com descrição do produto específico do usuário.
+- Comece com <!-- ANALISE: seguido de <!DOCTYPE html>. Zero texto fora do HTML. Português do Brasil.`,
 
-ANTES DE ESCREVER O HTML, responda internamente:
-- Quais cores o usuário pediu? (use APENAS essas)
-- Qual é o produto/ramo? (use para descrever a imagem Pollinations)
+  // ── FICHA TÉCNICA ──────────────────────────────────────────────────────────
+  datasheet: `Você é um especialista em conteúdo de marketing técnico. Gere uma ficha técnica de produto em Markdown estruturado com: Visão Geral, Características, Especificações (tabela), Benefícios, Casos de Uso e CTA. Use apenas Markdown válido. Português do Brasil.`,
 
-Comece DIRETAMENTE com <!DOCTYPE html>. Sem explicações fora do HTML. Use português do Brasil.`,
-
-  // ── FICHA TÉCNICA ───────────────────────────────────────────────────────────
-  datasheet: `Você é um especialista em conteúdo de marketing técnico. Gere uma ficha técnica de produto em Markdown bem estruturado, com seções: Visão Geral, Características, Especificações (tabela), Benefícios, Casos de Uso e CTA. Use apenas Markdown válido. Português do Brasil.`,
-
-  // ── TEXTO GENÉRICO ──────────────────────────────────────────────────────────
+  // ── TEXTO GENÉRICO ─────────────────────────────────────────────────────────
   text: `Você é um copywriter sênior de marketing. Escreva conteúdo persuasivo, claro e direto em português do Brasil. Use Markdown quando ajudar a leitura.`,
 };
 
@@ -119,7 +114,6 @@ export const APIRoute = createAPIFileRoute("/api/chat")({
     }
 
     const systemPrompt = SYSTEM_PROMPTS[intent] ?? SYSTEM_PROMPTS.text;
-    const fullPrompt = `${systemPrompt}\n\nPedido do usuário:\n${prompt.trim()}`;
 
     let ollamaRes: Response;
     try {
@@ -128,7 +122,11 @@ export const APIRoute = createAPIFileRoute("/api/chat")({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model,
-          prompt: fullPrompt,
+          // `system` é o campo nativo do Ollama para system prompt — tem prioridade
+          // sobre o `prompt` (que é o pedido do usuário). Isso impede que o modelo
+          // misture as regras com o conteúdo e reduza o peso das instruções.
+          system: systemPrompt,
+          prompt: prompt.trim(),
           stream: true,
         }),
         signal: request.signal,
