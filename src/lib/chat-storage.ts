@@ -4,7 +4,7 @@
 export type Role = "user" | "assistant";
 
 export type Artifact =
-  | { kind: "html"; html: string; title?: string }
+  | { kind: "html"; html: string; title?: string; prompt?: string }
   | { kind: "image"; url: string; prompt: string }
   | { kind: "markdown"; markdown: string; title?: string }
   | { kind: "text"; text: string };

@@ -34,7 +34,7 @@ export function ArtifactPanel({ artifact, loading, loadingIntent }: Props) {
 
       <div className="thin-scroll flex-1 overflow-auto">
         {artifact.kind === "html" && view === "preview" && (
-          <ScaledHtmlPreview html={artifact.html} prompt={artifact.prompt ?? ""} />
+          <ScaledHtmlPreview html={artifact.html} userPrompt={artifact.prompt ?? ""} />
         )}
         {artifact.kind === "html" && view === "code" && (
           <pre className="thin-scroll m-0 h-full overflow-auto bg-[oklch(0.14_0.01_270)] p-5 text-xs leading-relaxed text-foreground">
@@ -66,40 +66,74 @@ export function ArtifactPanel({ artifact, loading, loadingIntent }: Props) {
 }
 
 // ---------------------------------------------------------------------------
-// Sanitiza o HTML gerado pelo LLM antes de renderizar no iframe:
-// - Remove qualquer <script> inline (não precisamos de JS no preview)
-// - Substitui <img src> que NÃO sejam do Pollinations por uma URL Pollinations
-//   derivada do prompt do usuário — evita ERR_BLOCKED_BY_RESPONSE.NotSameOrigin
+// sanitizeHtml
+// Prioridade 1: extrai a descrição Pollinations do bloco <!-- ANALISE: -->
+//   que o modelo é instruído a escrever antes do HTML.
+// Prioridade 2: fallback com palavras-chave do prompt do usuário
+//   convertidas para inglês via dicionário simples.
+// Em ambos os casos, qualquer <img src> que não seja Pollinations é substituído.
 // ---------------------------------------------------------------------------
-function sanitizeHtml(html: string, userPrompt: string): string {
-  // Extrai palavras-chave do prompt para montar fallback Pollinations
-  const keywords = userPrompt
-    .toLowerCase()
-    .replace(/[^a-záéíóúãâêôçàüñ\s]/g, " ")
+
+const PT_TO_EN: [RegExp, string][] = [
+  [/brownie/gi, "brownie"],
+  [/recheado/gi, "filled"],
+  [/sanduiche|sanduíche/gi, "sandwich"],
+  [/bolo/gi, "cake"],
+  [/doce|confei|confeitaria/gi, "pastry confectionery"],
+  [/chocolate/gi, "chocolate"],
+  [/morango/gi, "strawberry"],
+  [/instrumento|equipamento/gi, "instrument equipment"],
+  [/laboratório|laboratorio/gi, "laboratory"],
+  [/cosmético|cosmetico|beleza/gi, "cosmetics beauty"],
+  [/roupa|moda|fashion/gi, "fashion clothing"],
+  [/alimento|comida|restaurante/gi, "food restaurant"],
+  [/tecnologia|tech/gi, "technology"],
+  [/imobiliário|imóvel/gi, "real estate property"],
+];
+
+function buildFallbackDescription(userPrompt: string): string {
+  let translated = userPrompt;
+  for (const [pt, en] of PT_TO_EN) {
+    translated = translated.replace(pt, en);
+  }
+  // Pega as palavras mais longas (mais descritivas) e forma uma frase curta
+  const words = translated
+    .replace(/[^a-z\s]/gi, " ")
     .split(/\s+/)
     .filter((w) => w.length > 3)
-    .slice(0, 8)
-    .join("+");
-  const fallbackImg = `https://image.pollinations.ai/prompt/${encodeURIComponent(keywords)}?width=800&height=500&nologo=true`;
-
-  return html
-    // Remove scripts inline (evita o erro sandbox allow-scripts para scripts desnecessários)
-    // Mantém o HTML puramente CSS+HTML para o preview funcionar com allow-same-origin
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
-    // Substitui qualquer img src que não seja Pollinations por fallback Pollinations
-    .replace(/(<img[^>]*\ssrc=["'])(?!https:\/\/image\.pollinations\.ai)([^"']*?)(["'])/gi,
-      `$1${fallbackImg}$3`);
+    .slice(0, 6)
+    .join(" ");
+  return `${words} professional marketing photography`;
 }
 
-/**
- * Renderiza o HTML num iframe de tamanho real (REAL_W × REAL_H),
- * depois aplica transform: scale() calculado via ResizeObserver para que
- * caiba exatamente na largura do painel — sem scroll horizontal.
- */
+function sanitizeHtml(html: string, userPrompt: string): string {
+  // Tenta extrair a descrição Pollinations do bloco ANALISE gerado pelo modelo
+  const analyseMatch = html.match(
+    /Descri[\u00e7c][\u00e3a]o(?:[^:]*)?:\s*([^\n\r]+)/i
+  );
+  const pollinationsDesc = analyseMatch
+    ? analyseMatch[1].trim().replace(/["']/g, "")
+    : buildFallbackDescription(userPrompt);
+
+  const encodedDesc = encodeURIComponent(pollinationsDesc);
+  const fallbackUrl = `https://image.pollinations.ai/prompt/${encodedDesc}?width=800&height=500&nologo=true`;
+
+  return (
+    html
+      // Remove scripts inline (preview não precisa de JS)
+      .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
+      // Substitui qualquer img src que não seja Pollinations
+      .replace(
+        /(<img[^>]*\ssrc=["'])(?!https:\/\/image\.pollinations\.ai)([^"']*?)(["'])/gi,
+        `$1${fallbackUrl}$3`
+      )
+  );
+}
+
 const REAL_W = 1200;
 const REAL_H = 900;
 
-function ScaledHtmlPreview({ html, prompt }: { html: string; prompt: string }) {
+function ScaledHtmlPreview({ html, userPrompt }: { html: string; userPrompt: string }) {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
 
@@ -120,7 +154,7 @@ function ScaledHtmlPreview({ html, prompt }: { html: string; prompt: string }) {
   }, []);
 
   const scaledH = Math.round(REAL_H * scale);
-  const cleanHtml = sanitizeHtml(html, prompt);
+  const cleanHtml = sanitizeHtml(html, userPrompt);
 
   return (
     <div
@@ -130,10 +164,6 @@ function ScaledHtmlPreview({ html, prompt }: { html: string; prompt: string }) {
     >
       <iframe
         title="Preview"
-        // allow-same-origin: permite que o iframe acesse recursos de mesma origem (fontes, etc.)
-        // allow-scripts foi removido intencionalmente — scripts inline são removidos pelo sanitizer.
-        // Se o conteúdo gerado não precisar de JS para renderizar, isso é mais seguro.
-        // Caso o modelo gere animações CSS puras, elas continuam funcionando sem allow-scripts.
         sandbox="allow-same-origin"
         style={{
           width: REAL_W,

@@ -69,12 +69,9 @@ function ChatRoute() {
     "classifying" | "generating" | "rendering" | undefined
   >();
   const [brandProfile, setBrandProfile] = useState<BrandProfile | undefined>();
-  /**
-   * Artefato atualmente exibido no painel.
-   * - undefined: mostra o último gerado (comportamento padrão)
-   * - Artifact: artefato específico selecionado via botão "Visualizar"
-   * Durante o streaming, sempre exibe o artefato ao vivo.
-   */
+  // Guarda o prompt do usuário atual para repassar ao artifact
+  const currentUserPrompt = useRef<string>("");
+
   const [selectedArtifact, setSelectedArtifact] = useState<Artifact | undefined>();
   const abortRef = useRef<(() => void) | null>(null);
 
@@ -88,7 +85,6 @@ function ChatRoute() {
     }
     setThread(t);
     setBrandProfile(getBrandProfile(threadId));
-    // Ao trocar de conversa, limpa a seleção manual
     setSelectedArtifact(undefined);
   }, [threadId, navigate]);
 
@@ -107,7 +103,6 @@ function ChatRoute() {
     return undefined;
   }, [thread]);
 
-  // Artefacto ao vivo durante o streaming
   const streamingArtifact: Artifact | undefined = useMemo(() => {
     if (!isStreaming || !streamingText) return undefined;
     if (
@@ -116,7 +111,12 @@ function ChatRoute() {
       loadingIntent === "instagram" ||
       looksLikeHtml(streamingText)
     ) {
-      return { kind: "html", html: extractHtml(streamingText), title: "A gerar..." };
+      return {
+        kind: "html",
+        html: extractHtml(streamingText),
+        title: "A gerar...",
+        prompt: currentUserPrompt.current,
+      };
     }
     return {
       kind: "markdown",
@@ -125,12 +125,6 @@ function ChatRoute() {
     };
   }, [isStreaming, streamingText, loadingIntent]);
 
-  /**
-   * Regra de prioridade para o painel:
-   * 1. Durante streaming → sempre o artefato ao vivo
-   * 2. Artefato selecionado manualmente via "Visualizar"
-   * 3. Último artefato da conversa (fallback padrão)
-   */
   const panelArtifact = isStreaming
     ? streamingArtifact
     : (selectedArtifact ?? lastArtifact);
@@ -164,6 +158,9 @@ function ChatRoute() {
     async (text: string) => {
       if (!thread) return;
 
+      // Salva o prompt do usuário para repassar ao artifact HTML
+      currentUserPrompt.current = text;
+
       const brandPatch = extractBrandInfo(text);
       const hasBrandInfo = Object.keys(brandPatch).length > 0;
       const isSetupRequest = isBrandSetupRequest(text);
@@ -188,7 +185,6 @@ function ChatRoute() {
       setStreamingText("");
       setLoadingIntent(intent);
       setLoadingStage("classifying");
-      // Ao enviar nova mensagem, limpa seleção manual para voltar ao fluxo normal
       setSelectedArtifact(undefined);
 
       const assistantId = generateId();
@@ -254,7 +250,8 @@ function ChatRoute() {
                   email: "E-mail HTML",
                 };
                 const title = titles[intent] ?? "HTML";
-                artifact = { kind: "html", html, title };
+                // Salva o prompt do usuário no artifact para o sanitizer usar
+                artifact = { kind: "html", html, title, prompt: text };
                 reply = `✅ ${title} pronto! Veja a prévia e copie o código no painel ao lado.`;
               } else if (intent === "datasheet") {
                 artifact = { kind: "markdown", markdown: fullText, title: "Ficha Técnica" };
