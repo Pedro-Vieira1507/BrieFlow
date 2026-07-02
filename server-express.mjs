@@ -839,11 +839,11 @@ app.post("/api/generate", async (req, res) => {
 });
 
 // ── SPA FALLBACK ──────────────────────────────────────────────
-app.get("*", (req, res) => {
-  res.sendFile(path.join(__dirname, "dist", "index.html"));
+app.get("/{*splat}", (req, res) => {
+  res.status(200).send(`<!doctype html><html lang="pt-BR"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>BrieFlow</title></head><body><div id="app">BrieFlow online</div></body></html>`);
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, "0.0.0.0", () => {
   console.log(`\n╔══════════════════════════════════════╗`);
   console.log(`║  BrieFlow Server — Fase 2 Ativa      ║`);
   console.log(`║  http://localhost:${PORT}               ║`);
