@@ -7,12 +7,14 @@ import {
   type Artifact,
   type Message,
   type Thread,
+  type ContentType,
   appendMessage,
   createThread,
   deleteThread,
   getThread,
   listThreads,
   updateMessage,
+  setThreadContentType,
 } from "@/lib/chat-storage";
 import {
   buildPollinationsUrl,
@@ -21,6 +23,14 @@ import {
   looksLikeHtml,
   translatePromptForImage,
 } from "@/lib/agent";
+import {
+  type BrandProfile,
+  getBrandProfile,
+  saveBrandProfile,
+  brandContextBlock,
+  extractBrandInfo,
+  isBrandSetupRequest,
+} from "@/lib/brand-memory";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 
@@ -38,7 +48,7 @@ function generateId(): string {
 export const Route = createFileRoute("/chat/$threadId")({
   head: () => ({
     meta: [
-      { title: "Conversa — Marketing AI" },
+      { title: "Conversa — BrieFlow" },
       { name: "description", content: "Chat com agente de marketing e painel de artefatos." },
     ],
   }),
@@ -55,6 +65,10 @@ function ChatRoute() {
   const [streamingText, setStreamingText] = useState("");
   const [loadingIntent, setLoadingIntent] =
     useState<"image" | "email" | "banner" | "instagram" | "datasheet" | "text" | undefined>();
+  const [loadingStage, setLoadingStage] = useState<
+    "classifying" | "generating" | "rendering" | undefined
+  >();
+  const [brandProfile, setBrandProfile] = useState<BrandProfile | undefined>();
   const abortRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
@@ -66,11 +80,13 @@ function ChatRoute() {
       return;
     }
     setThread(t);
+    setBrandProfile(getBrandProfile(threadId));
   }, [threadId, navigate]);
 
   const refresh = useCallback(() => {
     setThreads(listThreads());
     setThread(getThread(threadId));
+    setBrandProfile(getBrandProfile(threadId));
   }, [threadId]);
 
   const lastArtifact: Artifact | undefined = useMemo(() => {
@@ -82,7 +98,7 @@ function ChatRoute() {
     return undefined;
   }, [thread]);
 
-  // Artefacto ao vivo durante o streaming — actualizado token a token
+  // Artefacto ao vivo durante o streaming
   const streamingArtifact: Artifact | undefined = useMemo(() => {
     if (!isStreaming || !streamingText) return undefined;
     if (
@@ -100,12 +116,53 @@ function ChatRoute() {
     };
   }, [isStreaming, streamingText, loadingIntent]);
 
-  // O painel direito mostra: streaming ao vivo → artefacto final guardado
   const panelArtifact = isStreaming ? streamingArtifact : lastArtifact;
+
+  /**
+   * Constrói o histórico de mensagens da conversa para enviar ao modelo,
+   * garantindo multi-turn contextual real.
+   * Inclui o bloco de contexto de marca como prefixo do prompt do usuário.
+   */
+  const buildContextualPrompt = useCallback(
+    (userText: string): string => {
+      if (!thread) return userText;
+
+      const brandCtx = brandContextBlock(brandProfile);
+
+      // Últimas 10 trocas (user + assistant) para contexto multi-turn
+      const history = thread.messages
+        .slice(-20)
+        .map((m) => `${m.role === "user" ? "Usuário" : "Assistente"}: ${m.content}`)
+        .join("\n");
+
+      const parts: string[] = [];
+      if (brandCtx) parts.push(brandCtx);
+      if (history) {
+        parts.push("=== HISTÓRICO DESTA CONVERSA ===");
+        parts.push(history);
+        parts.push("===");
+      }
+      parts.push(`Usuário: ${userText}`);
+
+      return parts.join("\n\n");
+    },
+    [thread, brandProfile]
+  );
 
   const handleSend = useCallback(
     async (text: string) => {
       if (!thread) return;
+
+      // --- Detecção passiva de informações de marca na mensagem ---
+      const brandPatch = extractBrandInfo(text);
+      const hasBrandInfo = Object.keys(brandPatch).length > 0;
+      const isSetupRequest = isBrandSetupRequest(text);
+
+      if (hasBrandInfo || isSetupRequest) {
+        const currentProfile = getBrandProfile(threadId) ?? { threadId, updatedAt: Date.now() };
+        saveBrandProfile({ ...currentProfile, ...brandPatch, threadId });
+        setBrandProfile(getBrandProfile(threadId));
+      }
 
       const userMsg: Message = {
         id: generateId(),
@@ -120,6 +177,7 @@ function ChatRoute() {
       setIsStreaming(true);
       setStreamingText("");
       setLoadingIntent(intent);
+      setLoadingStage("classifying");
 
       const assistantId = generateId();
       const placeholder: Message = {
@@ -131,15 +189,19 @@ function ChatRoute() {
       appendMessage(thread.id, placeholder);
       refresh();
 
+      // Breve pausa para mostrar estágio "classifying" ao usuário
+      await new Promise((r) => setTimeout(r, 400));
+      setLoadingStage("generating");
+
       try {
         if (intent === "image") {
-          // Imagem genérica → Pollinations.ai
           const abortCtrl = new AbortController();
           abortRef.current = () => abortCtrl.abort();
 
           const englishPrompt = await translatePromptForImage(text, abortCtrl.signal);
           const url = buildPollinationsUrl(englishPrompt, { seed: Math.floor(Math.random() * 1e6) });
 
+          setLoadingStage("rendering");
           await new Promise<void>((resolve, reject) => {
             const img = new Image();
             img.onload = () => resolve();
@@ -147,18 +209,21 @@ function ChatRoute() {
             img.src = url;
           });
 
+          setThreadContentType(thread.id, "image" as ContentType);
           updateMessage(thread.id, assistantId, {
             content: "🖼️ Imagem gerada! Veja a prévia no painel ao lado.",
             artifact: { kind: "image", url, prompt: englishPrompt },
           });
           setIsStreaming(false);
           setLoadingIntent(undefined);
+          setLoadingStage(undefined);
           abortRef.current = null;
           refresh();
         } else {
-          // Todos os outros intents (email, banner, instagram, datasheet, text)
-          // → streaming SSE via /api/chat
-          const abort = callOllama(text, intent, {
+          // Injeta o contexto de marca + histórico no prompt
+          const contextualPrompt = buildContextualPrompt(text);
+
+          const abort = callOllama(contextualPrompt, intent, {
             onToken: (token) => {
               setStreamingText((prev) => prev + token);
             },
@@ -189,10 +254,12 @@ function ChatRoute() {
                 reply = "✅ Conteúdo pronto! Veja o resultado completo no painel ao lado.";
               }
 
+              setThreadContentType(thread.id, intent as ContentType);
               updateMessage(thread.id, assistantId, { content: reply, artifact });
               setIsStreaming(false);
               setStreamingText("");
               setLoadingIntent(undefined);
+              setLoadingStage(undefined);
               abortRef.current = null;
               refresh();
             },
@@ -202,6 +269,7 @@ function ChatRoute() {
               setIsStreaming(false);
               setStreamingText("");
               setLoadingIntent(undefined);
+              setLoadingStage(undefined);
               abortRef.current = null;
               refresh();
             },
@@ -215,11 +283,12 @@ function ChatRoute() {
         setIsStreaming(false);
         setStreamingText("");
         setLoadingIntent(undefined);
+        setLoadingStage(undefined);
         abortRef.current = null;
         refresh();
       }
     },
-    [thread, refresh],
+    [thread, refresh, buildContextualPrompt, threadId]
   );
 
   const handleStop = useCallback(() => {
@@ -236,7 +305,17 @@ function ChatRoute() {
       deleteThread(id);
       refresh();
     },
-    [refresh],
+    [refresh]
+  );
+
+  const handleSaveBrand = useCallback(
+    (patch: Partial<BrandProfile>) => {
+      const current = getBrandProfile(threadId) ?? { threadId, updatedAt: Date.now() };
+      saveBrandProfile({ ...current, ...patch, threadId });
+      setBrandProfile(getBrandProfile(threadId));
+      toast.success("Perfil de marca salvo para esta conversa!");
+    },
+    [threadId]
   );
 
   return (
@@ -251,10 +330,13 @@ function ChatRoute() {
         <section className="flex h-screen flex-col border-r border-border bg-background/40">
           <ChatPanel
             messages={thread?.messages ?? []}
-            streamingText=""
+            streamingText={streamingText}
             onSend={handleSend}
             onStop={handleStop}
             isStreaming={isStreaming}
+            brandProfile={brandProfile}
+            onSaveBrand={handleSaveBrand}
+            loadingStage={loadingStage}
           />
         </section>
         <section className="hidden h-screen flex-col bg-card/30 lg:flex">
@@ -273,6 +355,5 @@ function ChatRoute() {
 function extractHtml(raw: string): string {
   const fence = raw.match(/```(?:html)?\s*([\s\S]*?)```/i);
   if (fence) return fence[1].trim();
-  // Se não há fences, devolve directamente (já é HTML limpo do template)
   return raw.trim();
 }

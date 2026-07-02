@@ -9,6 +9,8 @@ export type Artifact =
   | { kind: "markdown"; markdown: string; title?: string }
   | { kind: "text"; text: string };
 
+export type ContentType = "email" | "banner" | "instagram" | "datasheet" | "image" | "text";
+
 export interface Message {
   id: string;
   role: Role;
@@ -23,13 +25,14 @@ export interface Thread {
   createdAt: number;
   updatedAt: number;
   messages: Message[];
+  /** Tipo do último conteúdo gerado — usado para ícone e label na sidebar */
+  lastContentType?: ContentType;
 }
 
 function generateId(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID(); // fix: era uma chamada recursiva infinita
+    return crypto.randomUUID();
   }
-  // Fallback para ambientes sem suporte a crypto.randomUUID
   return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
     const r = (Math.random() * 16) | 0;
     const v = c === "x" ? r : (r & 0x3) | 0x8;
@@ -116,5 +119,13 @@ export function updateMessage(threadId: string, messageId: string, patch: Partia
   if (!m) return;
   Object.assign(m, patch);
   t.updatedAt = Date.now();
+  safeWrite(all);
+}
+
+export function setThreadContentType(threadId: string, contentType: ContentType) {
+  const all = safeRead();
+  const t = all.find((x) => x.id === threadId);
+  if (!t) return;
+  t.lastContentType = contentType;
   safeWrite(all);
 }

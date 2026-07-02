@@ -1,18 +1,32 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { ArrowUp, Sparkles, User2, Square } from "lucide-react";
+import { ArrowUp, Sparkles, User2, Square, Building2, ChevronDown, ChevronUp } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import type { Message } from "@/lib/chat-storage";
+import type { BrandProfile } from "@/lib/brand-memory";
 
 interface Props {
   messages: Message[];
   onSend: (text: string) => void;
   onStop?: () => void;
   isStreaming?: boolean;
+  streamingText?: string;
+  brandProfile?: BrandProfile;
+  onSaveBrand?: (patch: Partial<BrandProfile>) => void;
+  loadingStage?: "classifying" | "generating" | "rendering";
 }
 
-export function ChatPanel({ messages, onSend, onStop, isStreaming }: Props) {
+export function ChatPanel({
+  messages,
+  onSend,
+  onStop,
+  isStreaming,
+  streamingText,
+  brandProfile,
+  onSaveBrand,
+  loadingStage,
+}: Props) {
   const [input, setInput] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -23,7 +37,7 @@ export function ChatPanel({ messages, onSend, onStop, isStreaming }: Props) {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages.length, isStreaming]);
+  }, [messages.length, isStreaming, streamingText]);
 
   function submit() {
     const text = input.trim();
@@ -34,6 +48,12 @@ export function ChatPanel({ messages, onSend, onStop, isStreaming }: Props) {
 
   return (
     <div className="flex h-full flex-col">
+      {/* Barra de contexto de marca */}
+      {(brandProfile?.companyName || onSaveBrand) && (
+        <BrandContextBar profile={brandProfile} onEdit={onSaveBrand} />
+      )}
+
+      {/* Mensagens */}
       <div className="thin-scroll flex-1 overflow-y-auto px-5 py-6">
         {messages.length === 0 ? (
           <EmptyChat onPick={(p) => onSend(p)} />
@@ -42,12 +62,13 @@ export function ChatPanel({ messages, onSend, onStop, isStreaming }: Props) {
             {messages.map((m) => (
               <MessageRow key={m.id} message={m} />
             ))}
-            {isStreaming && <Typing />}
+            {isStreaming && <Typing stage={loadingStage} />}
             <div ref={bottomRef} />
           </div>
         )}
       </div>
 
+      {/* Input */}
       <div className="border-t border-border bg-background/60 px-4 py-4 backdrop-blur">
         <div className="mx-auto max-w-2xl">
           <div className="flex items-end gap-2 rounded-2xl border border-border bg-card/80 p-2 shadow-sm focus-within:ring-2 focus-within:ring-primary/40">
@@ -84,11 +105,118 @@ export function ChatPanel({ messages, onSend, onStop, isStreaming }: Props) {
   );
 }
 
+/** Barra superior com resumo do perfil de marca da conversa */
+function BrandContextBar({
+  profile,
+  onEdit,
+}: {
+  profile?: BrandProfile;
+  onEdit?: (patch: Partial<BrandProfile>) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState<Partial<BrandProfile>>(profile ?? {});
+
+  if (!profile?.companyName && !editing) {
+    return (
+      <button
+        onClick={() => setEditing(true)}
+        className="flex w-full items-center gap-2 border-b border-border bg-muted/30 px-4 py-2 text-left text-xs text-muted-foreground transition hover:bg-muted/50"
+      >
+        <Building2 className="h-3.5 w-3.5 shrink-0" />
+        <span>Configure o perfil de marca desta conversa para resultados mais precisos →</span>
+      </button>
+    );
+  }
+
+  if (editing) {
+    return (
+      <div className="border-b border-border bg-muted/30 px-4 py-3">
+        <p className="mb-2 text-xs font-medium text-foreground">Perfil de marca — esta conversa</p>
+        <div className="grid grid-cols-2 gap-2 text-xs">
+          {([
+            ["companyName", "Empresa"],
+            ["sector", "Setor"],
+            ["primaryColor", "Cor principal"],
+            ["toneOfVoice", "Tom de voz"],
+            ["targetAudience", "Público-alvo"],
+            ["extra", "Notas extras"],
+          ] as [keyof BrandProfile, string][]).map(([key, label]) => (
+            <div key={key} className={key === "extra" ? "col-span-2" : ""}>
+              <label className="mb-0.5 block text-[10px] text-muted-foreground">{label}</label>
+              <input
+                type="text"
+                value={(form[key] as string) ?? ""}
+                onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
+                className="w-full rounded border border-border bg-background px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-primary/50"
+              />
+            </div>
+          ))}
+        </div>
+        <div className="mt-2 flex gap-2">
+          <button
+            onClick={() => {
+              onEdit?.(form);
+              setEditing(false);
+            }}
+            className="rounded bg-primary px-3 py-1 text-xs text-primary-foreground hover:bg-primary/80"
+          >
+            Salvar
+          </button>
+          <button
+            onClick={() => setEditing(false)}
+            className="rounded px-3 py-1 text-xs text-muted-foreground hover:bg-muted"
+          >
+            Cancelar
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="border-b border-border bg-muted/20">
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className="flex w-full items-center gap-2 px-4 py-2 text-left text-xs text-muted-foreground transition hover:bg-muted/30"
+      >
+        <Building2 className="h-3.5 w-3.5 shrink-0 text-primary" />
+        <span className="flex-1 font-medium text-foreground">{profile?.companyName}</span>
+        {profile?.sector && <span className="text-muted-foreground">{profile.sector}</span>}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            setForm(profile ?? {});
+            setEditing(true);
+          }}
+          className="rounded px-2 py-0.5 hover:bg-muted"
+        >
+          Editar
+        </button>
+        {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+      </button>
+      {expanded && (
+        <div className="grid grid-cols-2 gap-1 px-4 pb-2 text-[10px] text-muted-foreground">
+          {profile?.toneOfVoice && <span>Tom: {profile.toneOfVoice}</span>}
+          {profile?.primaryColor && <span>Cor: {profile.primaryColor}</span>}
+          {profile?.targetAudience && (
+            <span className="col-span-2">Público: {profile.targetAudience}</span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MessageRow({ message }: { message: Message }) {
   const isUser = message.role === "user";
   return (
     <div className={`flex gap-3 ${isUser ? "flex-row-reverse" : ""}`}>
-      <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${isUser ? "bg-primary text-primary-foreground" : "bg-accent text-accent-foreground"}`}>
+      <div
+        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
+          isUser ? "bg-primary text-primary-foreground" : "bg-accent text-accent-foreground"
+        }`}
+      >
         {isUser ? <User2 className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
       </div>
       <div
@@ -110,16 +238,29 @@ function MessageRow({ message }: { message: Message }) {
   );
 }
 
-function Typing() {
+/** Indicador de carregamento com estágios detalhados */
+function Typing({ stage }: { stage?: "classifying" | "generating" | "rendering" }) {
+  const stageLabel =
+    stage === "classifying"
+      ? "Classificando pedido..."
+      : stage === "rendering"
+        ? "Renderizando..."
+        : "Gerando conteúdo...";
+
   return (
     <div className="flex items-center gap-3">
       <div className="flex h-8 w-8 items-center justify-center rounded-full bg-accent text-accent-foreground">
         <Sparkles className="h-4 w-4" />
       </div>
-      <div className="flex items-center gap-1.5 rounded-2xl bg-muted px-3 py-2.5">
-        <Dot delay="0ms" />
-        <Dot delay="150ms" />
-        <Dot delay="300ms" />
+      <div className="flex flex-col gap-1">
+        <div className="flex items-center gap-1.5 rounded-2xl bg-muted px-3 py-2.5">
+          <Dot delay="0ms" />
+          <Dot delay="150ms" />
+          <Dot delay="300ms" />
+        </div>
+        {stage && (
+          <span className="px-1 text-[10px] text-muted-foreground">{stageLabel}</span>
+        )}
       </div>
     </div>
   );
