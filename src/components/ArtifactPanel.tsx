@@ -32,14 +32,10 @@ export function ArtifactPanel({ artifact, loading, loadingIntent }: Props) {
         <Toolbar artifact={artifact} view={view} onViewChange={setView} />
       </header>
 
+      {/* Área de preview: escala o conteúdo para caber no painel sem cortar */}
       <div className="thin-scroll flex-1 overflow-auto">
         {artifact.kind === "html" && view === "preview" && (
-          <iframe
-            title="Email preview"
-            sandbox=""
-            className="h-full min-h-[600px] w-full bg-white"
-            srcDoc={artifact.html}
-          />
+          <ScaledHtmlPreview html={artifact.html} />
         )}
         {artifact.kind === "html" && view === "code" && (
           <pre className="thin-scroll m-0 h-full overflow-auto bg-[oklch(0.14_0.01_270)] p-5 text-xs leading-relaxed text-foreground">
@@ -51,7 +47,7 @@ export function ArtifactPanel({ artifact, loading, loadingIntent }: Props) {
             <img
               src={artifact.url}
               alt={artifact.prompt}
-              className="max-h-full max-w-full rounded-xl shadow-2xl ring-1 ring-border"
+              className="max-h-full max-w-full rounded-xl shadow-2xl ring-1 ring-border object-contain"
             />
           </div>
         )}
@@ -66,6 +62,37 @@ export function ArtifactPanel({ artifact, loading, loadingIntent }: Props) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Renderiza HTML num iframe invisível de tamanho padrão (1200×900),
+ * depois escala via CSS transform para caber no painel sem scroll horizontal.
+ * O export continua usando o HTML original no tamanho real.
+ */
+function ScaledHtmlPreview({ html }: { html: string }) {
+  // Dimensões reais do documento gerado
+  const REAL_W = 1200;
+  const REAL_H = 900;
+
+  return (
+    <div
+      className="relative w-full overflow-hidden bg-white"
+      style={{ paddingBottom: `${(REAL_H / REAL_W) * 100}%` }}
+    >
+      <iframe
+        title="Preview"
+        sandbox="allow-same-origin"
+        className="absolute inset-0 origin-top-left"
+        style={{
+          width: REAL_W,
+          height: REAL_H,
+          transform: `scale(calc(100cqw / ${REAL_W}))`,
+          transformOrigin: "top left",
+        }}
+        srcDoc={html}
+      />
     </div>
   );
 }

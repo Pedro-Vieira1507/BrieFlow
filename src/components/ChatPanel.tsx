@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { ArrowUp, Sparkles, User2, Square, Building2, ChevronDown, ChevronUp } from "lucide-react";
+import { ArrowUp, Eye, Sparkles, User2, Square, Building2, ChevronDown, ChevronUp } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import type { Message } from "@/lib/chat-storage";
+import type { Artifact } from "@/lib/chat-storage";
 import type { BrandProfile } from "@/lib/brand-memory";
 
 interface Props {
@@ -15,6 +16,8 @@ interface Props {
   brandProfile?: BrandProfile;
   onSaveBrand?: (patch: Partial<BrandProfile>) => void;
   loadingStage?: "classifying" | "generating" | "rendering";
+  /** Chamado ao clicar em "Visualizar" numa mensagem com artefato */
+  onViewArtifact?: (artifact: Artifact) => void;
 }
 
 export function ChatPanel({
@@ -26,6 +29,7 @@ export function ChatPanel({
   brandProfile,
   onSaveBrand,
   loadingStage,
+  onViewArtifact,
 }: Props) {
   const [input, setInput] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -60,7 +64,7 @@ export function ChatPanel({
         ) : (
           <div className="mx-auto flex max-w-2xl flex-col gap-5">
             {messages.map((m) => (
-              <MessageRow key={m.id} message={m} />
+              <MessageRow key={m.id} message={m} onViewArtifact={onViewArtifact} />
             ))}
             {isStreaming && <Typing stage={loadingStage} />}
             <div ref={bottomRef} />
@@ -208,8 +212,16 @@ function BrandContextBar({
   );
 }
 
-function MessageRow({ message }: { message: Message }) {
+function MessageRow({
+  message,
+  onViewArtifact,
+}: {
+  message: Message;
+  onViewArtifact?: (artifact: Artifact) => void;
+}) {
   const isUser = message.role === "user";
+  const hasArtifact = !isUser && !!message.artifact;
+
   return (
     <div className={`flex gap-3 ${isUser ? "flex-row-reverse" : ""}`}>
       <div
@@ -232,6 +244,17 @@ function MessageRow({ message }: { message: Message }) {
           <div className="prose-chat">
             <ReactMarkdown>{message.content || "…"}</ReactMarkdown>
           </div>
+        )}
+
+        {/* Botão Visualizar — aparece apenas em mensagens do agente que têm artefato */}
+        {hasArtifact && onViewArtifact && (
+          <button
+            onClick={() => onViewArtifact(message.artifact!)}
+            className="mt-2 flex items-center gap-1.5 rounded-lg border border-border bg-card/80 px-3 py-1.5 text-xs font-medium text-foreground transition hover:border-primary/60 hover:bg-card hover:text-primary"
+          >
+            <Eye className="h-3.5 w-3.5" />
+            Visualizar
+          </button>
         )}
       </div>
     </div>

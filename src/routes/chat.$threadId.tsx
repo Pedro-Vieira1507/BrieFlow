@@ -69,6 +69,13 @@ function ChatRoute() {
     "classifying" | "generating" | "rendering" | undefined
   >();
   const [brandProfile, setBrandProfile] = useState<BrandProfile | undefined>();
+  /**
+   * Artefato atualmente exibido no painel.
+   * - undefined: mostra o último gerado (comportamento padrão)
+   * - Artifact: artefato específico selecionado via botão "Visualizar"
+   * Durante o streaming, sempre exibe o artefato ao vivo.
+   */
+  const [selectedArtifact, setSelectedArtifact] = useState<Artifact | undefined>();
   const abortRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
@@ -81,6 +88,8 @@ function ChatRoute() {
     }
     setThread(t);
     setBrandProfile(getBrandProfile(threadId));
+    // Ao trocar de conversa, limpa a seleção manual
+    setSelectedArtifact(undefined);
   }, [threadId, navigate]);
 
   const refresh = useCallback(() => {
@@ -116,20 +125,22 @@ function ChatRoute() {
     };
   }, [isStreaming, streamingText, loadingIntent]);
 
-  const panelArtifact = isStreaming ? streamingArtifact : lastArtifact;
-
   /**
-   * Constrói o histórico de mensagens da conversa para enviar ao modelo,
-   * garantindo multi-turn contextual real.
-   * Inclui o bloco de contexto de marca como prefixo do prompt do usuário.
+   * Regra de prioridade para o painel:
+   * 1. Durante streaming → sempre o artefato ao vivo
+   * 2. Artefato selecionado manualmente via "Visualizar"
+   * 3. Último artefato da conversa (fallback padrão)
    */
+  const panelArtifact = isStreaming
+    ? streamingArtifact
+    : (selectedArtifact ?? lastArtifact);
+
   const buildContextualPrompt = useCallback(
     (userText: string): string => {
       if (!thread) return userText;
 
       const brandCtx = brandContextBlock(brandProfile);
 
-      // Últimas 10 trocas (user + assistant) para contexto multi-turn
       const history = thread.messages
         .slice(-20)
         .map((m) => `${m.role === "user" ? "Usuário" : "Assistente"}: ${m.content}`)
@@ -153,7 +164,6 @@ function ChatRoute() {
     async (text: string) => {
       if (!thread) return;
 
-      // --- Detecção passiva de informações de marca na mensagem ---
       const brandPatch = extractBrandInfo(text);
       const hasBrandInfo = Object.keys(brandPatch).length > 0;
       const isSetupRequest = isBrandSetupRequest(text);
@@ -178,6 +188,8 @@ function ChatRoute() {
       setStreamingText("");
       setLoadingIntent(intent);
       setLoadingStage("classifying");
+      // Ao enviar nova mensagem, limpa seleção manual para voltar ao fluxo normal
+      setSelectedArtifact(undefined);
 
       const assistantId = generateId();
       const placeholder: Message = {
@@ -189,7 +201,6 @@ function ChatRoute() {
       appendMessage(thread.id, placeholder);
       refresh();
 
-      // Breve pausa para mostrar estágio "classifying" ao usuário
       await new Promise((r) => setTimeout(r, 400));
       setLoadingStage("generating");
 
@@ -220,7 +231,6 @@ function ChatRoute() {
           abortRef.current = null;
           refresh();
         } else {
-          // Injeta o contexto de marca + histórico no prompt
           const contextualPrompt = buildContextualPrompt(text);
 
           const abort = callOllama(contextualPrompt, intent, {
@@ -337,6 +347,7 @@ function ChatRoute() {
             brandProfile={brandProfile}
             onSaveBrand={handleSaveBrand}
             loadingStage={loadingStage}
+            onViewArtifact={setSelectedArtifact}
           />
         </section>
         <section className="hidden h-screen flex-col bg-card/30 lg:flex">
