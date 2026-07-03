@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { ArrowUp, Eye, Sparkles, User2, Square, Building2, ChevronDown, ChevronUp } from "lucide-react";
+import { ArrowUp, Eye, Sparkles, User2, Square, Building2, ChevronDown, ChevronUp, Brain, Target, Zap } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import type { Message } from "@/lib/chat-storage";
 import type { Artifact } from "@/lib/chat-storage";
@@ -15,7 +15,7 @@ interface Props {
   streamingText?: string;
   brandProfile?: BrandProfile;
   onSaveBrand?: (patch: Partial<BrandProfile>) => void;
-  loadingStage?: "classifying" | "generating" | "rendering";
+  loadingStage?: "classifying" | "planning" | "generating" | "validating" | "rendering";
   /** Chamado ao clicar em "Visualizar" numa mensagem com artefato */
   onViewArtifact?: (artifact: Artifact) => void;
 }
@@ -212,6 +212,75 @@ function BrandContextBar({
   );
 }
 
+/**
+ * AgentReasoning — exibe raciocínio estratégico do agente
+ * (formato, objetivo, funil, tom) antes do botão de artefato.
+ * Renderizado apenas quando a mensagem tem metadata de reasoning.
+ */
+function AgentReasoning({ reasoning }: { reasoning: NonNullable<Message["reasoning"]> }) {
+  const [open, setOpen] = useState(false);
+
+  const pills = [
+    reasoning.intent     && { icon: <Zap className="h-3 w-3" />,    label: reasoning.intent },
+    reasoning.objective  && { icon: <Target className="h-3 w-3" />, label: reasoning.objective },
+    reasoning.tone       && { icon: <Brain className="h-3 w-3" />,  label: reasoning.tone },
+  ].filter(Boolean) as { icon: React.ReactNode; label: string }[];
+
+  return (
+    <div className="mb-2">
+      {/* Pills resumo — sempre visíveis */}
+      <div className="flex flex-wrap gap-1.5 mb-1">
+        {pills.map((p, i) => (
+          <span
+            key={i}
+            className="inline-flex items-center gap-1 rounded-full border border-border bg-muted/40 px-2 py-0.5 text-[10px] text-muted-foreground"
+          >
+            {p.icon}
+            {p.label}
+          </span>
+        ))}
+        {reasoning.funnelStage && (
+          <span className="inline-flex items-center gap-1 rounded-full border border-primary/20 bg-primary/5 px-2 py-0.5 text-[10px] text-primary/70">
+            funil: {reasoning.funnelStage}
+          </span>
+        )}
+      </div>
+
+      {/* Detalhes expandíveis */}
+      {reasoning.summary && (
+        <button
+          onClick={() => setOpen((v) => !v)}
+          className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition"
+        >
+          <Brain className="h-3 w-3" />
+          {open ? "Ocultar raciocínio" : "Ver raciocínio estratégico"}
+          {open ? <ChevronUp className="h-2.5 w-2.5" /> : <ChevronDown className="h-2.5 w-2.5" />}
+        </button>
+      )}
+      {open && reasoning.summary && (
+        <div className="mt-1.5 rounded-lg border border-border bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground leading-relaxed">
+          <ReactMarkdown>{reasoning.summary}</ReactMarkdown>
+        </div>
+      )}
+
+      {/* Perguntas de briefing pendentes */}
+      {reasoning.questions && reasoning.questions.length > 0 && (
+        <div className="mt-2 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2">
+          <p className="text-[10px] font-medium text-amber-600 mb-1.5">Para resultados mais precisos, informe:</p>
+          <ul className="space-y-1">
+            {reasoning.questions.map((q, i) => (
+              <li key={i} className="text-[11px] text-muted-foreground flex gap-1.5">
+                <span className="text-amber-500 shrink-0">{i + 1}.</span>
+                {q}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MessageRow({
   message,
   onViewArtifact,
@@ -221,6 +290,7 @@ function MessageRow({
 }) {
   const isUser = message.role === "user";
   const hasArtifact = !isUser && !!message.artifact;
+  const hasReasoning = !isUser && !!message.reasoning;
 
   return (
     <div className={`flex gap-3 ${isUser ? "flex-row-reverse" : ""}`}>
@@ -238,6 +308,9 @@ function MessageRow({
             : "max-w-[85%] text-sm text-foreground"
         }
       >
+        {/* Raciocínio estratégico — antes do conteúdo */}
+        {hasReasoning && <AgentReasoning reasoning={message.reasoning!} />}
+
         {isUser ? (
           <p className="whitespace-pre-wrap leading-relaxed">{message.content}</p>
         ) : (
@@ -262,13 +335,17 @@ function MessageRow({
 }
 
 /** Indicador de carregamento com estágios detalhados */
-function Typing({ stage }: { stage?: "classifying" | "generating" | "rendering" }) {
+function Typing({ stage }: { stage?: "classifying" | "planning" | "generating" | "validating" | "rendering" }) {
   const stageLabel =
     stage === "classifying"
-      ? "Classificando pedido..."
-      : stage === "rendering"
-        ? "Renderizando..."
-        : "Gerando conteúdo...";
+      ? "Classificando pedido e detectando intenção..."
+      : stage === "planning"
+        ? "Planejando estrutura do copy..."
+        : stage === "validating"
+          ? "Validando coerência com canal e objetivo..."
+          : stage === "rendering"
+            ? "Renderizando artefato..."
+            : "Gerando conteúdo...";
 
   return (
     <div className="flex items-center gap-3">
@@ -300,10 +377,10 @@ function Dot({ delay }: { delay: string }) {
 
 function EmptyChat({ onPick }: { onPick: (s: string) => void }) {
   const suggestions = [
-    "Crie um e-mail HTML de Black Friday para um e-commerce de tênis",
-    "Gere uma imagem de marketing para um café especial, estilo minimalista",
-    "Monte uma ficha técnica de um fone bluetooth premium",
-    "Escreva 3 legendas de Instagram para lançamento de SaaS",
+    "Crie um e-mail HTML de Black Friday para um e-commerce de tênis com foco em conversão",
+    "Gere um banner Shimadzu com 3% de desconto em azul escuro e vermelho",
+    "Monte uma ficha técnica de um fone bluetooth premium com especificações técnicas",
+    "Escreva 3 legendas de Instagram para lançamento de SaaS de gestão financeira",
   ];
   return (
     <div className="mx-auto flex max-w-xl flex-col items-center gap-6 pt-16 text-center">
@@ -314,6 +391,9 @@ function EmptyChat({ onPick }: { onPick: (s: string) => void }) {
         <h1 className="text-2xl font-semibold tracking-tight">Agente de Marketing</h1>
         <p className="mt-2 text-sm text-muted-foreground">
           Diga o que você precisa — texto, e-mail HTML, ficha técnica ou imagem — e veja o artefato renderizado ao lado.
+        </p>
+        <p className="mt-1 text-xs text-muted-foreground/70">
+          O agente classifica seu pedido, planeja a estrutura e valida a saída antes de entregar.
         </p>
       </div>
       <div className="grid w-full gap-2 sm:grid-cols-2">
