@@ -4,12 +4,12 @@
 export type Role = "user" | "assistant";
 
 export type Artifact =
-  | { kind: "html"; html: string; title?: string; prompt?: string }
+  | { kind: "html"; html: string; title?: string; prompt?: string; intent?: string }
   | { kind: "image"; url: string; prompt: string }
   | { kind: "markdown"; markdown: string; title?: string }
   | { kind: "text"; text: string };
 
-export type ContentType = "email" | "banner" | "instagram" | "datasheet" | "image" | "text";
+export type ContentType = "email" | "banner" | "instagram" | "datasheet" | "image" | "text" | string;
 
 export interface Message {
   id: string;
@@ -17,6 +17,14 @@ export interface Message {
   content: string;
   createdAt: number;
   artifact?: Artifact;
+  reasoning?: {
+    intent?: string;
+    objective?: string;
+    funnelStage?: string;
+    tone?: string;
+    summary?: string;
+    questions?: string[];
+  };
 }
 
 export interface Thread {

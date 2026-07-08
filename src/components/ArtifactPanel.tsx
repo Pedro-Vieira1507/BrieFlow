@@ -8,7 +8,7 @@ import ReactMarkdown from "react-markdown";
 interface Props {
   artifact?: Artifact;
   loading?: boolean;
-  loadingIntent?: "image" | "email" | "datasheet" | "text";
+  loadingIntent?: "image" | "email" | "banner" | "instagram" | "datasheet" | "text" | string;
 }
 
 export function ArtifactPanel({ artifact, loading, loadingIntent }: Props) {
@@ -32,9 +32,13 @@ export function ArtifactPanel({ artifact, loading, loadingIntent }: Props) {
         <Toolbar artifact={artifact} view={view} onViewChange={setView} />
       </header>
 
-      <div className="thin-scroll flex-1 overflow-auto">
+      <div className="thin-scroll flex-1 overflow-auto bg-[var(--background)]">
         {artifact.kind === "html" && view === "preview" && (
-          <ScaledHtmlPreview html={artifact.html} userPrompt={artifact.prompt ?? ""} />
+          <ScaledHtmlPreview 
+            html={artifact.html} 
+            userPrompt={artifact.prompt ?? ""} 
+            intent={artifact.intent} 
+          />
         )}
         {artifact.kind === "html" && view === "code" && (
           <pre className="thin-scroll m-0 h-full overflow-auto bg-[oklch(0.14_0.01_270)] p-5 text-xs leading-relaxed text-foreground">
@@ -65,15 +69,6 @@ export function ArtifactPanel({ artifact, loading, loadingIntent }: Props) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// sanitizeHtml
-// Prioridade 1: extrai a descrição Pollinations do bloco <!-- ANALISE: -->
-//   que o modelo é instruído a escrever antes do HTML.
-// Prioridade 2: fallback com palavras-chave do prompt do usuário
-//   convertidas para inglês via dicionário simples.
-// Em ambos os casos, qualquer <img src> que não seja Pollinations é substituído.
-// ---------------------------------------------------------------------------
-
 const PT_TO_EN: [RegExp, string][] = [
   [/brownie/gi, "brownie"],
   [/recheado/gi, "filled"],
@@ -96,7 +91,6 @@ function buildFallbackDescription(userPrompt: string): string {
   for (const [pt, en] of PT_TO_EN) {
     translated = translated.replace(pt, en);
   }
-  // Pega as palavras mais longas (mais descritivas) e forma uma frase curta
   const words = translated
     .replace(/[^a-z\s]/gi, " ")
     .split(/\s+/)
@@ -107,7 +101,6 @@ function buildFallbackDescription(userPrompt: string): string {
 }
 
 function sanitizeHtml(html: string, userPrompt: string): string {
-  // Tenta extrair a descrição Pollinations do bloco ANALISE gerado pelo modelo
   const analyseMatch = html.match(
     /Descri[\u00e7c][\u00e3a]o(?:[^:]*)?:\s*([^\n\r]+)/i
   );
@@ -120,9 +113,7 @@ function sanitizeHtml(html: string, userPrompt: string): string {
 
   return (
     html
-      // Remove scripts inline (preview não precisa de JS)
       .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
-      // Substitui qualquer img src que não seja Pollinations
       .replace(
         /(<img[^>]*\ssrc=["'])(?!https:\/\/image\.pollinations\.ai)([^"']*?)(["'])/gi,
         `$1${fallbackUrl}$3`
@@ -130,12 +121,16 @@ function sanitizeHtml(html: string, userPrompt: string): string {
   );
 }
 
-const REAL_W = 1200;
-const REAL_H = 900;
-
-function ScaledHtmlPreview({ html, userPrompt }: { html: string; userPrompt: string }) {
+function ScaledHtmlPreview({ html, userPrompt, intent }: { html: string; userPrompt: string; intent?: string }) {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
+
+  // Define proporções reais baseadas na intenção
+  let REAL_W = 1200;
+  let REAL_H = 900;
+  if (intent === "banner") { REAL_H = 500; }
+  else if (intent === "instagram") { REAL_W = 1080; REAL_H = 1080; }
+  else if (intent === "email") { REAL_W = 600; REAL_H = 800; } // Padrão clássico de e-mail marketing
 
   useEffect(() => {
     const el = wrapperRef.current;
@@ -151,7 +146,7 @@ function ScaledHtmlPreview({ html, userPrompt }: { html: string; userPrompt: str
     if (w > 0) setScale(w / REAL_W);
 
     return () => observer.disconnect();
-  }, []);
+  }, [REAL_W]);
 
   const scaledH = Math.round(REAL_H * scale);
   const cleanHtml = sanitizeHtml(html, userPrompt);
@@ -159,8 +154,8 @@ function ScaledHtmlPreview({ html, userPrompt }: { html: string; userPrompt: str
   return (
     <div
       ref={wrapperRef}
-      className="w-full overflow-hidden bg-white"
-      style={{ height: scaledH }}
+      className="w-full overflow-hidden bg-white shadow-inner flex justify-center"
+      style={{ height: scaledH > 0 ? scaledH : "auto", minHeight: "100%" }}
     >
       <iframe
         title="Preview"
@@ -169,9 +164,10 @@ function ScaledHtmlPreview({ html, userPrompt }: { html: string; userPrompt: str
           width: REAL_W,
           height: REAL_H,
           transform: `scale(${scale})`,
-          transformOrigin: "top left",
+          transformOrigin: "top center", // Centraliza em vez de encostar na esquerda
           border: "none",
           display: "block",
+          backgroundColor: "#fff" // Previne fundos transparentes feios
         }}
         srcDoc={cleanHtml}
       />
@@ -213,7 +209,7 @@ function Toolbar({
           <Button size="sm" variant="secondary" onClick={() => copy(artifact.html, "HTML copiado")}>
             <Copy className="mr-1 h-4 w-4" /> Copiar
           </Button>
-          <Button size="sm" onClick={() => download(artifact.html, "banner.html", "text/html")}>
+          <Button size="sm" onClick={() => download(artifact.html, "output.html", "text/html")}>
             <Download className="mr-1 h-4 w-4" /> Baixar
           </Button>
         </>
@@ -253,7 +249,7 @@ function ArtifactIcon({ kind }: { kind: Artifact["kind"] }) {
 }
 
 function labelFor(a: Artifact) {
-  if (a.kind === "html") return "E-mail HTML";
+  if (a.kind === "html") return "Código HTML";
   if (a.kind === "image") return "Imagem de marketing";
   if (a.kind === "markdown") return a.title ?? "Ficha técnica";
   return "Texto gerado";
@@ -335,10 +331,12 @@ function Tile({ icon, label }: { icon: React.ReactNode; label: string }) {
   );
 }
 
-function LoadingState({ intent }: { intent: "image" | "email" | "datasheet" | "text" }) {
-  const labels: Record<typeof intent, string> = {
+function LoadingState({ intent }: { intent: "image" | "email" | "banner" | "instagram" | "datasheet" | "text" | string }) {
+  const labels: Record<string, string> = {
     image: "Gerando imagem no Pollinations…",
-    email: "Compondo o e-mail HTML…",
+    email: "Compondo o e-mail HTML seguro…",
+    banner: "Desenhando layout do banner…",
+    instagram: "Estruturando post de Instagram…",
     datasheet: "Estruturando ficha técnica…",
     text: "Escrevendo conteúdo…",
   };
@@ -350,7 +348,7 @@ function LoadingState({ intent }: { intent: "image" | "email" | "datasheet" | "t
         <Sparkles className="absolute inset-0 m-auto h-7 w-7 text-primary-foreground" />
       </div>
       <div>
-        <p className="font-medium text-foreground">{labels[intent]}</p>
+        <p className="font-medium text-foreground">{labels[intent] || "Processando conteúdo..."}</p>
         <p className="mt-1 text-sm text-muted-foreground">Isso pode levar alguns segundos.</p>
       </div>
       <div className="w-full max-w-sm space-y-2">

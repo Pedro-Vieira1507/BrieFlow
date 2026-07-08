@@ -20,6 +20,11 @@ import {
   buildPollinationsUrl,
   callOllama,
   detectIntent,
+  detectCopyObjective,
+  detectFunnelStage,
+  suggestTone,
+  detectMissingBriefing,
+  buildBriefingQuestions,
   looksLikeHtml,
   translatePromptForImage,
 } from "@/lib/agent";
@@ -64,14 +69,13 @@ function ChatRoute() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingText, setStreamingText] = useState("");
   const [loadingIntent, setLoadingIntent] =
-    useState<"image" | "email" | "banner" | "instagram" | "datasheet" | "text" | undefined>();
+    useState<"image" | "email" | "banner" | "instagram" | "datasheet" | "text" | undefined | string>();
   const [loadingStage, setLoadingStage] = useState<
-    "classifying" | "generating" | "rendering" | undefined
+    "classifying" | "planning" | "generating" | "validating" | "rendering" | undefined
   >();
   const [brandProfile, setBrandProfile] = useState<BrandProfile | undefined>();
-  // Guarda o prompt do usuário atual para repassar ao artifact
+  
   const currentUserPrompt = useRef<string>("");
-
   const [selectedArtifact, setSelectedArtifact] = useState<Artifact | undefined>();
   const abortRef = useRef<(() => void) | null>(null);
 
@@ -116,6 +120,7 @@ function ChatRoute() {
         html: extractHtml(streamingText),
         title: "A gerar...",
         prompt: currentUserPrompt.current,
+        intent: loadingIntent
       };
     }
     return {
@@ -134,9 +139,8 @@ function ChatRoute() {
       if (!thread) return userText;
 
       const brandCtx = brandContextBlock(brandProfile);
-
       const history = thread.messages
-        .slice(-20)
+        .slice(-10)
         .map((m) => `${m.role === "user" ? "Usuário" : "Assistente"}: ${m.content}`)
         .join("\n");
 
@@ -158,8 +162,8 @@ function ChatRoute() {
     async (text: string) => {
       if (!thread) return;
 
-      // Salva o prompt do usuário para repassar ao artifact HTML
       currentUserPrompt.current = text;
+      const contextualPrompt = buildContextualPrompt(text);
 
       const brandPatch = extractBrandInfo(text);
       const hasBrandInfo = Object.keys(brandPatch).length > 0;
@@ -181,6 +185,36 @@ function ChatRoute() {
       refresh();
 
       const intent = detectIntent(text);
+      const objective = detectCopyObjective(text);
+      const funnelStage = detectFunnelStage(text, objective);
+      const tone = suggestTone(intent as any, objective, text);
+
+      // --- PREFLIGHT: VALIDATION BLOCK ---
+      // Se não for imagem nem texto puro, valida os dados necessários.
+      if (intent !== "image" && intent !== "text") {
+        const missingFields = detectMissingBriefing(contextualPrompt, intent as any);
+        if (missingFields.length > 0) {
+           const questions = buildBriefingQuestions(missingFields);
+           const reply = `Antes de gerar o ${intent.toUpperCase()}, percebi que faltam algumas informações estratégicas:\n\n` +
+                         questions.map(q => `- **${q}**`).join('\n') +
+                         `\n\nPor favor, forneça esses detalhes para garantir o melhor resultado, ou [configure o perfil da marca acima](#).`;
+
+           const assistantId = generateId();
+           appendMessage(thread.id, {
+             id: assistantId,
+             role: "assistant",
+             content: reply,
+             createdAt: Date.now(),
+             reasoning: {
+               intent,
+               questions: missingFields
+             }
+           });
+           refresh();
+           return; // Aborta e obriga o usuário a responder.
+        }
+      }
+
       setIsStreaming(true);
       setStreamingText("");
       setLoadingIntent(intent);
@@ -193,6 +227,12 @@ function ChatRoute() {
         role: "assistant",
         content: "",
         createdAt: Date.now(),
+        reasoning: {
+          intent,
+          objective,
+          funnelStage,
+          tone
+        }
       };
       appendMessage(thread.id, placeholder);
       refresh();
@@ -227,9 +267,7 @@ function ChatRoute() {
           abortRef.current = null;
           refresh();
         } else {
-          const contextualPrompt = buildContextualPrompt(text);
-
-          const abort = callOllama(contextualPrompt, intent, {
+          const abort = callOllama(contextualPrompt, intent as any, {
             onToken: (token) => {
               setStreamingText((prev) => prev + token);
             },
@@ -250,8 +288,7 @@ function ChatRoute() {
                   email: "E-mail HTML",
                 };
                 const title = titles[intent] ?? "HTML";
-                // Salva o prompt do usuário no artifact para o sanitizer usar
-                artifact = { kind: "html", html, title, prompt: text };
+                artifact = { kind: "html", html, title, prompt: text, intent };
                 reply = `✅ ${title} pronto! Veja a prévia e copie o código no painel ao lado.`;
               } else if (intent === "datasheet") {
                 artifact = { kind: "markdown", markdown: fullText, title: "Ficha Técnica" };
@@ -280,7 +317,9 @@ function ChatRoute() {
               abortRef.current = null;
               refresh();
             },
-          });
+          }, undefined, {
+            objective, funnelStage, tone
+          }); // Passando o reasoning para API
           abortRef.current = abort;
         }
       } catch (err) {
@@ -361,7 +400,151 @@ function ChatRoute() {
 }
 
 function extractHtml(raw: string): string {
-  const fence = raw.match(/```(?:html)?\s*([\s\S]*?)```/i);
-  if (fence) return fence[1].trim();
-  return raw.trim();
-}
+  const fence = raw.match(/
+http://googleusercontent.com/immersive_entry_chip/0
+
+---
+
+### 4. System Prompts Blindados (Ollama API)
+Correção do HTML para evitar que o código de E-mail vaze estilos e impedir que os Banners ignorem a paleta de cores ou exijam composites fotorealistas complexos demais, priorizando "color blocking" (design limpo).
+
+📄 **Substitua `src/routes/api/chat.ts`**:
+```typescript
+/**
+ * Server Function — POST /api/chat
+ */
+import { createAPIFileRoute } from "@tanstack/start/api";
+
+const OLLAMA_INTERNAL_URL = process.env.OLLAMA_URL ?? "http://127.0.0.1:11434";
+const DEFAULT_MODEL = process.env.OLLAMA_MODEL ?? "qwen2.5:14b";
+
+const SYSTEM_PROMPTS: Record<string, string> = {
+  // ── E-MAIL (FORÇA LAYOUT DE TABELA TRADICIONAL PARA NÃO QUEBRAR) ──
+  email: `Você é um especialista em e-mail marketing. Gere o HTML.
+Regras invioláveis:
+- Comece DIRETAMENTE com <!DOCTYPE html>.
+- Sem <link> externos, sem @import. Nada de JS.
+- Você DEVE usar APENAS estruturas baseadas em <table border="0" cellpadding="0" cellspacing="0" width="100%"> para layout.
+- É ESTRITAMENTE PROIBIDO usar flexbox (display:flex) ou grid (display:grid). Clientes de email (Outlook) vão quebrar.
+- Cor: use SOMENTE as cores explicitamente pedidas pelo usuário. Se não especificado, use #ffffff de fundo de conteúdo, #f3f4f6 no fundo geral.
+- Imagem: se precisar de imagem, use EXCLUSIVAMENTE: <img src="https://image.pollinations.ai/prompt/DESCRICAO_EM_INGLES?width=600&height=300&nologo=true" style="width:100%; max-width:600px; display:block">.`,
+
+  // ── BANNER (FORÇA COLOR BLOCKING EM VEZ DE FOTORREALISMO FULL) ──
+  banner: `Você é um designer de banners publicitários focado em HTML/CSS (Dimensões esperadas do container são 1200x500).
+
+Passo 1 — Extraia do pedido do usuário num comentário HTML inicial:
+  Passo 2 — Construa o HTML:
+
+ESTRUTURA DO BANNER (Color Blocking Design):
+- Container pai: width: 1200px; height: 500px; position:relative; overflow:hidden; font-family: sans-serif; display:table;
+- Divida visualmente o layout usando duas caixas absolutas (painéis coloridos). O lado esquerdo deve ter uma cor sólida que combine com a marca (COR PRIMÁRIA DO USUÁRIO).
+- Painel Esquerdo (Conteúdo): Largura ~600px. Fundo com a COR PRIMÁRIA. Coloque Título Grande (font-size >40px), subtítulo contrastante e Botão CTA preenchido.
+- Painel Direito (Imagem): Largura ~600px. Fundo limpo. Carregue:
+  <img src="https://image.pollinations.ai/prompt/DESCRICAO_EM_INGLES_DO_PRODUTO_white_studio_background?width=600&height=500&nologo=true" style="width:100%; height:100%; object-fit:cover;">
+
+REGRAS:
+- A COR DO FUNDO do painel esquerdo DEVE ser a que o usuário pediu (Se não pedir, não use azul).
+- A imagem Pollinations deve focar NO PRODUTO com "white studio background" para não misturar fundos irreais.
+- Apenas HTML/CSS. ZERO marcação Markdown no output principal (NADA de \`\`\`html). Comece direto pela ESTRUTURA:
+- Container: width:1080px; height:1080px; position:relative; overflow:hidden; font-family:sans-serif; background-color: COR PRIMÁRIA
+- Use a imagem Pollinations (1080x1080) com opacity ou compositing para se fundir à cor base da marca.
+- Tipografia gigante e bold. Tudo centrado ou alinhado drasticamente (Swiss Design).
+- ZERO texto explicativo, inicie direto no HTML.`,
+
+  datasheet: `Você é um conteudista técnico. Gere uma ficha técnica de produto em Markdown (Visão Geral, Especificações Técnicas (Tabela obrigatória), Casos de Uso, Diferenciais). Use português PT-BR direto e altamente persuasivo no B2B.`,
+  text: `Você é um copywriter sênior de marketing. Escreva conteúdo persuasivo.`,
+};
+
+export const APIRoute = createAPIFileRoute("/api/chat")({
+  POST: async ({ request }) => {
+    let body: { prompt: string; intent: string; model?: string; reasoning?: any };
+
+    try {
+      body = await request.json();
+    } catch {
+      return new Response(JSON.stringify({ error: "Body JSON inválido" }), { status: 400 });
+    }
+
+    const { prompt, intent = "text", model = DEFAULT_MODEL, reasoning } = body;
+    if (!prompt) return new Response(JSON.stringify({ error: "Falta prompt" }), { status: 400 });
+
+    const systemPrompt = SYSTEM_PROMPTS[intent] ?? SYSTEM_PROMPTS.text;
+    
+    // Injeta o reasoning validado pelo orquestrador no System Prompt para focar o modelo
+    const enrichedSystem = reasoning 
+        ? `${systemPrompt}\n\n[CONTEXTO ESTRATÉGICO FORÇADO]\n- Objetivo: ${reasoning.objective}\n- Funil: ${reasoning.funnelStage}\n- Tom: ${reasoning.tone}`
+        : systemPrompt;
+
+    let ollamaRes: Response;
+    try {
+      ollamaRes = await fetch(`${OLLAMA_INTERNAL_URL}/api/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model,
+          system: enrichedSystem,
+          prompt: prompt.trim(),
+          stream: true,
+        }),
+        signal: request.signal,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return new Response(JSON.stringify({ error: `Ollama error: ${msg}` }), { status: 502 });
+    }
+
+    const encoder = new TextEncoder();
+    const ollamaReader = ollamaRes.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    const readable = new ReadableStream({
+      async pull(controller) {
+        try {
+          const { done, value } = await ollamaReader.read();
+
+          if (done) {
+            controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+            controller.close();
+            return;
+          }
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+              const json = JSON.parse(line) as { response?: string; done?: boolean };
+              if (json.response) {
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify(json.response)}\n\n`));
+              }
+              if (json.done) {
+                controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+                controller.close();
+                return;
+              }
+            } catch {}
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          controller.enqueue(encoder.encode(`data: {"error":"${msg}"}\n\n`));
+          controller.close();
+        }
+      },
+      cancel() {
+        ollamaReader.cancel();
+      },
+    });
+
+    return new Response(readable, {
+      status: 200,
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      },
+    });
+  },
+});
