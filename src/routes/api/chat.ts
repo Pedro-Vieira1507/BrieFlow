@@ -3,92 +3,139 @@
  *
  * Usa o campo `system` da API do Ollama (separado do `prompt`) para que
  * as regras do sistema tenham prioridade máxima sobre o pedido do usuário.
- * Antes de gerar HTML, o modelo é forçado a um bloco de raciocínio explícito
- * (chain-of-thought) que extrai cores, produto e descrição da imagem.
  */
 import { createAPIFileRoute } from "@tanstack/start/api";
 
 const OLLAMA_INTERNAL_URL = process.env.OLLAMA_URL ?? "http://127.0.0.1:11434";
 const DEFAULT_MODEL = process.env.OLLAMA_MODEL ?? "qwen2.5:14b";
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SYSTEM PROMPTS — enviados no campo `system` da API do Ollama
-// Isso garante que as regras não sejam tratadas como parte do pedido do usuário
-// ─────────────────────────────────────────────────────────────────────────────
-
 const SYSTEM_PROMPTS: Record<string, string> = {
-  // ── E-MAIL ──────────────────────────────────────────────────────────────────
-  email: `Você é um especialista em e-mail marketing que gera HTML inline-styled responsivo.
-Regras inviolaveis:
-- Comece DIRETAMENTE com <!DOCTYPE html>. Zero texto fora do HTML.
-- Sem <link> externos, sem @import.
-- Português do Brasil.
-- Cor: use SOMENTE as cores explicitamente pedidas pelo usuário. Se não especificou, use #1a1a1a de fundo e #f97316 como destaque. NUNCA use azul como cor principal sem pedido.
-- Imagem: se precisar de imagem, use EXCLUSIVAMENTE: <img src="https://image.pollinations.ai/prompt/DESCRICAO_EM_INGLES?width=600&height=300&nologo=true" style="width:100%;display:block">. A DESCRICAO deve descrever exatamente o produto mencionado pelo usuário em inglês.`,
+  // ── BANNER (PADRÃO AGÊNCIA DE PUBLICIDADE) ──────────────────────────────────
+  banner: `Você é um Diretor de Arte Sênior de uma agência B2B. Gere o código HTML/CSS de um banner publicitário de ALTÍSSIMA QUALIDADE (1200x500px).
 
-  // ── BANNER ──────────────────────────────────────────────────────────────────
-  banner: `Você é um designer de banners HTML/CSS. Gere um banner 1200x500px completo e autossuficiente.
+REGRAS DE IMAGEM (MUITO IMPORTANTE):
+Para evitar que a IA desenhe pessoas quando o cliente pede um equipamento, sua descrição da imagem Pollinations em inglês DEVE OBRIGATORIAMENTE conter as palavras:
+"professional macro product photography, isolated on pure white background, highly detailed, no humans, nobody, no people, empty scene".
 
-PROCESSO OBRIGATÓRIO antes de escrever qualquer HTML:
-Passo 1 — Extraia do pedido do usuário e escreva num comentário HTML no início do código:
-  <!-- ANALISE:
-  Cores pedidas: [liste as cores exatas mencionadas pelo usuário]
-  Cor primária (fundo/base): [hex exato]
-  Cor secundária: [hex exato]
-  Cor de destaque (textos de promoção/desconto): [hex exato]
-  Produto: [nome do produto]
-  Descrição da imagem Pollinations (inglês): [descrição detalhada e específica do produto]
-  -->
-Passo 2 — Construa o HTML usando EXATAMENTE os valores definidos no Passo 1.
+PROCESSO OBRIGATÓRIO:
+Gere OBRIGATORIAMENTE o HTML exato abaixo, substituindo apenas os colchetes pelo conteúdo real. NÃO INVENTE CSS.
 
-ESTRUTURA DO BANNER:
-- Div raiz: width:1200px; height:500px; position:relative; overflow:hidden; display:flex; font-family:Arial,sans-serif
-- Painel esquerdo (~680px): background com a COR PRIMARIA pedida; padding:50px 60px; display:flex; flex-direction:column; justify-content:center; gap:16px
-  - Tag da marca: font-size:12px; letter-spacing:2px; text-transform:uppercase; opacity:0.8; cor contrastante com o fundo
-  - Título principal: font-size:48px; font-weight:900; line-height:1.1; cor branca ou contrastante
-  - Subtexto de oferta/desconto: font-size:22px; font-weight:700; color: COR DE DESTAQUE (vermelho, dourado, etc — o que o usuário pediu)
-  - Descrição: font-size:15px; opacity:0.85; max-width:400px
-  - Botão CTA: display:inline-block; padding:16px 40px; border-radius:8px; font-weight:900; font-size:16px; background: COR SECUNDÁRIA ou destaque; cursor:pointer
-- Painel direito (~520px): position:relative; overflow:hidden
-  - <img src="https://image.pollinations.ai/prompt/DESCRICAO_EM_INGLES_DO_PRODUTO?width=520&height=500&nologo=true" style="width:100%;height:100%;object-fit:cover;display:block">
-- Badge de desconto (opcional): position:absolute; top:30px; right:30px; background: COR DE DESTAQUE; color:#fff; border-radius:50%; width:90px; height:90px; display:flex; flex-direction:column; align-items:center; justify-content:center; font-weight:900
-
-REGRAS ABSOLUTAS:
-- A COR DO FUNDO do painel esquerdo é a cor primária que o usuário pediu. Se pediu rosa, é rosa. Se pediu marrom, é marrom.
-- NUNCA use background azul (#0000ff, #003366, #1a73e8, navy, blue, #1e40af, #2563eb, #3b82f6 ou qualquer tom de azul) a não ser que o usuário tenha pedido explicitamente a palavra "azul".
-- A descrição Pollinations DEVE descrever o produto específico mencionado (ex: brownie recheado sanduiche quadrado = "square layered chocolate brownie sandwich cut in half showing filling close-up food photography").
-- Comece DIRETAMENTE com <!-- ANALISE: (o comentário do Passo 1) seguido de <!DOCTYPE html>.
-- ZERO texto explicativo fora do HTML.
-- Português do Brasil nos textos do banner.`,
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800;900&display=swap');
+  * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Inter', sans-serif; }
+  .banner { width: 1200px; height: 500px; display: flex; overflow: hidden; background: linear-gradient(135deg, [COR_PRIMARIA] 0%, #111 150%); color: #fff; position: relative; }
+  .bg-pattern { position: absolute; inset: 0; opacity: 0.05; background-image: radial-gradient(#fff 1px, transparent 1px); background-size: 24px 24px; z-index: 1; pointer-events: none;}
+  .content { flex: 1; padding: 60px 80px; display: flex; flex-direction: column; justify-content: center; z-index: 3; }
+  .badge { display: inline-block; padding: 6px 14px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 100px; text-transform: uppercase; font-size: 12px; font-weight: 800; letter-spacing: 2px; margin-bottom: 24px; width: fit-content; backdrop-filter: blur(4px); }
+  .title { font-size: 52px; font-weight: 900; line-height: 1.1; letter-spacing: -1.5px; margin-bottom: 16px; text-wrap: balance; text-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+  .subtitle { font-size: 22px; font-weight: 600; color: [COR_DE_DESTAQUE_OU_SECUNDARIA]; margin-bottom: 16px; }
+  .desc { font-size: 16px; line-height: 1.6; opacity: 0.85; max-width: 480px; margin-bottom: 32px; font-weight: 400; }
+  .cta { display: inline-flex; align-items: center; justify-content: center; background: [COR_DE_DESTAQUE_OU_SECUNDARIA]; color: #000; padding: 18px 42px; border-radius: 8px; font-weight: 800; font-size: 16px; text-decoration: none; width: fit-content; box-shadow: 0 10px 25px -5px [COR_DE_DESTAQUE_OU_SECUNDARIA]; transition: transform 0.2s; }
+  .image-wrapper { width: 550px; position: relative; flex-shrink: 0; z-index: 2; display: flex; align-items: center; justify-content: center; padding: 30px;}
+  .image-wrapper img { width: 100%; height: 100%; object-fit: contain; filter: drop-shadow(-10px 20px 30px rgba(0,0,0,0.4)); transform: scale(1.05); }
+  .gradient-overlay { position: absolute; top: 0; bottom: 0; left: 0; width: 200px; background: linear-gradient(to right, [COR_PRIMARIA] 0%, transparent 100%); z-index: 3; }
+</style>
+</head>
+<body>
+  <div class="banner">
+    <div class="bg-pattern"></div>
+    <div class="content">
+      <div class="badge">[NOME DA MARCA]</div>
+      <h1 class="title">[HEADLINE PODEROSA]</h1>
+      <h2 class="subtitle">[OFERTA OU SUBTÍTULO]</h2>
+      <p class="desc">[BREVE DESCRIÇÃO DA DOR OU SOLUÇÃO]</p>
+      <a href="#" class="cta">[TEXTO DO BOTAO CTA]</a>
+    </div>
+    <div class="image-wrapper">
+      <div class="gradient-overlay"></div>
+      <img src="https://image.pollinations.ai/prompt/[DESCRICAO_DO_PRODUTO_EM_INGLES_COM_AS_REGRAS_DE_IMAGEM_MENCIONADAS]?width=600&height=500&nologo=true" alt="Product">
+    </div>
+  </div>
+</body>
+</html>`,
 
   // ── INSTAGRAM ───────────────────────────────────────────────────────────────
-  instagram: `Você é um designer de posts para Instagram especializado em marketing. Gere um post HTML/CSS 1080x1080px completo.
+  instagram: `Você é um Diretor de Arte Sênior. Gere um post HTML/CSS 1080x1080px de ALTÍSSIMA QUALIDADE.
+Adicione OBRIGATORIAMENTE no final da descrição da imagem Pollinations: ", high-end commercial product photography, dramatic studio lighting, empty scene, no people, nobody, no humans".
+Siga ESTRITAMENTE a estrutura abaixo, substituindo os valores em colchetes.
 
-PROCESSO OBRIGATÓRIO antes de escrever qualquer HTML:
-Escreva um comentário HTML no início:
-  <!-- ANALISE:
-  Cores pedidas: [liste]
-  Cor primária: [hex]
-  Cor secundária: [hex]
-  Produto/ramo: [nome]
-  Descrição Pollinations (inglês, específica): [descrição]
-  -->
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
+  * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Inter', sans-serif; }
+  .post { width: 1080px; height: 1080px; position: relative; display: flex; flex-direction: column; justify-content: flex-end; padding: 80px; background-color: [COR_PRIMARIA]; overflow: hidden; }
+  .bg-img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; z-index: 0; opacity: 0.55; mix-blend-mode: luminosity; }
+  .gradient { position: absolute; inset: 0; background: linear-gradient(to top, [COR_PRIMARIA] 10%, transparent 80%); z-index: 1; }
+  .brand { position: absolute; top: 60px; left: 80px; z-index: 2; font-size: 28px; font-weight: 900; letter-spacing: 4px; color: #fff; opacity: 0.9; text-transform: uppercase; }
+  .content { position: relative; z-index: 2; color: #fff; text-align: left; max-width: 900px; }
+  .title { font-size: 85px; font-weight: 900; line-height: 1.05; letter-spacing: -2px; margin-bottom: 24px; text-transform: uppercase; text-shadow: 0 10px 30px rgba(0,0,0,0.3); }
+  .subtitle { font-size: 32px; font-weight: 700; color: [COR_DE_DESTAQUE]; background: rgba(0,0,0,0.25); display: inline-block; padding: 12px 28px; border-radius: 12px; backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.1); }
+</style>
+</head>
+<body>
+  <div class="post">
+    <img class="bg-img" src="https://image.pollinations.ai/prompt/[DESCRICAO_DO_PRODUTO_EM_INGLES_COM_AS_REGRAS_DE_IMAGEM_MENCIONADAS]?width=1080&height=1080&nologo=true">
+    <div class="gradient"></div>
+    <div class="brand">[NOME DA MARCA]</div>
+    <div class="content">
+      <h1 class="title">[HEADLINE PODEROSA E CURTA]</h1>
+      <h2 class="subtitle">[OFERTA OU CALL TO ACTION]</h2>
+    </div>
+  </div>
+</body>
+</html>`,
 
-ESTRUTURA:
-- Div raiz: width:1080px; height:1080px; position:relative; overflow:hidden; font-family:Arial,sans-serif
-- Fundo: imagem Pollinations (position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:0) + overlay com as cores pedidas (z-index:1)
-- Textos (z-index:2): headline grande bold centrada, subtítulo, nome da marca no canto
+  // ── E-MAIL ──────────────────────────────────────────────────────────────────
+  email: `Você é um especialista em e-mail marketing. Gere um HTML responsivo baseado ESTRITAMENTE neste template seguro para Outlook e Gmail (Tabelas).
+Regras de imagem em inglês: "product photography, empty scene, no people, nobody, isolated".
 
-REGRAS:
-- Cores: use SOMENTE as cores que o usuário pediu. NUNCA azul como padrão.
-- Imagem: use https://image.pollinations.ai/prompt/DESCRICAO?width=1080&height=1080&nologo=true com descrição do produto específico do usuário.
-- Comece com <!-- ANALISE: seguido de <!DOCTYPE html>. Zero texto fora do HTML. Português do Brasil.`,
+<!DOCTYPE html>
+<html>
+<body style="margin:0; padding:0; background-color:#f4f4f5; font-family:Arial, sans-serif;">
+  <table width="100%" border="0" cellpadding="0" cellspacing="0" bgcolor="#f4f4f5">
+    <tr>
+      <td align="center" style="padding: 40px 10px;">
+        <table width="600" border="0" cellpadding="0" cellspacing="0" bgcolor="#ffffff" style="border-radius:12px; overflow:hidden; box-shadow:0 10px 25px rgba(0,0,0,0.05);">
+          <tr>
+            <td align="center" bgcolor="[COR_PRIMARIA]" style="padding: 35px; color:#ffffff; font-size:26px; font-weight:bold; text-transform:uppercase; letter-spacing:2px;">
+              [NOME DA MARCA]
+            </td>
+          </tr>
+          <tr>
+            <td>
+              <img src="https://image.pollinations.ai/prompt/[DESCRICAO_DO_PRODUTO_EM_INGLES_COM_REGRAS]?width=600&height=350&nologo=true" width="600" style="display:block; width:100%; max-width:600px;">
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 40px 35px; color:#333333; font-size:16px; line-height:1.6;">
+              <h1 style="margin-top:0; font-size:26px; color:#111111; letter-spacing:-0.5px;">[HEADLINE]</h1>
+              <p>[CORPO DO E-MAIL - ARGUMENTAÇÃO PERSUASIVA]</p>
+            </td>
+          </tr>
+          <tr>
+            <td align="center" style="padding: 0 35px 50px;">
+              <a href="#" style="display:inline-block; background-color:[COR_DE_DESTAQUE]; color:#000000; font-size:16px; font-weight:bold; text-decoration:none; padding:18px 36px; border-radius:8px;">[TEXTO DO BOTAO]</a>
+            </td>
+          </tr>
+          <tr>
+            <td align="center" bgcolor="#eeeeee" style="padding: 24px; font-size:12px; color:#888888;">
+              © 2024 [NOME DA MARCA]. Todos os direitos reservados.
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`,
 
-  // ── FICHA TÉCNICA ──────────────────────────────────────────────────────────
-  datasheet: `Você é um especialista em conteúdo de marketing técnico. Gere uma ficha técnica de produto em Markdown estruturado com: Visão Geral, Características, Especificações (tabela), Benefícios, Casos de Uso e CTA. Use apenas Markdown válido. Português do Brasil.`,
-
-  // ── TEXTO GENÉRICO ─────────────────────────────────────────────────────────
-  text: `Você é um copywriter sênior de marketing. Escreva conteúdo persuasivo, claro e direto em português do Brasil. Use Markdown quando ajudar a leitura.`,
+  datasheet: `Você é um conteudista técnico. Gere uma ficha técnica de produto em Markdown estruturado com: Visão Geral, Características, Especificações (tabela), Benefícios, Casos de Uso e CTA. Use apenas Markdown válido. Português do Brasil.`,
+  text: `Você é um copywriter sênior de marketing. Escreva conteúdo persuasivo, claro e direto em português do Brasil. Use Markdown.`,
 };
 
 export const APIRoute = createAPIFileRoute("/api/chat")({
@@ -122,9 +169,6 @@ export const APIRoute = createAPIFileRoute("/api/chat")({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model,
-          // `system` é o campo nativo do Ollama para system prompt — tem prioridade
-          // sobre o `prompt` (que é o pedido do usuário). Isso impede que o modelo
-          // misture as regras com o conteúdo e reduza o peso das instruções.
           system: systemPrompt,
           prompt: prompt.trim(),
           stream: true,
@@ -182,7 +226,6 @@ export const APIRoute = createAPIFileRoute("/api/chat")({
                 return;
               }
             } catch {
-              // linha JSON malformada — ignora
             }
           }
         } catch (err) {
