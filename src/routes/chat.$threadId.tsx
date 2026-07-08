@@ -408,6 +408,13 @@ function ChatRoute() {
   );
 }
 export function extractHtml(raw: string): string {
-  // Usando new RegExp para evitar problemas com formatação de blocos de código
-  const regex = new RegExp("
-http://googleusercontent.com/immersive_entry_chip/0
+  // Usando String.fromCharCode(96) para gerar as crases de forma programática.
+  // Isso evita que o botão de copiar do chat quebre a formatação.
+  const ticks = String.fromCharCode(96, 96, 96);
+  const pattern = ticks + "(?:html)?\\s*([\\s\\S]*?)" + ticks;
+  const regex = new RegExp(pattern, "i");
+  const fence = raw.match(regex);
+  
+  if (fence) return fence[1].trim();
+  return raw.trim();
+}
