@@ -1,26 +1,25 @@
 /**
  * BrieFlow — Production Server
  *
- * Arquitectura:
- *   1. Express regista /api/chat, /api/translate, /api/generate-banner
- *   2. Todas as outras rotas passam ao handler Nitro do TanStack Start
- *      (.output/server/index.mjs) via toNodeListener() do h3
+ * Stack: TanStack Start + Vite SSR (sem Nitro)
+ * Build output: dist/client/ + dist/server/server.js
  *
- * NOTA: O TanStack Start (Nitro) gera o output em .output/, NÃO em dist/.
- *       O server-express.mjs NÃO importa createExpressApp — usa toNodeListener.
+ * Ordem de middleware Express:
+ *   1. Ficheiros estáticos do Vite (dist/client)
+ *   2. POST /api/chat     — Multi-Agent Pipeline (Agente 1 non-stream + Agente 2 SSE)
+ *   3. POST /api/translate
+ *   4. POST /api/generate-banner  (template legado)
+ *   5. * tudo o resto    — SSR do TanStack Start (dist/server/server.js → createExpressApp)
  */
 
 import express    from "express";
 import path       from "path";
 import { fileURLToPath } from "url";
-import http       from "http";
 
-const __dirname  = path.dirname(fileURLToPath(import.meta.url));
-const PORT       = process.env.PORT        || 3000;
-const OLLAMA_URL = process.env.OLLAMA_URL  ?? "http://127.0.0.1:11434";
+const __dirname     = path.dirname(fileURLToPath(import.meta.url));
+const PORT          = process.env.PORT         || 3000;
+const OLLAMA_URL    = process.env.OLLAMA_URL   ?? "http://127.0.0.1:11434";
 const DEFAULT_MODEL = process.env.OLLAMA_MODEL ?? "qwen2.5:14b";
-
-const HTML_INTENTS     = new Set(["email","banner","instagram","linkedin","landing"]);
 
 // ═══════════════════════════════════════════════════════════════
 // BRAND IDENTITIES
@@ -310,79 +309,80 @@ body{width:1200px;height:400px;overflow:hidden;font-family:'Montserrat',sans-ser
 }
 
 // ═══════════════════════════════════════════════════════════════
-// EXPRESS APP — rotas API
+// EXPRESS APP
 // ═══════════════════════════════════════════════════════════════
 const app = express();
 app.use(express.json({ limit: "4mb" }));
 
+// ── Ficheiros estáticos Vite ────────────────────────────────────────
+app.use(express.static(path.join(__dirname, "dist/client")));
+
 // ── POST /api/chat ────────────────────────────────────────────
 app.post("/api/chat", async (req, res) => {
   const { prompt, intent = "text", model = DEFAULT_MODEL, reasoning } = req.body ?? {};
-
   if (!prompt) return res.status(400).json({ error: "Falta prompt" });
 
-  const isVisualIntent = ["banner", "email", "instagram"].includes(intent);
-  const contextRules = reasoning
+  const isVisual = ["banner","email","instagram"].includes(intent);
+  const ctxRules = reasoning
     ? `\n\n[DIRETRIZ ESTRATÉGICA]\nObjetivo: ${reasoning.objective}\nFunil: ${reasoning.funnelStage}\nTom: ${reasoning.tone}`
     : "";
 
-  let finalSystemPrompt = "";
-  let finalUserPrompt   = prompt;
+  let systemPrompt = "";
+  let userPrompt   = prompt;
 
-  if (isVisualIntent) {
-    let strategicCopy;
+  if (isVisual) {
+    let copy;
     try {
-      strategicCopy = await runCopywriterAgent(prompt, intent, model, contextRules);
-      console.log(`[Agent1] Copy gerado para "${intent}":\n${strategicCopy.slice(0,200)}...`);
+      copy = await runCopywriterAgent(prompt, intent, model, ctxRules);
+      console.log(`[Agent1] ${intent} copy:\n${copy.slice(0,200)}...`);
     } catch (err) {
       console.error("[Agent1] ERRO:", err);
-      return res.status(502).json({ error: `Agente 1 (Copywriter) falhou: ${err}` });
+      return res.status(502).json({ error: `Agente 1 falhou: ${err}` });
     }
-    finalSystemPrompt = buildDesignerPrompt(intent, strategicCopy);
-    finalUserPrompt   = `Renderize o HTML com base no copy acima. Diretrizes de marca do utilizador: ${prompt}`;
+    systemPrompt = buildDesignerPrompt(intent, copy);
+    userPrompt   = `Renderize o HTML. Diretrizes de marca: ${prompt}`;
   } else {
-    const singleAgentSystem = {
-      text:      `Você é um Copywriter Sénior B2B. Escreva texto direto, sem jargões de IA. Use Markdown.${contextRules}`,
-      datasheet: `Você é um Engenheiro de Produto. Escreva conteúdo técnico e preciso em Markdown.${contextRules}`,
+    const sys = {
+      text:      `Você é um Copywriter Sénior B2B. Texto direto, sem jargões de IA. Use Markdown.${ctxRules}`,
+      datasheet: `Você é um Engenheiro de Produto. Conteúdo técnico e preciso em Markdown.${ctxRules}`,
     };
-    finalSystemPrompt = singleAgentSystem[intent] ?? singleAgentSystem.text;
+    systemPrompt = sys[intent] ?? sys.text;
   }
 
   let ollamaRes;
   try {
     ollamaRes = await fetch(`${OLLAMA_URL}/api/generate`, {
-      method: "POST",
+      method:  "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model, system: finalSystemPrompt, prompt: finalUserPrompt.trim(), stream: true }),
+      body:    JSON.stringify({ model, system: systemPrompt, prompt: userPrompt.trim(), stream: true }),
     });
   } catch (err) {
-    console.error("[Agent2] Fetch error:", err);
-    return res.status(502).json({ error: `Ollama stream error: ${err}` });
+    return res.status(502).json({ error: `Ollama indisponível: ${err}` });
   }
 
   if (!ollamaRes.ok) {
     const txt = await ollamaRes.text().catch(() => "");
-    return res.status(502).json({ error: `Ollama respondeu ${ollamaRes.status}: ${txt}` });
+    return res.status(502).json({ error: `Ollama ${ollamaRes.status}: ${txt}` });
   }
 
-  res.setHeader("Content-Type",  "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache");
-  res.setHeader("Connection",    "keep-alive");
+  res.setHeader("Content-Type",      "text/event-stream");
+  res.setHeader("Cache-Control",     "no-cache");
+  res.setHeader("Connection",        "keep-alive");
   res.setHeader("X-Accel-Buffering", "no");
   res.flushHeaders();
 
   const decoder = new TextDecoder();
-  let buffer = "";
+  let buf = "";
   for await (const chunk of ollamaRes.body) {
-    buffer += decoder.decode(chunk, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() ?? "";
+    buf += decoder.decode(chunk, { stream: true });
+    const lines = buf.split("\n");
+    buf = lines.pop() ?? "";
     for (const line of lines) {
       if (!line.trim()) continue;
       try {
-        const json = JSON.parse(line);
-        if (json.response) res.write(`data: ${JSON.stringify(json.response)}\n\n`);
-        if (json.done) { res.write("data: [DONE]\n\n"); res.end(); return; }
+        const j = JSON.parse(line);
+        if (j.response) res.write(`data: ${JSON.stringify(j.response)}\n\n`);
+        if (j.done) { res.write("data: [DONE]\n\n"); res.end(); return; }
       } catch { /* linha inválida */ }
     }
   }
@@ -396,9 +396,9 @@ app.post("/api/translate", async (req, res) => {
   if (!prompt) return res.json({ englishPrompt: prompt });
   try {
     const r = await fetch(`${OLLAMA_URL}/api/generate`, {
-      method: "POST",
+      method:  "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+      body:    JSON.stringify({
         model,
         prompt: `Translate the following marketing image brief into a concise, vivid English prompt for an image generator. Return ONLY the English prompt — no quotes, no preface, no explanation.\n\n${prompt}`,
         stream: false,
@@ -406,112 +406,92 @@ app.post("/api/translate", async (req, res) => {
     });
     if (!r.ok) return res.json({ englishPrompt: prompt });
     const data = await r.json();
-    const englishPrompt = (data.response ?? prompt).trim().replace(/^["']|["']$/g, "");
-    return res.json({ englishPrompt });
+    const out  = (data.response ?? prompt).trim().replace(/^["']|["']$/g, "");
+    return res.json({ englishPrompt: out });
   } catch {
     return res.json({ englishPrompt: prompt });
   }
 });
 
 // ── POST /api/generate-banner (legado) ────────────────────────
-app.post("/api/generate-banner", async (req,res)=>{
-  const body=req.body||{};
-  const prompt=body.prompt||"";
-  const model=body.model||DEFAULT_MODEL;
-  const brand=detectBrand(prompt);
+app.post("/api/generate-banner", async (req,res) => {
+  const body   = req.body || {};
+  const prompt = body.prompt || "";
+  const model  = body.model  || DEFAULT_MODEL;
+  const brand  = detectBrand(prompt);
 
-  let productImages=[null,null,null];
-  if(brand.productQueries){
-    try{ productImages=await searchProductImages(brand.productQueries); }
-    catch(e){ console.error("[banner] searchProductImages error:",e); }
+  let productImages = [null,null,null];
+  if (brand.productQueries) {
+    try { productImages = await searchProductImages(brand.productQueries); }
+    catch(e) { console.error("[banner] searchProductImages:",e); }
   }
 
-  const schema=`Gere SOMENTE um JSON válido (sem markdown, sem blocos de código) no formato:
+  const schema = `Gere SOMENTE um JSON válido (sem markdown, sem blocos de código) no formato:
 {"headline":"...","highlight":"...","subline":"...","description":"...","badge_value":"...","badge_sup":"...","badge_label":"...","validity":"...","cta":"..."}
 
-Contexto da marca: ${brand.palette}
-Briefing: ${prompt}`;
+Contexto da marca: ${brand.palette}\nBriefing: ${prompt}`;
 
   let ollamaData;
-  try{
-    const or=await fetch(`${OLLAMA_URL}/api/generate`,{
-      method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({model,prompt:schema,stream:false}),
+  try {
+    const or = await fetch(`${OLLAMA_URL}/api/generate`, {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ model, prompt: schema, stream: false }),
     });
-    ollamaData=await or.json();
-  }catch(e){ return res.status(502).json({error:"Ollama unavailable"}); }
+    ollamaData = await or.json();
+  } catch(e) {
+    return res.status(502).json({ error: "Ollama indisponível" });
+  }
 
-  let fields={};
-  try{
-    const raw=(ollamaData.response||"").trim();
-    const m=raw.match(/\{[\s\S]*\}/);
-    if(m) fields=JSON.parse(m[0]);
-  }catch(e){ console.error("[banner] JSON parse error",e); }
+  let fields = {};
+  try {
+    const raw = (ollamaData.response || "").trim();
+    const m   = raw.match(/\{[\s\S]*\}/);
+    if (m) fields = JSON.parse(m[0]);
+  } catch(e) { console.error("[banner] JSON parse:",e); }
 
-  const d={
-    ...brand, brand:brand.displayName, bg_image_url:null,
-    product_img_1:productImages[0], product_img_2:productImages[1], product_img_3:productImages[2],
-    headline:fields.headline||"Precisão que transforma",
-    highlight:fields.highlight||"",
-    subline:fields.subline||"",
-    description:fields.description||"",
-    badge_value:fields.badge_value||"3",
-    badge_sup:fields.badge_sup||"%",
-    badge_label:fields.badge_label||"de Desconto",
-    validity:fields.validity||"Oferta por tempo limitado",
-    cta:fields.cta||"Ver Oferta",
+  const d = {
+    ...brand, brand: brand.displayName, bg_image_url: null,
+    product_img_1: productImages[0], product_img_2: productImages[1], product_img_3: productImages[2],
+    headline:    fields.headline    || "Precisão que transforma",
+    highlight:   fields.highlight   || "",
+    subline:     fields.subline     || "",
+    description: fields.description || "",
+    badge_value: fields.badge_value || "3",
+    badge_sup:   fields.badge_sup   || "%",
+    badge_label: fields.badge_label || "de Desconto",
+    validity:    fields.validity    || "Oferta por tempo limitado",
+    cta:         fields.cta         || "Ver Oferta",
   };
-  res.setHeader("Content-Type","text/html;charset=utf-8");
+  res.setHeader("Content-Type", "text/html;charset=utf-8");
   res.send(bannerTemplate(d));
 });
 
 // ═══════════════════════════════════════════════════════════════
-// NITRO / TANSTACK START HANDLER
+// SSR do TanStack Start — dist/server/server.js → createExpressApp()
 //
-// O TanStack Start (Nitro) gera .output/server/index.mjs
-// Esse ficheiro exporta { handler } — um h3 event-handler.
-// Convertemos com toNodeListener() do h3 para usar com Express.
-//
-// Se .output não existir (antes do build), o servidor arranque
-// em modo "só API" sem crash — útil para testes locais.
+// O build do Vite SSR gera dist/server/server.js com export createExpressApp.
+// Importamos de forma lazy (await import) para que o servidor arrange
+// mesmo que o build ainda não exista — não crasha antes do listen().
 // ═══════════════════════════════════════════════════════════════
-const outputPath = path.join(__dirname, ".output/server/index.mjs");
-let nitroAttached = false;
+const ssrPath = path.join(__dirname, "dist/server/server.js");
+let ssrAttached = false;
 
 try {
-  const nitro = await import(outputPath);
-
-  // h3 exporta toNodeListener; Nitro re-exporta o mesmo util
-  const { toNodeListener } = await import("h3").catch(async () => {
-    // fallback: tentar importar de dentro do .output
-    return await import(path.join(__dirname, ".output/server/node_modules/h3/dist/index.mjs"))
-      .catch(() => ({ toNodeListener: null }));
-  });
-
-  const handler = nitro.handler ?? nitro.default ?? nitro;
-
-  if (toNodeListener && typeof handler === "function") {
-    // Modo preferido: toNodeListener converte h3 handler → Node.js requestListener
-    app.use(toNodeListener(handler));
-    nitroAttached = true;
-    console.log("[BrieFlow] Nitro SSR handler ligado via toNodeListener");
-  } else if (typeof handler === "function") {
-    // Fallback: tentar usar directamente como middleware Node.js
-    app.use((req, res) => handler(req, res));
-    nitroAttached = true;
-    console.log("[BrieFlow] Nitro SSR handler ligado via middleware directo");
-  }
+  const { createExpressApp } = await import(ssrPath);
+  const ssrHandler = await createExpressApp();
+  app.use(ssrHandler);
+  ssrAttached = true;
+  console.log("[BrieFlow] TanStack Start SSR activo (dist/server/server.js)");
 } catch (e) {
-  console.warn("[BrieFlow] .output/server/index.mjs não encontrado — a correr em modo API-only.");
-  console.warn("           Execute 'npm run build' para activar o SSR do TanStack Start.");
+  // Build não existe ainda — modo SPA com ficheiros estáticos
+  console.warn("[BrieFlow] dist/server/server.js não encontrado — modo SPA.");
+  console.warn("           Execute 'npm run build' para activar SSR.");
   console.warn("           Detalhe:", e.message);
-
-  // Servir client build estático como fallback (se existir)
-  const clientBuild = path.join(__dirname, ".output/public");
-  app.use(express.static(clientBuild));
   app.get("*", (_req, res) => {
-    res.sendFile(path.join(clientBuild, "index.html"), (err) => {
-      if (err) res.status(503).send("BrieFlow: build não encontrado. Execute npm run build.");
+    const spa = path.join(__dirname, "dist/client/index.html");
+    res.sendFile(spa, (err) => {
+      if (err) res.status(503).send("BrieFlow: execute npm run build.");
     });
   });
 }
@@ -522,5 +502,5 @@ try {
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`\n[BrieFlow] ✓ Servidor em http://0.0.0.0:${PORT}`);
   console.log(`[BrieFlow] Ollama: ${OLLAMA_URL} | Modelo: ${DEFAULT_MODEL}`);
-  console.log(`[BrieFlow] SSR: ${nitroAttached ? "Nitro activo" : "modo API-only (sem build)"}\n`);
+  console.log(`[BrieFlow] SSR: ${ssrAttached ? "TanStack Start activo" : "modo SPA (sem build)"}\n`);
 });
