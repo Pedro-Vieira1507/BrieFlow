@@ -202,13 +202,13 @@ export const APIRoute = createAPIFileRoute("/api/chat")({
           const { done, value } = await ollamaReader.read();
 
           if (done) {
-            controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+            controller.enqueue(encoder.encode("data: [DONE]\\n\\n"));
             controller.close();
             return;
           }
 
           buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
+          const lines = buffer.split("\\n");
           buffer = lines.pop() ?? "";
 
           for (const line of lines) {
@@ -217,11 +217,11 @@ export const APIRoute = createAPIFileRoute("/api/chat")({
               const json = JSON.parse(line) as { response?: string; done?: boolean };
               if (json.response) {
                 controller.enqueue(
-                  encoder.encode(`data: ${JSON.stringify(json.response)}\n\n`),
+                  encoder.encode(`data: ${JSON.stringify(json.response)}\\n\\n`),
                 );
               }
               if (json.done) {
-                controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+                controller.enqueue(encoder.encode("data: [DONE]\\n\\n"));
                 controller.close();
                 return;
               }
@@ -230,7 +230,7 @@ export const APIRoute = createAPIFileRoute("/api/chat")({
           }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
-          controller.enqueue(encoder.encode(`data: {"error":"${msg}"}\n\n`));
+          controller.enqueue(encoder.encode(`data: {"error":"${msg}"}\\n\\n`));
           controller.close();
         }
       },
