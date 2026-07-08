@@ -25,7 +25,9 @@ import {
   suggestTone,
   detectMissingBriefing,
   buildBriefingQuestions,
+  inheritIntentFromContext,
   looksLikeHtml,
+  extractHtml,
   translatePromptForImage,
 } from "@/lib/agent";
 import {
@@ -74,7 +76,7 @@ function ChatRoute() {
     "classifying" | "planning" | "generating" | "validating" | "rendering" | undefined
   >();
   const [brandProfile, setBrandProfile] = useState<BrandProfile | undefined>();
-  
+
   const currentUserPrompt = useRef<string>("");
   const [selectedArtifact, setSelectedArtifact] = useState<Artifact | undefined>();
   const abortRef = useRef<(() => void) | null>(null);
@@ -120,7 +122,7 @@ function ChatRoute() {
         html: extractHtml(streamingText),
         title: "A gerar...",
         prompt: currentUserPrompt.current,
-        intent: loadingIntent
+        intent: loadingIntent,
       };
     }
     return {
@@ -137,13 +139,11 @@ function ChatRoute() {
   const buildContextualPrompt = useCallback(
     (userText: string): string => {
       if (!thread) return userText;
-
       const brandCtx = brandContextBlock(brandProfile);
       const history = thread.messages
         .slice(-10)
         .map((m) => `${m.role === "user" ? "Usuário" : "Assistente"}: ${m.content}`)
         .join("\n");
-
       const parts: string[] = [];
       if (brandCtx) parts.push(brandCtx);
       if (history) {
@@ -152,10 +152,9 @@ function ChatRoute() {
         parts.push("===");
       }
       parts.push(`Usuário: ${userText}`);
-
       return parts.join("\n\n");
     },
-    [thread, brandProfile]
+    [thread, brandProfile],
   );
 
   const handleSend = useCallback(
@@ -165,16 +164,17 @@ function ChatRoute() {
       currentUserPrompt.current = text;
       const contextualPrompt = buildContextualPrompt(text);
 
+      // Atualiza perfil de marca se o utilizador forneceu dados
       const brandPatch = extractBrandInfo(text);
       const hasBrandInfo = Object.keys(brandPatch).length > 0;
       const isSetupRequest = isBrandSetupRequest(text);
-
       if (hasBrandInfo || isSetupRequest) {
         const currentProfile = getBrandProfile(threadId) ?? { threadId, updatedAt: Date.now() };
         saveBrandProfile({ ...currentProfile, ...brandPatch, threadId });
         setBrandProfile(getBrandProfile(threadId));
       }
 
+      // Regista mensagem do utilizador
       const userMsg: Message = {
         id: generateId(),
         role: "user",
@@ -184,46 +184,59 @@ function ChatRoute() {
       appendMessage(thread.id, userMsg);
       refresh();
 
+      // -----------------------------------------------------------------------
+      // 1. DETEÇÃO DE INTENÇÃO + MEMÓRIA DE INTENÇÃO
+      // -----------------------------------------------------------------------
       let intent = detectIntent(text);
       const objective = detectCopyObjective(text);
       const funnelStage = detectFunnelStage(text, objective);
-      const tone = suggestTone(intent as any, objective, text);
+      const tone = suggestTone(intent as Parameters<typeof suggestTone>[0], objective, text);
 
-      // --- HERANÇA DE CONTEXTO (PREFLIGHT) ---
-      // Se a última mensagem foi uma pergunta de preflight do agente,
-      // e o usuário respondeu com poucas palavras, herdamos a intenção original.
-      const lastMsg = thread.messages[thread.messages.length - 1];
-      const isAnsweringPreflight = lastMsg?.role === "assistant" && (lastMsg.reasoning?.questions?.length ?? 0) > 0;
-      
-      if (isAnsweringPreflight && intent === "text") {
-         intent = (lastMsg.reasoning?.intent as any) || "text";
-      }
+      // Encontra a última mensagem do assistente para verificação de contexto
+      const messages = [...thread.messages]; // snapshot antes do append acima
+      const lastAssistantMsg = [...messages].reverse().find((m) => m.role === "assistant");
 
-      // --- PREFLIGHT: VALIDATION BLOCK ---
+      // Herda intenção se o utilizador está a responder a uma pergunta de preflight
+      intent = inheritIntentFromContext(intent, lastAssistantMsg as Parameters<typeof inheritIntentFromContext>[1]);
+
+      // -----------------------------------------------------------------------
+      // 2. PREFLIGHT: INTERCEPTION — para se faltar briefing
+      // -----------------------------------------------------------------------
       if (intent !== "image" && intent !== "text") {
-        const missingFields = detectMissingBriefing(contextualPrompt, intent as any);
-        if (missingFields.length > 0) {
-           const questions = buildBriefingQuestions(missingFields);
-           const reply = `Antes de gerar o ${intent.toUpperCase()}, percebi que faltam algumas informações estratégicas:\n\n` +
-                         questions.map(q => `- **${q}**`).join('\n') +
-                         `\n\nPor favor, forneça esses detalhes para garantir o melhor resultado, ou configure o perfil da marca acima.`;
+        const missingFields = detectMissingBriefing(contextualPrompt, intent as Parameters<typeof detectMissingBriefing>[1]);
 
-           const assistantId = generateId();
-           appendMessage(thread.id, {
-             id: assistantId,
-             role: "assistant",
-             content: reply,
-             createdAt: Date.now(),
-             reasoning: {
-               intent,
-               questions: missingFields
-             }
-           });
-           refresh();
-           return; 
+        if (missingFields.length > 0) {
+          const questions = buildBriefingQuestions(missingFields);
+          const intentLabel: Record<string, string> = {
+            banner:    "Banner",
+            instagram: "Post Instagram",
+            email:     "E-mail HTML",
+            linkedin:  "Post LinkedIn",
+            landing:   "Landing Page",
+            datasheet: "Ficha Técnica",
+          };
+          const label = intentLabel[intent] ?? intent.toUpperCase();
+
+          const reply =
+            `Antes de gerar o **${label}**, preciso de mais informações:\n\n` +
+            questions.map((q) => `• ${q}`).join("\n") +
+            `\n\nAssim posso garantir um resultado de nível agência e não genérico.`;
+
+          appendMessage(thread.id, {
+            id: generateId(),
+            role: "assistant",
+            content: reply,
+            createdAt: Date.now(),
+            reasoning: { intent, questions: missingFields },
+          });
+          refresh();
+          return; // PARA a geração — aguarda resposta do utilizador
         }
       }
 
+      // -----------------------------------------------------------------------
+      // 3. GERAÇÃO
+      // -----------------------------------------------------------------------
       setIsStreaming(true);
       setStreamingText("");
       setLoadingIntent(intent);
@@ -236,12 +249,7 @@ function ChatRoute() {
         role: "assistant",
         content: "",
         createdAt: Date.now(),
-        reasoning: {
-          intent,
-          objective,
-          funnelStage,
-          tone
-        }
+        reasoning: { intent, objective, funnelStage, tone },
       };
       appendMessage(thread.id, placeholder);
       refresh();
@@ -251,6 +259,7 @@ function ChatRoute() {
 
       try {
         if (intent === "image") {
+          // --- GERAÇÃO DE IMAGEM ---
           const abortCtrl = new AbortController();
           abortRef.current = () => abortCtrl.abort();
 
@@ -276,145 +285,141 @@ function ChatRoute() {
           abortRef.current = null;
           refresh();
         } else {
-          const abort = callOllama(contextualPrompt, intent as any, {
-            onToken: (token) => {
-              setStreamingText((prev) => prev + token);
-            },
-            onDone: (fullText) => {
-              let artifact: Artifact;
-              let reply: string;
+          // --- GERAÇÃO DE TEXTO / HTML (Multi-Agente) ---
+          const abort = callOllama(
+            contextualPrompt,
+            intent as Parameters<typeof callOllama>[1],
+            {
+              onToken: (token) => {
+                setStreamingText((prev) => prev + token);
+              },
+              onDone: (fullText) => {
+                let artifact: Artifact;
+                let reply: string;
 
-              if (
-                intent === "banner" ||
-                intent === "instagram" ||
-                intent === "email" ||
-                looksLikeHtml(fullText)
-              ) {
-                const html = extractHtml(fullText);
-                const titles: Record<string, string> = {
-                  banner: "Banner",
-                  instagram: "Post Instagram",
-                  email: "E-mail HTML",
-                };
-                const title = titles[intent] ?? "HTML";
-                artifact = { kind: "html", html, title, prompt: text, intent };
-                reply = `✅ ${title} pronto! Veja a prévia e copie o código no painel ao lado.`;
-              } else if (intent === "datasheet") {
-                artifact = { kind: "markdown", markdown: fullText, title: "Ficha Técnica" };
-                reply = "✅ Ficha técnica gerada! Use **Exportar PDF** no painel ao lado.";
-              } else {
-                artifact = { kind: "markdown", markdown: fullText };
-                reply = "✅ Conteúdo pronto! Veja o resultado completo no painel ao lado.";
-              }
+                if (
+                  intent === "banner" ||
+                  intent === "instagram" ||
+                  intent === "email" ||
+                  looksLikeHtml(fullText)
+                ) {
+                  const html = extractHtml(fullText);
+                  const titles: Record<string, string> = {
+                    banner:    "Banner 1200×500",
+                    instagram: "Post Instagram 1080×1080",
+                    email:     "E-mail HTML",
+                  };
+                  const title = titles[intent] ?? "HTML";
+                  artifact = {
+                    kind: "html",
+                    html,
+                    title,
+                    prompt: currentUserPrompt.current,
+                    intent,
+                  };
+                  reply = `✅ **${title}** gerado com sucesso. Veja a prévia no painel.`;
+                } else {
+                  artifact = {
+                    kind: "markdown",
+                    markdown: fullText,
+                    title: intent === "datasheet" ? "Ficha Técnica" : "Conteúdo",
+                  };
+                  reply = fullText;
+                }
 
-              setThreadContentType(thread.id, intent as ContentType);
-              updateMessage(thread.id, assistantId, { content: reply, artifact });
-              setIsStreaming(false);
-              setStreamingText("");
-              setLoadingIntent(undefined);
-              setLoadingStage(undefined);
-              abortRef.current = null;
-              refresh();
+                setThreadContentType(thread.id, "html" as ContentType);
+                updateMessage(thread.id, assistantId, { content: reply, artifact });
+                setIsStreaming(false);
+                setLoadingIntent(undefined);
+                setLoadingStage(undefined);
+                abortRef.current = null;
+                refresh();
+              },
+              onError: (errMsg) => {
+                toast.error(`Erro: ${errMsg}`);
+                updateMessage(thread.id, assistantId, {
+                  content: `❌ Ocorreu um erro: ${errMsg}`,
+                });
+                setIsStreaming(false);
+                setLoadingIntent(undefined);
+                setLoadingStage(undefined);
+                abortRef.current = null;
+                refresh();
+              },
             },
-            onError: (msg) => {
-              updateMessage(thread.id, assistantId, { content: `⚠️ ${msg}` });
-              toast.error(msg);
-              setIsStreaming(false);
-              setStreamingText("");
-              setLoadingIntent(undefined);
-              setLoadingStage(undefined);
-              abortRef.current = null;
-              refresh();
-            },
-          }, undefined, {
-            objective, funnelStage, tone
-          }); 
+            undefined,
+            { objective, funnelStage, tone },
+          );
           abortRef.current = abort;
         }
       } catch (err) {
-        const msg = err instanceof Error ? err.message : "Erro desconhecido";
-        updateMessage(thread.id, assistantId, { content: `⚠️ ${msg}` });
-        toast.error(msg);
+        toast.error(`Erro inesperado: ${err}`);
         setIsStreaming(false);
-        setStreamingText("");
         setLoadingIntent(undefined);
         setLoadingStage(undefined);
         abortRef.current = null;
-        refresh();
       }
     },
-    [thread, refresh, buildContextualPrompt, threadId]
+    [thread, buildContextualPrompt, refresh, threadId],
   );
 
   const handleStop = useCallback(() => {
-    abortRef.current?.();
+    if (abortRef.current) {
+      abortRef.current();
+      abortRef.current = null;
+    }
+    setIsStreaming(false);
+    setLoadingIntent(undefined);
+    setLoadingStage(undefined);
   }, []);
 
-  const handleNew = useCallback(() => {
-    const t = createThread();
-    navigate({ to: "/chat/$threadId", params: { threadId: t.id } });
+  const handleNewThread = useCallback(() => {
+    const fresh = createThread();
+    navigate({ to: "/chat/$threadId", params: { threadId: fresh.id } });
   }, [navigate]);
 
-  const handleDelete = useCallback(
+  const handleDeleteThread = useCallback(
     (id: string) => {
       deleteThread(id);
-      refresh();
+      const remaining = listThreads();
+      if (remaining.length === 0) {
+        const fresh = createThread();
+        navigate({ to: "/chat/$threadId", params: { threadId: fresh.id }, replace: true });
+      } else {
+        navigate({ to: "/chat/$threadId", params: { threadId: remaining[0].id }, replace: true });
+      }
     },
-    [refresh]
-  );
-
-  const handleSaveBrand = useCallback(
-    (patch: Partial<BrandProfile>) => {
-      const current = getBrandProfile(threadId) ?? { threadId, updatedAt: Date.now() };
-      saveBrandProfile({ ...current, ...patch, threadId });
-      setBrandProfile(getBrandProfile(threadId));
-      toast.success("Perfil de marca salvo para esta conversa!");
-    },
-    [threadId]
+    [navigate],
   );
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden">
+    <div className="flex h-screen overflow-hidden bg-background">
+      <Toaster richColors position="top-right" />
       <ThreadList
         threads={threads}
-        activeId={threadId}
-        onNew={handleNew}
-        onDelete={handleDelete}
+        currentThreadId={threadId}
+        onNew={handleNewThread}
+        onDelete={handleDeleteThread}
       />
-      <main className="grid flex-1 grid-cols-1 lg:grid-cols-[minmax(380px,1fr)_minmax(420px,1.2fr)]">
-        <section className="flex h-screen flex-col border-r border-border bg-background/40">
+      <main className="flex flex-1 overflow-hidden">
+        <section className="flex w-[420px] flex-shrink-0 flex-col border-r border-border">
           <ChatPanel
-            messages={thread?.messages ?? []}
-            streamingText={streamingText}
+            thread={thread}
+            isStreaming={isStreaming}
+            loadingStage={loadingStage}
             onSend={handleSend}
             onStop={handleStop}
-            isStreaming={isStreaming}
-            brandProfile={brandProfile}
-            onSaveBrand={handleSaveBrand}
-            loadingStage={loadingStage}
-            onViewArtifact={setSelectedArtifact}
+            onSelectArtifact={setSelectedArtifact}
           />
         </section>
-        <section className="hidden h-screen flex-col bg-card/30 lg:flex">
+        <section className="flex flex-1 flex-col overflow-hidden">
           <ArtifactPanel
             artifact={panelArtifact}
-            loading={isStreaming && !streamingText}
+            loading={isStreaming && !streamingArtifact}
             loadingIntent={loadingIntent}
           />
         </section>
       </main>
-      <Toaster richColors position="top-right" />
     </div>
   );
-}
-export function extractHtml(raw: string): string {
-  // Usando String.fromCharCode(96) para gerar as crases de forma programática.
-  // Isso evita que o botão de copiar do chat quebre a formatação.
-  const ticks = String.fromCharCode(96, 96, 96);
-  const pattern = ticks + "(?:html)?\\s*([\\s\\S]*?)" + ticks;
-  const regex = new RegExp(pattern, "i");
-  const fence = raw.match(regex);
-  
-  if (fence) return fence[1].trim();
-  return raw.trim();
 }

@@ -34,10 +34,10 @@ export function ArtifactPanel({ artifact, loading, loadingIntent }: Props) {
 
       <div className="thin-scroll flex-1 overflow-auto bg-[var(--background)]">
         {artifact.kind === "html" && view === "preview" && (
-          <ScaledHtmlPreview 
-            html={artifact.html} 
-            userPrompt={artifact.prompt ?? ""} 
-            intent={artifact.intent} 
+          <ScaledHtmlPreview
+            html={artifact.html}
+            userPrompt={artifact.prompt ?? ""}
+            intent={artifact.intent}
           />
         )}
         {artifact.kind === "html" && view === "code" && (
@@ -69,6 +69,31 @@ export function ArtifactPanel({ artifact, loading, loadingIntent }: Props) {
   );
 }
 
+// ============================================================================
+// Dimensões canônicas por intent
+// ============================================================================
+function getCanvasDimensions(intent?: string): { width: number; height: number } {
+  switch (intent) {
+    case "banner":    return { width: 1200, height: 500 };
+    case "instagram": return { width: 1080, height: 1080 };
+    case "email":     return { width: 600,  height: 800 };
+    default:          return { width: 1200, height: 900 };
+  }
+}
+
+// ============================================================================
+// Fallback robusto para imagens Pollinations
+// Não depende de regex frágil em comentários HTML.
+// Estratégia:
+//   1. Se o HTML já contém uma URL pollinations válida → mantém.
+//   2. Se contém outra <img> sem pollinations → substitui pela URL de fallback.
+//   3. A URL de fallback é construída a partir do userPrompt traduzido para inglês
+//      usando o mapa PT→EN + negative prompts obrigatórios.
+// ============================================================================
+const NEGATIVE_PROMPTS_ENCODED = encodeURIComponent(
+  "professional macro product photography, isolated on pure white background, no humans, nobody, no people, empty scene",
+);
+
 const PT_TO_EN: [RegExp, string][] = [
   [/brownie/gi, "brownie"],
   [/recheado/gi, "filled"],
@@ -84,9 +109,12 @@ const PT_TO_EN: [RegExp, string][] = [
   [/alimento|comida|restaurante/gi, "food restaurant"],
   [/tecnologia|tech/gi, "technology"],
   [/imobiliário|imóvel/gi, "real estate property"],
+  [/pipeta|pipetas/gi, "laboratory pipette"],
+  [/laboratorial/gi, "laboratory"],
+  [/farmácio|farmaceutico/gi, "pharmaceutical"],
 ];
 
-function buildFallbackDescription(userPrompt: string): string {
+function buildFallbackPollinationsUrl(userPrompt: string, intent?: string): string {
   let translated = userPrompt;
   for (const [pt, en] of PT_TO_EN) {
     translated = translated.replace(pt, en);
@@ -95,68 +123,80 @@ function buildFallbackDescription(userPrompt: string): string {
     .replace(/[^a-z\s]/gi, " ")
     .split(/\s+/)
     .filter((w) => w.length > 3)
-    .slice(0, 6)
+    .slice(0, 8)
     .join(" ");
-  return `${words} professional marketing photography`;
+
+  const dims = getCanvasDimensions(intent);
+  const desc = encodeURIComponent(
+    `${words} ${NEGATIVE_PROMPTS_ENCODED.slice(0, 60)}`,
+  );
+  return `https://image.pollinations.ai/prompt/${encodeURIComponent(words + ", professional macro product photography, isolated on pure white background, no humans, nobody")}?width=${dims.width}&height=${dims.height}&nologo=true`;
 }
 
-function sanitizeHtml(html: string, userPrompt: string): string {
-  const analyseMatch = html.match(
-    /Descri[\u00e7c][\u00e3a]o(?:[^:]*)?:\s*([^\n\r]+)/i
-  );
-  const pollinationsDesc = analyseMatch
-    ? analyseMatch[1].trim().replace(/["']/g, "")
-    : buildFallbackDescription(userPrompt);
+function sanitizeHtml(html: string, userPrompt: string, intent?: string): string {
+  // Remove scripts
+  let clean = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
 
-  const encodedDesc = encodeURIComponent(pollinationsDesc);
-  const fallbackUrl = `https://image.pollinations.ai/prompt/${encodedDesc}?width=800&height=500&nologo=true`;
+  // Verifica se já existe uma URL Pollinations válida com descrição
+  const hasValidPollinations = /https:\/\/image\.pollinations\.ai\/prompt\/[^"'\s]{10,}/i.test(clean);
 
-  return (
-    html
-      .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
-      .replace(
-        /(<img[^>]*\ssrc=["'])(?!https:\/\/image\.pollinations\.ai)([^"']*?)(["'])/gi,
-        `$1${fallbackUrl}$3`
-      )
-  );
+  if (!hasValidPollinations) {
+    // Substitui qualquer src de imagem que não seja pollinations pela URL de fallback
+    const fallbackUrl = buildFallbackPollinationsUrl(userPrompt, intent);
+    clean = clean.replace(
+      /(<img[^>]*\ssrc=["'])(?!https:\/\/image\.pollinations\.ai)([^"']*?)(["'])/gi,
+      `$1${fallbackUrl}$3`,
+    );
+    // Se não havia nenhuma <img>, não faz nada — evita injetar imagens indesejadas
+  }
+
+  return clean;
 }
 
-function ScaledHtmlPreview({ html, userPrompt, intent }: { html: string; userPrompt: string; intent?: string }) {
+// ============================================================================
+// ScaledHtmlPreview — iframe dinâmico com escala por intent
+// ============================================================================
+function ScaledHtmlPreview({
+  html,
+  userPrompt,
+  intent,
+}: {
+  html: string;
+  userPrompt: string;
+  intent?: string;
+}) {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
 
-  // Define proporções reais baseadas na intenção
-  let REAL_W = 1200;
-  let REAL_H = 900;
-  if (intent === "banner") { REAL_H = 500; }
-  else if (intent === "instagram") { REAL_W = 1080; REAL_H = 1080; }
-  else if (intent === "email") { REAL_W = 600; REAL_H = 800; } 
+  const { width: REAL_W, height: REAL_H } = getCanvasDimensions(intent);
 
   useEffect(() => {
     const el = wrapperRef.current;
     if (!el) return;
 
+    const updateScale = (containerWidth: number) => {
+      if (containerWidth > 0) setScale(containerWidth / REAL_W);
+    };
+
     const observer = new ResizeObserver((entries) => {
-      const width = entries[0]?.contentRect.width ?? el.clientWidth;
-      if (width > 0) setScale(width / REAL_W);
+      const w = entries[0]?.contentRect.width ?? el.clientWidth;
+      updateScale(w);
     });
 
     observer.observe(el);
-    const w = el.clientWidth;
-    if (w > 0) setScale(w / REAL_W);
+    updateScale(el.clientWidth);
 
     return () => observer.disconnect();
   }, [REAL_W]);
 
   const scaledH = Math.round(REAL_H * scale);
-  const cleanHtml = sanitizeHtml(html, userPrompt);
+  const cleanHtml = sanitizeHtml(html, userPrompt, intent);
 
   return (
     <div
       ref={wrapperRef}
-      // Removemos o 'flex justify-center' e adicionamos 'relative' para âncora absoluta
       className="w-full overflow-hidden bg-white shadow-inner relative"
-      style={{ height: scaledH > 0 ? scaledH : "auto", minHeight: "100%" }}
+      style={{ height: scaledH > 0 ? scaledH : "auto", minHeight: scaledH > 0 ? scaledH : 200 }}
     >
       <iframe
         title="Preview"
@@ -165,13 +205,14 @@ function ScaledHtmlPreview({ html, userPrompt, intent }: { html: string; userPro
           width: `${REAL_W}px`,
           height: `${REAL_H}px`,
           transform: `scale(${scale})`,
-          transformOrigin: "top left", // Escala travada no canto superior esquerdo
+          // transform-origin: top left — garante que o lado esquerdo não é cortado
+          transformOrigin: "top left",
           border: "none",
           display: "block",
           backgroundColor: "#fff",
-          position: "absolute", // Previne vazamento do bounding box original
+          position: "absolute",
           top: 0,
-          left: 0
+          left: 0,
         }}
         srcDoc={cleanHtml}
       />
@@ -179,6 +220,9 @@ function ScaledHtmlPreview({ html, userPrompt, intent }: { html: string; userPro
   );
 }
 
+// ============================================================================
+// Toolbar, Icons, Labels, Utilities
+// ============================================================================
 function Toolbar({
   artifact,
   view,
@@ -210,10 +254,10 @@ function Toolbar({
               <Code2 className="mr-1 h-4 w-4" /> HTML
             </Button>
           </div>
-          <Button size="sm" variant="secondary" onClick={() => copy(artifact.html, "HTML copiado")}>
+          <Button size="sm" variant="secondary" onClick={() => copyText(artifact.html, "HTML copiado")}>
             <Copy className="mr-1 h-4 w-4" /> Copiar
           </Button>
-          <Button size="sm" onClick={() => download(artifact.html, "output.html", "text/html")}>
+          <Button size="sm" onClick={() => downloadFile(artifact.html, "output.html", "text/html")}>
             <Download className="mr-1 h-4 w-4" /> Baixar
           </Button>
         </>
@@ -227,7 +271,7 @@ function Toolbar({
 
       {artifact.kind === "markdown" && (
         <>
-          <Button size="sm" variant="secondary" onClick={() => copy(artifact.markdown, "Markdown copiado")}>
+          <Button size="sm" variant="secondary" onClick={() => copyText(artifact.markdown, "Markdown copiado")}>
             <Copy className="mr-1 h-4 w-4" /> Copiar
           </Button>
           <Button size="sm" onClick={exportPdf}>
@@ -237,7 +281,7 @@ function Toolbar({
       )}
 
       {artifact.kind === "text" && (
-        <Button size="sm" variant="secondary" onClick={() => copy(artifact.text, "Texto copiado")}>
+        <Button size="sm" variant="secondary" onClick={() => copyText(artifact.text, "Texto copiado")}>
           <Copy className="mr-1 h-4 w-4" /> Copiar
         </Button>
       )}
@@ -259,11 +303,11 @@ function labelFor(a: Artifact) {
   return "Texto gerado";
 }
 
-function copy(text: string, msg: string) {
+function copyText(text: string, msg: string) {
   navigator.clipboard.writeText(text).then(() => toast.success(msg));
 }
 
-function download(content: string, filename: string, mime: string) {
+function downloadFile(content: string, filename: string, mime: string) {
   const blob = new Blob([content], { type: mime });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -292,7 +336,9 @@ async function exportPdf() {
   const el = document.getElementById("print-area");
   if (!el) return;
   try {
-    const mod = (await import("html2pdf.js")).default as (el: HTMLElement) => {
+    const mod = (await import("html2pdf.js")).default as (
+      el: HTMLElement,
+    ) => {
       set: (opts: Record<string, unknown>) => { save: () => Promise<void> };
     };
     await mod(el)
@@ -300,7 +346,7 @@ async function exportPdf() {
         margin: 12,
         filename: `ficha-tecnica-${Date.now()}.pdf`,
         image: { type: "jpeg", quality: 0.98 },
-        html2canvas: { scale: 2, backgroundColor: "#ffffff" },
+        html2canvas: { scale: 2, useCORS: true },
         jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
       })
       .save();
@@ -309,57 +355,29 @@ async function exportPdf() {
   }
 }
 
+function LoadingState({ intent }: { intent: string }) {
+  const labels: Record<string, string> = {
+    banner:    "A gerar banner 1200×500…",
+    instagram: "A gerar post Instagram 1080×1080…",
+    email:     "A gerar e-mail HTML…",
+    image:     "A gerar imagem…",
+    datasheet: "A gerar ficha técnica…",
+    text:      "A gerar conteúdo…",
+  };
+  const label = labels[intent] ?? "A gerar conteúdo…";
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-4 text-muted-foreground">
+      <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+      <p className="text-sm">{label}</p>
+    </div>
+  );
+}
+
 function EmptyState() {
   return (
-    <div className="flex h-full flex-col items-center justify-center px-8 text-center text-muted-foreground">
-      <div className="mb-5 grid grid-cols-2 gap-3 opacity-80">
-        <Tile icon={<Mail className="h-5 w-5" />} label="E-mails HTML" />
-        <Tile icon={<ImageIcon className="h-5 w-5" />} label="Imagens" />
-        <Tile icon={<FileText className="h-5 w-5" />} label="Fichas técnicas" />
-        <Tile icon={<Sparkles className="h-5 w-5" />} label="Copy" />
-      </div>
-      <h2 className="text-xl font-semibold text-foreground">Painel de Artefatos</h2>
-      <p className="mt-2 max-w-sm text-sm">
-        Peça um e-mail, uma imagem ou uma ficha técnica no chat ao lado. O resultado aparece aqui, pronto para copiar ou exportar.
-      </p>
-    </div>
-  );
-}
-
-function Tile({ icon, label }: { icon: React.ReactNode; label: string }) {
-  return (
-    <div className="flex items-center gap-2 rounded-lg border border-border bg-card/60 px-4 py-3 text-sm text-foreground">
-      {icon}
-      {label}
-    </div>
-  );
-}
-
-function LoadingState({ intent }: { intent: "image" | "email" | "banner" | "instagram" | "datasheet" | "text" | string }) {
-  const labels: Record<string, string> = {
-    image: "Gerando imagem no Pollinations…",
-    email: "Compondo o e-mail HTML seguro…",
-    banner: "Desenhando layout do banner…",
-    instagram: "Estruturando post de Instagram…",
-    datasheet: "Estruturando ficha técnica…",
-    text: "Escrevendo conteúdo…",
-  };
-  return (
-    <div className="flex h-full flex-col items-center justify-center gap-6 px-8 text-center">
-      <div className="relative h-16 w-16">
-        <div className="absolute inset-0 animate-ping rounded-full bg-primary/30" />
-        <div className="absolute inset-2 rounded-full bg-primary/60" />
-        <Sparkles className="absolute inset-0 m-auto h-7 w-7 text-primary-foreground" />
-      </div>
-      <div>
-        <p className="font-medium text-foreground">{labels[intent] || "Processando conteúdo..."}</p>
-        <p className="mt-1 text-sm text-muted-foreground">Isso pode levar alguns segundos.</p>
-      </div>
-      <div className="w-full max-w-sm space-y-2">
-        <div className="h-3 animate-pulse rounded bg-muted" />
-        <div className="h-3 w-5/6 animate-pulse rounded bg-muted" />
-        <div className="h-3 w-3/4 animate-pulse rounded bg-muted" />
-      </div>
+    <div className="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground">
+      <Sparkles className="h-10 w-10 opacity-20" />
+      <p className="text-sm">O artefato gerado aparecerá aqui.</p>
     </div>
   );
 }

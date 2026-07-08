@@ -1,11 +1,11 @@
 /**
- * agent.ts — cliente do agente de marketing com orquestração de prompt.
+ * agent.ts — cliente do agente de marketing v3
  *
- * Melhorias v2:
- * - detectMissingBriefing: identifica campos críticos ausentes por intent
- * - enrichPromptWithReasoning: injeta raciocínio estratégico no prompt
- * - PreflightResult: tipo de retorno da validação de briefing
- * - callPreflight: chama /api/preflight antes de gerar, quando necessário
+ * Melhorias:
+ * - detectMissingBriefing: valida campos críticos por intent com heurísticas mais precisas
+ * - Memória de Intenção: inheritIntentFromContext verifica se user responde a pergunta de preflight
+ * - callOllama: streaming limpo com AbortController
+ * - extractHtml: usa String.fromCharCode para evitar quebra de build com backticks
  */
 
 export type Intent =
@@ -34,78 +34,87 @@ export interface PreflightResult {
 
 /** Campos obrigatórios mínimos por intent */
 const REQUIRED_FIELDS: Record<Exclude<Intent, "image">, string[]> = {
-  email:     ["objetivo", "oferta", "público"],
-  banner:    ["marca", "headline ou produto"],
-  instagram: ["público", "objetivo"],
-  linkedin:  ["empresa", "público", "objetivo"],
-  landing:   ["marca", "produto", "público", "CTA"],
+  email:     ["oferta ou produto", "público"],
+  banner:    ["produto ou oferta"],
+  instagram: ["produto ou oferta"],
+  linkedin:  ["empresa", "objetivo"],
+  landing:   ["marca", "produto", "CTA"],
   datasheet: ["produto", "atributos principais"],
   text:      [],
 };
 
 /** Perguntas padrão para campos ausentes */
 const FIELD_QUESTIONS: Record<string, string> = {
-  "objetivo":            "Qual é o objetivo principal? (conversão, awareness, lançamento, engajamento)",
-  "oferta":             "Qual é a oferta ou produto principal desta peça?",
-  "público":            "Quem é o público-alvo? (cargo, setor, faixa etária, dor principal)",
-  "marca":              "Qual é o nome da marca ou empresa?",
-  "headline ou produto": "Qual produto ou headline principal deseja destacar?",
-  "empresa":            "Qual é o nome da empresa e setor de atuação?",
-  "produto":            "Qual é o produto ou serviço que deve ser apresentado?",
-  "CTA":                "Qual é a ação que o usuário deve tomar? (ex: comprar, solicitar proposta, baixar)",
+  "oferta ou produto":    "Qual é o produto ou oferta principal que devo destacar?",
+  "público":             "Quem é o público-alvo? (cargo, setor, principal dor)",
+  "produto ou oferta":   "Qual produto ou oferta principal devo comunicar?",
+  "marca":               "Qual é o nome da marca ou empresa?",
+  "empresa":             "Qual é o nome da empresa e o setor de atuação?",
+  "objetivo":            "Qual é o objetivo? (conversão, awareness, lançamento, engajamento)",
+  "CTA":                 "Qual é a ação esperada do utilizador? (ex: solicitar orçamento, baixar ebook)",
   "atributos principais": "Quais são os 3 atributos técnicos mais importantes do produto?",
 };
 
 /**
- * Detecta campos críticos ausentes no prompt do usuário para um dado intent.
- * Retorna lista de campos faltantes.
+ * Detecta campos críticos ausentes no prompt para um dado intent.
+ * Heurísticas simplificadas mas robustas: foca em detectar se o utilizador
+ * forneceu ALGUMA informação de produto/oferta/público — não tenta parsear semântica complexa.
  */
 export function detectMissingBriefing(
   prompt: string,
   intent: Exclude<Intent, "image">,
 ): string[] {
   const p = prompt.toLowerCase();
+  const wordCount = p.split(/\s+/).filter(Boolean).length;
   const required = REQUIRED_FIELDS[intent] ?? [];
   const missing: string[] = [];
 
   for (const field of required) {
     switch (field) {
-      case "objetivo":
-        if (!/\b(objetivo|converter|vendas?|awareness|lançamento|engajamento|promover|divulgar|captar|gerar leads?)\b/i.test(p))
-          missing.push(field);
+      case "oferta ou produto":
+      case "produto ou oferta":
+      case "produto": {
+        // Considera preenchido se: há noun (palavra longa), nome próprio, ou term de produto
+        const hasProduto = (
+          /\b(produto|serviço|app|software|plataforma|equipamento|solução|sistema|kit|pacote|oferta|promoção|desconto|\d+%|lançamento)\b/i.test(p) ||
+          /[A-Z][a-zA-Z]{2,}/.test(prompt) ||
+          wordCount >= 6
+        );
+        if (!hasProduto) missing.push(field);
         break;
-      case "oferta":
-        if (!/\b(produto|serviço|oferta|desconto|promoção|[\d]+%|lançamento|kit|pacote)\b/i.test(p))
-          missing.push(field);
+      }
+      case "público": {
+        const hasPublico = (
+          /\b(público|persona|cliente|consumidor|profissional|empresa|b2b|b2c|gestor|diretor|ceo|cto|médico|engenheiro|estudante|equipe|time)\b/i.test(p) ||
+          wordCount >= 10
+        );
+        if (!hasPublico) missing.push(field);
         break;
-      case "público":
-        if (!/\b(público|persona|cliente|consumidor|profissional|empresa|b2b|b2c|gestores?|diretores?|estudantes?|médicos?|engenheiros?)\b/i.test(p))
-          missing.push(field);
+      }
+      case "marca": {
+        const hasMarca = /[A-Z][a-zA-Z]{1,}/.test(prompt) || wordCount >= 8;
+        if (!hasMarca) missing.push(field);
         break;
-      case "marca":
-        if (p.length < 15 && !/[A-Z]{2,}/.test(prompt))
-          missing.push(field);
+      }
+      case "empresa": {
+        const hasEmpresa = /[A-Z][a-zA-Z]{1,}/.test(prompt) || /\b(empresa|agência|startup|corp|ltd|ltda|inc)\b/i.test(p);
+        if (!hasEmpresa) missing.push(field);
         break;
-      case "headline ou produto":
-        if (p.split(" ").length < 5)
-          missing.push(field);
+      }
+      case "objetivo": {
+        const hasObj = /\b(objetivo|converter|vendas?|awareness|lançamento|engajamento|promover|divulgar|captar|gerar leads?)\b/i.test(p) || wordCount >= 8;
+        if (!hasObj) missing.push(field);
         break;
-      case "empresa":
-        if (!/[A-Z][a-z]+|[A-Z]{2,}/.test(prompt))
-          missing.push(field);
+      }
+      case "CTA": {
+        const hasCta = /\b(comprar|compre|solicitar|solicite|baixar|baixe|acessar|acesse|cadastrar|contratar|saiba mais|clique|entre em contato|agendar|agende|demonstração|orçamento)\b/i.test(p) || wordCount >= 12;
+        if (!hasCta) missing.push(field);
         break;
-      case "produto":
-        if (!/\b(produto|serviço|app|software|plataforma|equipamento|solução|sistema)\b/i.test(p))
-          missing.push(field);
+      }
+      case "atributos principais": {
+        if (wordCount < 8) missing.push(field);
         break;
-      case "CTA":
-        if (!/\b(comprar|compre|solicitar|solicite|baixar|baixe|acessar|acesse|cadastrar|cadastre|contratar|contrate|saiba mais|clique|entre em contato)\b/i.test(p))
-          missing.push(field);
-        break;
-      case "atributos principais":
-        if (p.split(" ").length < 8)
-          missing.push(field);
-        break;
+      }
     }
   }
 
@@ -113,57 +122,73 @@ export function detectMissingBriefing(
 }
 
 /**
- * Gera perguntas de briefing baseadas nos campos faltantes.
- * Retorna no máximo 3 perguntas.
+ * Gera perguntas de briefing (máx 2 por vez para não sobrecarregar o utilizador).
  */
 export function buildBriefingQuestions(missingFields: string[]): string[] {
   return missingFields
-    .slice(0, 3)
+    .slice(0, 2)
     .map((f) => FIELD_QUESTIONS[f] ?? `Por favor, informe: ${f}`);
 }
 
 /**
- * Detecta o objetivo de copy implícito no prompt.
+ * Verifica se a resposta atual do utilizador está a responder a uma
+ * pergunta de preflight anterior e herda a intenção do assistente.
+ *
+ * @param currentDetectedIntent - Intent detetada na mensagem atual
+ * @param lastAssistantMsg - Última mensagem do assistente
+ * @returns A intent correta (herdada ou a detetada)
  */
+export function inheritIntentFromContext(
+  currentDetectedIntent: Intent,
+  lastAssistantMsg?: { reasoning?: { intent?: string; questions?: string[] }; content: string },
+): Intent {
+  if (!lastAssistantMsg) return currentDetectedIntent;
+
+  const wasAskingPreflight =
+    (lastAssistantMsg.reasoning?.questions?.length ?? 0) > 0 ||
+    /antes de gerar|por favor, (informe|forneça|indique)|faltam algumas/i.test(
+      lastAssistantMsg.content,
+    );
+
+  if (wasAskingPreflight && currentDetectedIntent === "text") {
+    const inheritedIntent = lastAssistantMsg.reasoning?.intent as Intent | undefined;
+    if (inheritedIntent && inheritedIntent !== "text") {
+      return inheritedIntent;
+    }
+  }
+
+  return currentDetectedIntent;
+}
+
 export function detectCopyObjective(prompt: string): CopyObjective {
   const p = prompt.toLowerCase();
-  if (/\b(lançamento|launch|novo|estreia|novidade)\b/.test(p)) return "lancamento";
-  if (/\b(comprar|compre|desconto|oferta|promoção|converter|conversão|vendas?)\b/.test(p)) return "conversao";
-  if (/\b(awareness|marca|brand|reconhecimento|presença|institucional|apresentar)\b/.test(p)) return "awareness";
-  if (/\b(engajamento|curtida|compartilhar|interação|comunidade|seguidores?)\b/.test(p)) return "engajamento";
+  if (/\b(lan\u00e7amento|launch|novo|estreia|novidade)\b/.test(p)) return "lancamento";
+  if (/\b(comprar|compre|desconto|oferta|promo\u00e7\u00e3o|converter|convers\u00e3o|vendas?)\b/.test(p)) return "conversao";
+  if (/\b(awareness|marca|brand|reconhecimento|presen\u00e7a|institucional|apresentar)\b/.test(p)) return "awareness";
+  if (/\b(engajamento|curtida|compartilhar|intera\u00e7\u00e3o|comunidade|seguidores?)\b/.test(p)) return "engajamento";
   return "conversao";
 }
 
-/**
- * Detecta estágio do funil implícito no prompt.
- */
 export function detectFunnelStage(prompt: string, objective: CopyObjective): FunnelStage {
   const p = prompt.toLowerCase();
-  if (/\b(desconto|oferta|compre|black friday|promoção|cta|solicite|fechar|pedido)\b/.test(p)) return "conversion";
-  if (/\b(comparar|avaliar|benefício|por que|vantagem|diferencial)\b/.test(p)) return "consideration";
-  if (/\b(awareness|marca|brand|conhecer|apresentar|introdução|novidade|lançamento)\b/.test(p)) return "awareness";
-  if (/\b(fidelização|retenção|cliente|renovação|upsell|exclusivo para)\b/.test(p)) return "retention";
+  if (/\b(desconto|oferta|compre|black friday|promo\u00e7\u00e3o|cta|solicite|fechar|pedido)\b/.test(p)) return "conversion";
+  if (/\b(comparar|avaliar|benef\u00edcio|por que|vantagem|diferencial)\b/.test(p)) return "consideration";
+  if (/\b(awareness|marca|brand|conhecer|apresentar|introdu\u00e7\u00e3o|novidade|lan\u00e7amento)\b/.test(p)) return "awareness";
+  if (/\b(fideliza\u00e7\u00e3o|reten\u00e7\u00e3o|cliente|renova\u00e7\u00e3o|upsell|exclusivo para)\b/.test(p)) return "retention";
   return objective === "conversao" ? "conversion" : "awareness";
 }
 
-/**
- * Sugere tom de voz baseado em intent + objetivo.
- */
 export function suggestTone(intent: Intent, objective: CopyObjective, prompt: string): string {
   const p = prompt.toLowerCase();
-  if (/\b(técnico|científico|laboratório|medical|pharma|b2b|enterprise|industrial)\b/.test(p)) return "técnico-profissional";
-  if (/\b(premium|luxo|exclusivo|sofisticado|alto padrão)\b/.test(p)) return "premium";
-  if (/\b(descontraído|informal|jovem|divertido|criativo|viral)\b/.test(p)) return "descontraído";
+  if (/\b(t\u00e9cnico|cient\u00edfico|laborat\u00f3rio|medical|pharma|b2b|enterprise|industrial)\b/.test(p)) return "t\u00e9cnico-profissional";
+  if (/\b(premium|luxo|exclusivo|sofisticado|alto padr\u00e3o)\b/.test(p)) return "premium";
+  if (/\b(descontra\u00eddo|informal|jovem|divertido|criativo|viral)\b/.test(p)) return "descontra\u00eddo";
   if (intent === "linkedin") return "profissional-B2B";
   if (objective === "lancamento") return "entusiasmado-aspiracional";
   if (objective === "conversao") return "direto-persuasivo";
   return "profissional";
 }
 
-/**
- * Gera um resumo de raciocínio estratégico que será exibido no chat
- * antes do artefato — aumenta percepção de inteligência do agente.
- */
 export function buildReasoningSummary(params: {
   intent: Intent;
   objective: CopyObjective;
@@ -178,8 +203,8 @@ export function buildReasoningSummary(params: {
 
   const intentLabels: Record<Intent, string> = {
     email:     "E-mail HTML",
-    banner:    "Banner",
-    instagram: "Post Instagram",
+    banner:    "Banner 1200×500",
+    instagram: "Post Instagram 1080×1080",
     linkedin:  "Post LinkedIn",
     landing:   "Landing Page",
     datasheet: "Ficha Técnica",
@@ -203,16 +228,16 @@ export function buildReasoningSummary(params: {
   };
 
   const lines: string[] = [];
-  lines.push(`**Formato detectado:** ${intentLabels[intent]}`);
-  lines.push(`**Objetivo:** ${objectiveLabels[objective]} · **Funil:** ${funnelLabels[funnelStage]}`);
-  lines.push(`**Tom sugerido:** ${tone}`);
+  lines.push(`**Formato:** ${intentLabels[intent]}`);
+  lines.push(`**Objetivo:** ${objectiveLabels[objective]} \u00b7 **Funil:** ${funnelLabels[funnelStage]}`);
+  lines.push(`**Tom:** ${tone}`);
 
   if (multipleOutputs && outputCount && outputCount > 1) {
-    lines.push(`**Estratégia:** Vou gerar ${outputCount} variações com ângulos distintos: autoridade, dor do cliente e ganho de eficiência.`);
+    lines.push(`**Estratégia:** Gerando ${outputCount} variações com ângulos distintos.`);
   }
 
   if (missingFields.length > 0) {
-    lines.push(`\n⚠️ **Dados incompletos:** ${missingFields.join(", ")}. Gerando com as informações disponíveis — configure o perfil de marca para resultados mais precisos.`);
+    lines.push(`\n⚠️ **Dados parciais:** ${missingFields.join(", ")}. Gerando com as informações disponíveis.`);
   }
 
   return lines.join("\n");
@@ -230,7 +255,6 @@ export function detectIntent(prompt: string): Intent {
   return "text";
 }
 
-/** Detecta se o pedido envolve múltiplas saídas (ex: "3 legendas", "5 opções") */
 export function detectMultipleOutputs(prompt: string): { multiple: boolean; count: number } {
   const match = prompt.match(/\b([2-9]|\d{2})\s+(legendas?|opções?|versões?|variações?|alternativas?|copies?|textos?|headlines?)\b/i);
   if (match) return { multiple: true, count: parseInt(match[1]) };
@@ -244,124 +268,137 @@ export interface StreamCallbacks {
 }
 
 /**
- * callOllama — chama a Server Function /api/chat com streaming.
- * Inclui reasoning no body para o servidor injetar no system prompt.
+ * callOllama — chama POST /api/chat com streaming SSE.
+ * Retorna uma função de abort.
  */
 export function callOllama(
   prompt: string,
   intent: Exclude<Intent, "image">,
   callbacks: StreamCallbacks,
   signal?: AbortSignal,
-  reasoning?: {
-    objective?: CopyObjective;
-    funnelStage?: FunnelStage;
-    tone?: string;
-    multipleOutputs?: boolean;
-    outputCount?: number;
-  },
+  reasoning?: { objective: string; funnelStage: string; tone: string },
 ): () => void {
-  const controller = new AbortController();
-  if (signal) signal.addEventListener("abort", () => controller.abort());
-
-  let fullText = "";
+  const ctrl = new AbortController();
+  if (signal) {
+    signal.addEventListener("abort", () => ctrl.abort());
+  }
 
   (async () => {
+    let res: Response;
     try {
-      const res = await fetch("/api/chat", {
+      res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt, intent, reasoning }),
-        signal: controller.signal,
+        signal: ctrl.signal,
       });
+    } catch (err: unknown) {
+      if ((err as Error).name === "AbortError") return;
+      callbacks.onError(String(err));
+      return;
+    }
 
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-        callbacks.onError((err as { error: string }).error ?? `HTTP ${res.status}`);
-        return;
-      }
+    if (!res.ok) {
+      const txt = await res.text().catch(() => "");
+      callbacks.onError(`Servidor respondeu ${res.status}: ${txt}`);
+      return;
+    }
 
-      if (!res.body) {
-        callbacks.onError("Resposta sem corpo do servidor.");
-        return;
-      }
+    const reader = res.body!.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    let full = "";
 
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
+    try {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split("\n");
+        buf = lines.pop() ?? "";
         for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const payload = line.slice(6).trim();
-          if (payload === "[DONE]") {
-            callbacks.onDone(fullText);
+          const trimmed = line.trim();
+          if (!trimmed.startsWith("data:")) continue;
+          const data = trimmed.slice(5).trim();
+          if (data === "[DONE]") {
+            callbacks.onDone(full);
             return;
           }
           try {
-            const token = JSON.parse(payload) as string;
-            fullText += token;
+            const token = JSON.parse(data) as string;
+            full += token;
             callbacks.onToken(token);
           } catch {
-            // payload inválido — ignora
+            // token não parseable — ignorar
           }
         }
       }
-
-      callbacks.onDone(fullText);
-    } catch (err) {
-      if ((err as Error).name === "AbortError") return;
-      callbacks.onError(err instanceof Error ? err.message : "Erro desconhecido");
+    } catch (err: unknown) {
+      if ((err as Error).name !== "AbortError") {
+        callbacks.onError(String(err));
+      }
+    } finally {
+      callbacks.onDone(full);
     }
   })();
 
-  return () => controller.abort();
+  return () => ctrl.abort();
+}
+
+/** Verifica se um texto contém HTML significativo */
+export function looksLikeHtml(text: string): boolean {
+  return /<(!DOCTYPE|html|head|body|div|table|style)[\s>]/i.test(text);
 }
 
 /**
- * translatePromptForImage — chama /api/translate para converter
- * o briefing em PT para um prompt em inglês antes do Pollinations.
+ * Extrai bloco HTML de uma resposta do LLM.
+ * Usa String.fromCharCode(96) em vez de backtick literal
+ * para evitar quebra de build em alguns bundlers.
  */
+export function extractHtml(text: string): string {
+  const BT = String.fromCharCode(96);
+  const fenceRegex = new RegExp(
+    BT + BT + BT + `(?:html)?\\n?([\\s\\S]*?)` + BT + BT + BT,
+    "i",
+  );
+  const fenced = text.match(fenceRegex);
+  if (fenced) return fenced[1].trim();
+
+  const doctype = text.match(/<(!DOCTYPE\s+html|html)[\s\S]*<\/html>/i);
+  if (doctype) return doctype[0].trim();
+
+  // Se não encontrou estrutura, retorna o texto todo (o LLM pode ter emitido HTML puro)
+  return text.trim();
+}
+
+/** Constrói URL do Pollinations para geração de imagens */
+export function buildPollinationsUrl(
+  description: string,
+  opts: { width?: number; height?: number; seed?: number } = {},
+): string {
+  const { width = 1024, height = 1024, seed } = opts;
+  const encoded = encodeURIComponent(description);
+  const seedParam = seed != null ? `&seed=${seed}` : "";
+  return `https://image.pollinations.ai/prompt/${encoded}?width=${width}&height=${height}&nologo=true${seedParam}`;
+}
+
+/** Traduz prompt PT→EN para geração de imagem via Ollama local */
 export async function translatePromptForImage(
-  prompt: string,
+  ptPrompt: string,
   signal?: AbortSignal,
 ): Promise<string> {
+  const OLLAMA_URL = "/api/translate-image-prompt";
   try {
-    const res = await fetch("/api/translate", {
+    const res = await fetch(OLLAMA_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt }),
+      body: JSON.stringify({ prompt: ptPrompt }),
       signal,
     });
-    if (!res.ok) return prompt;
-    const { englishPrompt } = (await res.json()) as { englishPrompt: string };
-    return englishPrompt ?? prompt;
+    if (!res.ok) throw new Error(`translate endpoint: ${res.status}`);
+    const data = await res.json() as { translated?: string };
+    return data.translated ?? ptPrompt;
   } catch {
-    return prompt;
+    return ptPrompt;
   }
-}
-
-export function buildPollinationsUrl(
-  prompt: string,
-  opts: { width?: number; height?: number; seed?: number } = {},
-) {
-  const { width = 1024, height = 1024, seed } = opts;
-  const encoded = encodeURIComponent(prompt);
-  const params = new URLSearchParams({
-    width: String(width),
-    height: String(height),
-    nologo: "true",
-  });
-  if (seed !== undefined) params.set("seed", String(seed));
-  return `https://image.pollinations.ai/prompt/${encoded}?${params.toString()}`;
-}
-
-export function looksLikeHtml(text: string): boolean {
-  return /<!doctype html|<html[\s>]|<body[\s>]|<table[\s>]|<div[\s>]/i.test(text);
 }
