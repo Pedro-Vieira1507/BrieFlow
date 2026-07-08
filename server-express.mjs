@@ -1,14 +1,13 @@
 import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
-import { readdirSync } from "fs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PORT      = process.env.PORT        || 3000;
-const OLLAMA_URL= process.env.OLLAMA_URL  ?? "http://127.0.0.1:11434";
-const DEFAULT_MODEL = process.env.OLLAMA_MODEL ?? "gemma3:4b";
+const PORT       = process.env.PORT         || 3000;
+const OLLAMA_URL = process.env.OLLAMA_URL   ?? "http://127.0.0.1:11434";
+const DEFAULT_MODEL = process.env.OLLAMA_MODEL ?? "qwen2.5:14b";
 
-const HTML_INTENTS = new Set(["email","banner","instagram","linkedin","landing"]);
+const HTML_INTENTS     = new Set(["email","banner","instagram","linkedin","landing"]);
 const TEMPLATE_INTENTS = new Set(["banner","instagram","linkedin"]);
 
 // ═══════════════════════════════════════════════════════════════
@@ -135,7 +134,96 @@ async function searchProductImages(queries){
 }
 
 // ═══════════════════════════════════════════════════════════════
-// TEMPLATE: BANNER  1200×400
+// MULTI-AGENT PIPELINE (para intenções visuais via TanStack)
+// ═══════════════════════════════════════════════════════════════
+const POLLINATIONS_NEG = "professional macro product photography, isolated on pure white background, no humans, nobody, no people, empty scene, no faces, no hands, no body parts";
+
+const STRATEGIST_SYSTEM = {
+  banner: `Você é um Copywriter B2B de Elite especializado em conversão.
+FRAMEWORK OBRIGATÓRIO: AIDA (Atenção, Interesse, Desejo, Ação).
+
+REGRAS ABSOLUTAS:
+- NUNCA produza HTML, CSS, código ou tags de qualquer tipo.
+- NUNCA use jargões de IA: "revolucionário", "inovador", "eleve seu nível", "desvende o poder".
+- Tom: corporativo realista, focado em dor, métricas e eficiência.
+
+ESTRUTURA DE SAÍDA OBRIGATÓRIA:
+[HEADLINE]: (A promessa principal — máx 5 palavras, impacto máximo)
+[SUBTITLE]: (O apoio ou oferta específica — máx 10 palavras)
+[CTA]: (Ação direta e específica — ex: "Solicitar Diagnóstico Gratuito")`,
+
+  instagram: `Você é um Copywriter B2B de Redes Sociais especializado em Swiss Design visual.
+FRAMEWORK OBRIGATÓRIO: PAS (Problema, Agitação, Solução).
+
+REGRAS ABSOLUTAS:
+- NUNCA produza HTML, CSS ou código de qualquer tipo.
+- Tom: provocativo mas profissional.
+
+ESTRUTURA DE SAÍDA OBRIGATÓRIA:
+[HEADLINE]: (Máx 6 palavras)
+[SUBTITLE]: (Máx 10 palavras)
+[CAPTION]: (3 parágrafos curtos seguindo PAS)`,
+
+  email: `Você é um Copywriter B2B de E-mail Marketing de Elite.
+FRAMEWORK OBRIGATÓRIO: AIDA.
+
+REGRAS ABSOLUTAS:
+- NUNCA produza HTML, CSS ou código.
+- Parágrafos curtos: máximo 2 frases.
+
+ESTRUTURA DE SAÍDA OBRIGATÓRIA:
+[SUBJECT]: (máx 50 caracteres)
+[HEADLINE]: (título interno impactante)
+[BODY]: (corpo AIDA, escaneável)
+[CTA]: (específico e direto)`,
+};
+
+const BANNER_TEMPLATE = `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;900&display=swap');*{box-sizing:border-box;margin:0;padding:0;font-family:'Inter',sans-serif;}body{width:1200px;height:500px;overflow:hidden;}.banner{width:1200px;height:500px;display:flex;overflow:hidden;background:[PRIMARY_COLOR];color:#fff;position:relative;}.content{flex:1;padding:60px 80px;display:flex;flex-direction:column;justify-content:center;z-index:3;background:[PRIMARY_COLOR];}.title{font-size:56px;font-weight:900;line-height:1.05;letter-spacing:-1.5px;margin-bottom:20px;color:#fff;}.subtitle{font-size:22px;font-weight:600;color:rgba(255,255,255,0.85);margin-bottom:35px;}.cta{display:inline-flex;background:#fff;color:[PRIMARY_COLOR];padding:18px 42px;border-radius:8px;font-weight:800;font-size:16px;text-decoration:none;width:fit-content;}.image-side{width:550px;position:relative;display:flex;align-items:center;justify-content:center;padding:30px;overflow:hidden;}.image-side img{width:100%;height:100%;object-fit:contain;filter:drop-shadow(-10px 20px 30px rgba(0,0,0,0.45));transform:scale(1.08);position:relative;z-index:2;}.gradient-overlay{position:absolute;top:0;bottom:0;left:0;width:220px;background:linear-gradient(to right,[PRIMARY_COLOR] 0%,transparent 100%);z-index:3;}</style></head><body><div class="banner"><div class="content"><h1 class="title">HEADLINE_AQUI</h1><p class="subtitle">SUBTITLE_AQUI</p><a href="#" class="cta">CTA_AQUI</a></div><div class="image-side"><div class="gradient-overlay"></div><img src="https://image.pollinations.ai/prompt/PRODUCT_DESCRIPTION_EN?width=600&height=500&nologo=true&seed=SEED" alt="product"/></div></div></body></html>`;
+
+const INSTAGRAM_TEMPLATE = `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');*{box-sizing:border-box;margin:0;padding:0;font-family:'Inter',sans-serif;}body{width:1080px;height:1080px;overflow:hidden;}.post{width:1080px;height:1080px;position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center;}.bg-image{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:1;}.color-overlay{position:absolute;inset:0;background:[PRIMARY_COLOR];opacity:0.82;z-index:2;}.content{position:relative;z-index:3;text-align:center;color:#fff;padding:80px;display:flex;flex-direction:column;align-items:center;gap:32px;}.headline{font-size:88px;font-weight:900;line-height:0.95;letter-spacing:-3px;text-transform:uppercase;}.subtitle{font-size:32px;font-weight:400;opacity:0.88;}.divider{width:80px;height:4px;background:rgba(255,255,255,0.6);border-radius:2px;}</style></head><body><div class="post"><img class="bg-image" src="https://image.pollinations.ai/prompt/PRODUCT_DESCRIPTION_EN?width=1080&height=1080&nologo=true&seed=SEED" alt="background"/><div class="color-overlay"></div><div class="content"><h1 class="headline">HEADLINE_AQUI</h1><div class="divider"></div><p class="subtitle">SUBTITLE_AQUI</p></div></div></body></html>`;
+
+const EMAIL_TEMPLATE = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>EMAIL_SUBJECT_AQUI</title></head><body style="margin:0;padding:0;background-color:#f4f4f5;font-family:Arial,Helvetica,sans-serif;"><table width="100%" border="0" cellpadding="0" cellspacing="0" bgcolor="#f4f4f5"><tr><td align="center" style="padding:40px 10px;"><table width="600" border="0" cellpadding="0" cellspacing="0" bgcolor="#ffffff" style="border-radius:8px;overflow:hidden;"><tr><td bgcolor="[PRIMARY_COLOR]" style="padding:36px 48px;"><p style="margin:0;color:rgba(255,255,255,0.7);font-size:12px;text-transform:uppercase;letter-spacing:2px;">NOME_EMPRESA_AQUI</p><h1 style="margin:12px 0 0;color:#ffffff;font-size:28px;font-weight:700;">HEADLINE_AQUI</h1></td></tr><tr><td style="padding:40px 48px;"><table width="100%" border="0" cellpadding="0" cellspacing="0"><tr><td style="color:#374151;font-size:16px;line-height:1.7;">BODY_AQUI</td></tr><tr><td style="padding-top:32px;"></td></tr><tr><td align="center"><table border="0" cellpadding="0" cellspacing="0"><tr><td bgcolor="[PRIMARY_COLOR]" style="border-radius:6px;"><a href="#" style="display:inline-block;padding:16px 40px;color:#ffffff;font-size:16px;font-weight:700;text-decoration:none;">CTA_AQUI</a></td></tr></table></td></tr></table></td></tr><tr><td bgcolor="#f9fafb" style="padding:24px 48px;border-top:1px solid #e5e7eb;"><p style="margin:0;color:#9ca3af;font-size:12px;text-align:center;">Recebeu este e-mail pois está na nossa lista de contactos B2B.</p></td></tr></table></td></tr></table></body></html>`;
+
+const TEMPLATES_MAP = { banner: BANNER_TEMPLATE, instagram: INSTAGRAM_TEMPLATE, email: EMAIL_TEMPLATE };
+
+function buildDesignerPrompt(intent, strategicCopy) {
+  const template = TEMPLATES_MAP[intent] ?? TEMPLATES_MAP.banner;
+  return `Você é o Diretor de Arte HTML — um coder de precisão de nível agência.
+
+O Copywriter Estratégico gerou o seguinte copy perfeito. Injete-o EXATAMENTE no template.
+
+=== COPY GERADO ===
+${strategicCopy}
+===================
+
+REGRAS ABSOLUTAS:
+1. Use o template HTML exato fornecido abaixo — NÃO altere a estrutura CSS.
+2. Substitua todos os placeholders (HEADLINE_AQUI, SUBTITLE_AQUI, etc.) pelo copy acima.
+3. Para [PRIMARY_COLOR]: derive uma cor sólida da marca a partir do briefing. Se não houver indicação, use #1a1a2e.
+4. Para a URL Pollinations: descrição em inglês com negative prompts: "${POLLINATIONS_NEG}". NUNCA descreva humanos. Substitua SEED por número entre 1000-9999.
+5. Retorne APENAS o HTML completo — sem explicações, sem markdown, sem blocos de código.
+
+=== TEMPLATE HTML OBRIGATÓRIO ===
+${template}`;
+}
+
+async function runCopywriterAgentExpress(prompt, intent, model, contextRules = "") {
+  const system = (STRATEGIST_SYSTEM[intent] ?? STRATEGIST_SYSTEM.banner) + contextRules;
+  const res = await fetch(`${OLLAMA_URL}/api/generate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model, system, prompt, stream: false }),
+  });
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new Error(`Agente 1 falhou (${res.status}): ${txt}`);
+  }
+  const data = await res.json();
+  return data.response ?? "";
+}
+
+// ═══════════════════════════════════════════════════════════════
+// TEMPLATE: BANNER  1200×400 (template legado do server-express)
 // ═══════════════════════════════════════════════════════════════
 function bannerTemplate(d){
   const bg1=d.bg1||"#030d1a",bg2=d.bg2||"#0a2d5e";
@@ -210,744 +298,204 @@ body{width:1200px;height:400px;overflow:hidden;font-family:'Montserrat',sans-ser
 }
 
 // ═══════════════════════════════════════════════════════════════
-// TEMPLATE: INSTAGRAM  1080×1080
-// Mesmo nível do banner: produto flutuante + imagem real de fundo
+// EXPRESS APP
 // ═══════════════════════════════════════════════════════════════
-function instagramTemplate(d){
-  const bg1=d.bg1||"#030d1a",bg2=d.bg2||"#0a2d5e";
-  const accent=d.accent||"#0057b8",accentLight=d.accentLight||"#4da6ff";
-  const badgeColor=d.badgeColor||"#e8001c",dotColor=d.dotColor||"#e8001c";
-  const bgImg=d.bg_image_url?`url('${d.bg_image_url}')`:`url('https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?w=1200&q=80')`;
-  const prodImg=d.product_img_1||"https://images.unsplash.com/photo-1532187863486-abf9dbad1b69?w=600&q=80";
-  return `<!DOCTYPE html>
-<html lang="pt-BR"><head>
-<meta charset="UTF-8"><meta name="viewport" content="width=1080">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;900&display=swap" rel="stylesheet">
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{width:1080px;height:1080px;overflow:hidden;font-family:'Montserrat',sans-serif}
-.post{width:1080px;height:1080px;position:relative;overflow:hidden;display:grid;grid-template-columns:1fr 380px;background:#000}
-/* Fundo */
-.bg{position:absolute;inset:0;background-image:${bgImg};background-size:cover;background-position:center;z-index:0}
-.bg::after{content:'';position:absolute;inset:0;background:linear-gradient(135deg,${bg1}f0 0%,${bg1}d0 40%,${bg2}99 70%,transparent 100%);z-index:1}
-/* Grade */
-.post::before{content:'';position:absolute;inset:0;background-image:linear-gradient(rgba(255,255,255,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.025) 1px,transparent 1px);background-size:54px 54px;z-index:2;pointer-events:none}
-/* Glow accent no canto esquerdo */
-.glow-l{position:absolute;top:-120px;left:-120px;width:500px;height:500px;background:radial-gradient(circle,${accent}30 0%,transparent 65%);z-index:2;pointer-events:none}
-/* Coluna esquerda — copy */
-.col-copy{padding:72px 56px;display:flex;flex-direction:column;justify-content:space-between;position:relative;z-index:4}
-.brand-pill{display:inline-flex;align-items:center;gap:9px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);border-radius:24px;padding:6px 18px;width:fit-content;margin-bottom:0}
-.brand-pill .dot{width:8px;height:8px;border-radius:50%;background:${dotColor};box-shadow:0 0 10px ${dotColor}cc}
-.brand-pill span{font-size:12px;font-weight:700;color:rgba(255,255,255,.8);letter-spacing:2px;text-transform:uppercase}
-.copy-mid{flex:1;display:flex;flex-direction:column;justify-content:center;gap:16px;padding:32px 0}
-.tag-line{font-size:13px;font-weight:600;color:${accentLight};letter-spacing:1.5px;text-transform:uppercase}
-.headline{font-size:64px;font-weight:900;color:#fff;line-height:1.0;letter-spacing:-2px;text-shadow:0 4px 24px rgba(0,0,0,.5)}
-.headline em{font-style:normal;color:${accentLight}}
-.subline{font-size:18px;font-weight:400;color:rgba(255,255,255,.6);line-height:1.55;max-width:400px}
-.divider{width:56px;height:3px;background:linear-gradient(90deg,${accent},${accentLight});border-radius:2px;margin:4px 0}
-.bottom{display:flex;flex-direction:column;gap:14px}
-.offer-badge{display:inline-flex;align-items:center;gap:0;background:${badgeColor};border-radius:12px;padding:14px 24px;width:fit-content;box-shadow:0 6px 24px ${badgeColor}88}
-.offer-top{font-size:13px;font-weight:700;color:rgba(255,255,255,.85);letter-spacing:1px;text-transform:uppercase;display:block}
-.offer-main{font-size:28px;font-weight:900;color:#fff;letter-spacing:-.5px;line-height:1;display:block}
-.cta-btn{display:inline-flex;align-items:center;gap:10px;background:rgba(255,255,255,.12);border:1.5px solid rgba(255,255,255,.25);border-radius:10px;padding:14px 28px;color:#fff;font-size:14px;font-weight:700;letter-spacing:.5px;text-decoration:none;width:fit-content;backdrop-filter:blur(4px)}
-.cta-arrow{font-size:16px}
-/* Coluna direita — produto */
-.col-product{position:relative;z-index:4;display:flex;align-items:flex-end;justify-content:center;padding-bottom:0;overflow:hidden}
-.product-glow{position:absolute;bottom:-80px;left:50%;transform:translateX(-50%);width:340px;height:340px;background:radial-gradient(circle,${accent}40 0%,transparent 65%);z-index:0;pointer-events:none}
-.product-shadow{position:absolute;bottom:30px;left:50%;transform:translateX(-50%);width:180px;height:20px;background:radial-gradient(ellipse,rgba(0,0,0,.6) 0%,transparent 70%);z-index:1}
-.product-img{position:relative;z-index:2;width:340px;height:700px;object-fit:contain;mix-blend-mode:multiply;filter:drop-shadow(0 24px 48px rgba(0,0,0,.7)) drop-shadow(0 8px 16px rgba(0,0,0,.4));transform:translateY(20px)}
-/* Linha divisória vertical */
-.vdiv{position:absolute;top:8%;bottom:8%;left:calc(100% - 380px);width:1px;background:linear-gradient(to bottom,transparent,rgba(255,255,255,.15),transparent);z-index:3}
-/* Selo de validade */
-.validity-tag{position:absolute;top:56px;right:56px;background:rgba(0,0,0,.5);border:1px solid rgba(255,255,255,.15);border-radius:8px;padding:6px 14px;font-size:11px;color:rgba(255,255,255,.55);letter-spacing:.5px;z-index:5;backdrop-filter:blur(4px)}
-</style></head><body>
-<div class="post">
-  <div class="bg"></div>
-  <div class="glow-l"></div>
-  <div class="vdiv"></div>
-  <span class="validity-tag">&#x23F1; ${d.validity||"Oferta por tempo limitado"}</span>
-  <div class="col-copy">
-    <div class="brand-pill"><span class="dot"></span><span>${d.brand||"Marca"}</span></div>
-    <div class="copy-mid">
-      <span class="tag-line">${d.tag||"Oferta Exclusiva"}</span>
-      <h1 class="headline">${d.headline}<br><em>${d.highlight||""}</em></h1>
-      <div class="divider"></div>
-      <p class="subline">${d.subline||""}</p>
-    </div>
-    <div class="bottom">
-      <div class="offer-badge">
-        <span class="offer-top">${d.badge_label||"Promoção"}</span>
-        <span class="offer-main">${d.badge_value||""} ${d.badge_sup||""}</span>
-      </div>
-      <a href="#" class="cta-btn"><span>${d.cta||"Saiba Mais"}</span><span class="cta-arrow">&#8594;</span></a>
-    </div>
-  </div>
-  <div class="col-product">
-    <div class="product-glow"></div>
-    <div class="product-shadow"></div>
-    <img src="${prodImg}" alt="Produto" class="product-img" onerror="this.style.opacity=0"/>
-  </div>
-</div>
-</body></html>`;
-}
+const app = express();
+app.use(express.json({ limit: "4mb" }));
+
+// ── Ficheiros estáticos do build do Vite ──────────────────────
+app.use(express.static(path.join(__dirname, "dist/client")));
 
 // ═══════════════════════════════════════════════════════════════
-// TEMPLATE: LINKEDIN  1200×627
-// Landscape profissional com produto + copy estruturado
+// POST /api/chat — Multi-Agent Pipeline (registado diretamente)
 // ═══════════════════════════════════════════════════════════════
-function linkedinTemplate(d){
-  const bg1=d.bg1||"#030d1a",bg2=d.bg2||"#0a2d5e";
-  const accent=d.accent||"#0057b8",accentLight=d.accentLight||"#4da6ff";
-  const badgeColor=d.badgeColor||"#e8001c",dotColor=d.dotColor||"#e8001c";
-  const bgImg=d.bg_image_url?`url('${d.bg_image_url}')`:`url('https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?w=1400&q=80')`;
-  const prodImg=d.product_img_1||"https://images.unsplash.com/photo-1532187863486-abf9dbad1b69?w=600&q=80";
-  return `<!DOCTYPE html>
-<html lang="pt-BR"><head>
-<meta charset="UTF-8"><meta name="viewport" content="width=1200">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;900&display=swap" rel="stylesheet">
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{width:1200px;height:627px;overflow:hidden;font-family:'Montserrat',sans-serif}
-.card{width:1200px;height:627px;position:relative;overflow:hidden;background:#000}
-.bg{position:absolute;inset:0;background-image:${bgImg};background-size:cover;background-position:center;z-index:0}
-.bg::after{content:'';position:absolute;inset:0;background:linear-gradient(100deg,${bg1}f8 0%,${bg1}e0 30%,${bg1}b0 55%,${bg2}80 75%,${bg2}d0 100%);z-index:1}
-.grid-overlay{position:absolute;inset:0;background-image:linear-gradient(rgba(255,255,255,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.025) 1px,transparent 1px);background-size:40px 40px;z-index:2;pointer-events:none}
-.layout{position:relative;z-index:3;width:100%;height:100%;display:grid;grid-template-columns:1fr 420px}
-/* Coluna copy */
-.copy{padding:52px 48px 52px 60px;display:flex;flex-direction:column;justify-content:space-between}
-.top-row{display:flex;align-items:center;gap:12px}
-.brand-chip{display:inline-flex;align-items:center;gap:8px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.18);border-radius:20px;padding:5px 16px}
-.brand-chip .dot{width:7px;height:7px;border-radius:50%;background:${dotColor};box-shadow:0 0 8px ${dotColor}}
-.brand-chip span{font-size:11px;font-weight:700;letter-spacing:2px;color:rgba(255,255,255,.75);text-transform:uppercase}
-.category{font-size:11px;font-weight:600;color:${accentLight};letter-spacing:2px;text-transform:uppercase;opacity:.8}
-.mid{flex:1;display:flex;flex-direction:column;justify-content:center;gap:12px;padding:20px 0}
-.eyebrow{font-size:12px;font-weight:600;color:${accentLight};letter-spacing:2px;text-transform:uppercase}
-.headline{font-size:46px;font-weight:900;color:#fff;line-height:1.05;letter-spacing:-1px;text-shadow:0 2px 16px rgba(0,0,0,.5)}
-.headline em{font-style:normal;color:${accentLight}}
-.bar{width:48px;height:3px;background:linear-gradient(90deg,${accent},${accentLight});border-radius:2px}
-.body-text{font-size:15px;font-weight:400;color:rgba(255,255,255,.55);line-height:1.6;max-width:480px}
-.bottom-row{display:flex;align-items:center;gap:16px}
-.cta-primary{background:${accent};color:#fff;font-size:13px;font-weight:700;padding:12px 28px;border-radius:8px;text-decoration:none;letter-spacing:.5px;box-shadow:0 4px 20px ${accent}66;border:1.5px solid rgba(255,255,255,.15)}
-.cta-secondary{color:rgba(255,255,255,.5);font-size:12px;font-weight:500;letter-spacing:.5px;border:1px solid rgba(255,255,255,.15);padding:12px 20px;border-radius:8px;text-decoration:none}
-/* Coluna produto */
-.product-col{position:relative;display:flex;align-items:flex-end;justify-content:center;overflow:hidden}
-.product-glow{position:absolute;bottom:-60px;right:-40px;width:400px;height:400px;background:radial-gradient(circle,${accent}35 0%,transparent 65%);pointer-events:none;z-index:0}
-.product-glow2{position:absolute;top:-40px;right:20px;width:200px;height:200px;background:radial-gradient(circle,${badgeColor}20 0%,transparent 70%);pointer-events:none;z-index:0}
-.product-img{position:relative;z-index:1;width:380px;height:540px;object-fit:contain;mix-blend-mode:multiply;filter:drop-shadow(0 20px 40px rgba(0,0,0,.7)) drop-shadow(0 6px 12px rgba(0,0,0,.4));transform:translateY(16px)}
-.vdiv{position:absolute;top:10%;bottom:10%;left:calc(100% - 420px);width:1px;background:linear-gradient(to bottom,transparent,rgba(255,255,255,.12),transparent);z-index:3}
-/* Badge de oferta — canto superior direito */
-.offer-badge{position:absolute;top:44px;right:44px;background:linear-gradient(135deg,${badgeColor},${badgeColor}bb);border-radius:12px;padding:12px 18px;text-align:center;box-shadow:0 6px 20px ${badgeColor}88;z-index:5;min-width:120px}
-.offer-badge::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,.4),transparent)}
-.offer-v{font-size:32px;font-weight:900;color:#fff;line-height:1;letter-spacing:-1px}
-.offer-l{font-size:9px;font-weight:600;color:rgba(255,255,255,.85);letter-spacing:2px;text-transform:uppercase;margin-top:2px}
-</style></head><body>
-<div class="card">
-  <div class="bg"></div>
-  <div class="grid-overlay"></div>
-  <div class="vdiv"></div>
-  <div class="layout">
-    <div class="copy">
-      <div class="top-row">
-        <div class="brand-chip"><span class="dot"></span><span>${d.brand||"Marca"}</span></div>
-        <span class="category">${d.category||"Equipamentos Laboratoriais"}</span>
-      </div>
-      <div class="mid">
-        <span class="eyebrow">${d.eyebrow||d.tag||"Destaque"}</span>
-        <h1 class="headline">${d.headline}<br><em>${d.highlight||""}</em></h1>
-        <div class="bar"></div>
-        <p class="body-text">${d.description||d.subline||""}</p>
-      </div>
-      <div class="bottom-row">
-        <a href="#" class="cta-primary">${d.cta||"Saiba Mais"}</a>
-        <a href="#" class="cta-secondary">${d.validity||"Solicitar Proposta"}</a>
-      </div>
-    </div>
-    <div class="product-col">
-      <div class="product-glow"></div>
-      <div class="product-glow2"></div>
-      <img src="${prodImg}" alt="Produto" class="product-img" onerror="this.style.opacity=0"/>
-      <div class="offer-badge">
-        <div class="offer-v">${d.badge_value||""}<sup style="font-size:14px">${d.badge_sup||""}</sup></div>
-        <div class="offer-l">${d.badge_label||"Oferta"}</div>
-      </div>
-    </div>
-  </div>
-</div>
-</body></html>`;
-}
+app.post("/api/chat", async (req, res) => {
+  const { prompt, intent = "text", model = DEFAULT_MODEL, reasoning } = req.body ?? {};
 
-// ═══════════════════════════════════════════════════════════════
-// TEMPLATE: E-MAIL MARKETING  (600px, CSS inline)
-// ═══════════════════════════════════════════════════════════════
-function emailTemplate(d){
-  const accent=d.accent||"#0057b8";
-  const badgeColor=d.badgeColor||"#cc0000";
-  const bg1=d.bg1||"#030d1a";
-  const prodImg=d.product_img_1||"https://images.unsplash.com/photo-1532187863486-abf9dbad1b69?w=560&q=80";
-  return `<!DOCTYPE html>
-<html lang="pt-BR"><head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="X-UA-Compatible" content="IE=edge">
-<title>${d.subject||"Oferta Especial"}</title>
-</head>
-<body style="margin:0;padding:0;background:#f1f1f1;font-family:Arial,sans-serif">
-<!-- Preheader -->
-<div style="display:none;max-height:0;overflow:hidden;color:#f1f1f1">${d.preheader||d.subline||""}</div>
-<!-- Wrapper -->
-<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f1f1f1">
-<tr><td align="center" style="padding:24px 12px">
-<!-- Container -->
-<table width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;border-radius:16px;overflow:hidden;box-shadow:0 4px 32px rgba(0,0,0,.12)">
-
-<!-- HERO HEADER -->
-<tr><td style="background:${bg1};padding:0;position:relative">
-  <table width="100%" cellpadding="0" cellspacing="0" border="0">
-  <tr>
-    <td width="340" style="padding:48px 36px 0 40px;vertical-align:top">
-      <!-- Brand chip -->
-      <table cellpadding="0" cellspacing="0" border="0" style="margin-bottom:20px">
-      <tr><td style="background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);border-radius:20px;padding:5px 16px">
-        <span style="font-family:Arial,sans-serif;font-size:11px;font-weight:700;color:rgba(255,255,255,.75);letter-spacing:2px;text-transform:uppercase">${d.brand||"Marca"}</span>
-      </td></tr></table>
-      <!-- Headline -->
-      <h1 style="font-family:Arial,sans-serif;font-size:34px;font-weight:900;color:#ffffff;line-height:1.1;letter-spacing:-1px;margin:0 0 12px 0">${d.headline} <span style="color:${accent}">${d.highlight||""}</span></h1>
-      <!-- Subline -->
-      <p style="font-family:Arial,sans-serif;font-size:14px;font-weight:600;color:rgba(255,255,255,.6);margin:0 0 20px 0;letter-spacing:.3px">${d.subline||""}</p>
-      <!-- Badge oferta -->
-      <table cellpadding="0" cellspacing="0" border="0" style="margin-bottom:24px">
-      <tr><td style="background:${badgeColor};border-radius:12px;padding:12px 20px;text-align:center;box-shadow:0 4px 16px ${badgeColor}88">
-        <div style="font-family:Arial,sans-serif;font-size:28px;font-weight:900;color:#fff;line-height:1;letter-spacing:-1px">${d.badge_value||""} ${d.badge_sup||""}</div>
-        <div style="font-family:Arial,sans-serif;font-size:10px;font-weight:700;color:rgba(255,255,255,.85);letter-spacing:2px;text-transform:uppercase;margin-top:4px">${d.badge_label||"Desconto"}</div>
-      </td></tr></table>
-      <!-- CTA -->
-      <table cellpadding="0" cellspacing="0" border="0">
-      <tr><td style="background:${accent};border-radius:8px;box-shadow:0 4px 16px ${accent}88">
-        <a href="#" style="display:inline-block;padding:14px 32px;font-family:Arial,sans-serif;font-size:14px;font-weight:700;color:#fff;text-decoration:none;letter-spacing:.5px">${d.cta||"Saiba Mais"} &#8594;</a>
-      </td></tr></table>
-    </td>
-    <td width="260" style="vertical-align:bottom;padding:0">
-      <img src="${prodImg}" alt="Produto" width="240" style="display:block;width:240px;max-width:100%;margin:0 auto;object-fit:contain;mix-blend-mode:multiply;padding-top:24px" onerror="this.style.display='none'"/>
-    </td>
-  </tr>
-  <!-- Validity bar -->
-  <tr><td colspan="2" style="background:rgba(255,255,255,.05);border-top:1px solid rgba(255,255,255,.08);padding:10px 40px">
-    <p style="font-family:Arial,sans-serif;font-size:11px;color:rgba(255,255,255,.4);margin:0;letter-spacing:.5px">&#x23F1; ${d.validity||"Oferta por tempo limitado"}</p>
-  </td></tr>
-  </table>
-</td></tr>
-
-<!-- DESCRIPTION BLOCK -->
-<tr><td style="background:#fff;padding:36px 40px">
-  <h2 style="font-family:Arial,sans-serif;font-size:20px;font-weight:700;color:#1a1a1a;margin:0 0 12px 0">${d.section_title||"Por que escolher?"}</h2>
-  <p style="font-family:Arial,sans-serif;font-size:14px;color:#555;line-height:1.7;margin:0 0 20px 0">${d.description||""}</p>
-  <!-- Features -->
-  <table width="100%" cellpadding="0" cellspacing="0" border="0">
-  <tr>
-    <td width="48%" style="vertical-align:top;padding:0 8px 0 0">
-      <table cellpadding="0" cellspacing="0" border="0" style="width:100%;background:#f8f8f8;border-radius:10px;padding:16px">
-      <tr><td><p style="font-family:Arial,sans-serif;font-size:12px;font-weight:700;color:${accent};text-transform:uppercase;letter-spacing:1px;margin:0 0 4px 0">${d.feat1_title||"Qualidade"}</p>
-      <p style="font-family:Arial,sans-serif;font-size:13px;color:#666;margin:0">${d.feat1_desc||""}</p></td></tr>
-      </table>
-    </td>
-    <td width="48%" style="vertical-align:top;padding:0 0 0 8px">
-      <table cellpadding="0" cellspacing="0" border="0" style="width:100%;background:#f8f8f8;border-radius:10px;padding:16px">
-      <tr><td><p style="font-family:Arial,sans-serif;font-size:12px;font-weight:700;color:${accent};text-transform:uppercase;letter-spacing:1px;margin:0 0 4px 0">${d.feat2_title||"Suporte"}</p>
-      <p style="font-family:Arial,sans-serif;font-size:13px;color:#666;margin:0">${d.feat2_desc||""}</p></td></tr>
-      </table>
-    </td>
-  </tr>
-  </table>
-</td></tr>
-
-<!-- SECONDARY CTA -->
-<tr><td style="background:${bg1};padding:28px 40px;text-align:center">
-  <p style="font-family:Arial,sans-serif;font-size:14px;color:rgba(255,255,255,.6);margin:0 0 16px 0">${d.footer_text||"Fale com nosso time de especialistas"}</p>
-  <table cellpadding="0" cellspacing="0" border="0" align="center">
-  <tr><td style="border:1.5px solid rgba(255,255,255,.2);border-radius:8px">
-    <a href="#" style="display:inline-block;padding:12px 28px;font-family:Arial,sans-serif;font-size:13px;font-weight:600;color:rgba(255,255,255,.75);text-decoration:none;letter-spacing:.5px">${d.cta2||"Entre em Contato"}</a>
-  </td></tr></table>
-</td></tr>
-
-<!-- FOOTER -->
-<tr><td style="background:#f8f8f8;padding:20px 40px;text-align:center;border-top:1px solid #e8e8e8">
-  <p style="font-family:Arial,sans-serif;font-size:11px;color:#aaa;margin:0;line-height:1.6">${d.brand||"Marca"} &bull; ${d.address||""}<br>Para cancelar o recebimento deste e-mail, <a href="#" style="color:#aaa">clique aqui</a>.</p>
-</td></tr>
-
-</table>
-</td></tr></table>
-</body></html>`;
-}
-
-// ═══════════════════════════════════════════════════════════════
-// TEMPLATE: LANDING PAGE  full responsive
-// ═══════════════════════════════════════════════════════════════
-function landingTemplate(d){
-  const accent=d.accent||"#0057b8",accentLight=d.accentLight||"#4da6ff";
-  const bg1=d.bg1||"#030d1a",bg2=d.bg2||"#0a2d5e";
-  const badgeColor=d.badgeColor||"#cc0000",dotColor=d.dotColor||"#cc0000";
-  const bgImg=d.bg_image_url?`url('${d.bg_image_url}')`:`url('https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?w=1600&q=80')`;
-  const prodImg=d.product_img_1||"https://images.unsplash.com/photo-1532187863486-abf9dbad1b69?w=600&q=80";
-  const prodImg2=d.product_img_2||"https://images.unsplash.com/photo-1581092160607-ee22621dd758?w=600&q=80";
-  const prodImg3=d.product_img_3||"https://images.unsplash.com/photo-1554475901-4538ddfbccc2?w=600&q=80";
-  return `<!DOCTYPE html>
-<html lang="pt-BR"><head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${d.brand||"Marca"} — ${d.headline||"Oferta Especial"}</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;900&display=swap" rel="stylesheet">
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-html{scroll-behavior:smooth}
-body{font-family:'Montserrat',sans-serif;background:#fff;color:#1a1a1a;overflow-x:hidden}
-a{text-decoration:none;color:inherit}
-/* NAV */
-nav{position:fixed;top:0;left:0;right:0;z-index:100;background:rgba(0,0,0,.7);backdrop-filter:blur(12px);border-bottom:1px solid rgba(255,255,255,.08)}
-.nav-inner{max-width:1160px;margin:0 auto;padding:0 32px;height:64px;display:flex;align-items:center;justify-content:space-between}
-.nav-brand{display:flex;align-items:center;gap:10px}
-.nav-dot{width:8px;height:8px;border-radius:50%;background:${dotColor};box-shadow:0 0 10px ${dotColor}}
-.nav-name{font-size:15px;font-weight:700;color:#fff;letter-spacing:1.5px;text-transform:uppercase}
-.nav-cta{background:${accent};color:#fff;font-size:13px;font-weight:700;padding:10px 24px;border-radius:8px;letter-spacing:.5px;box-shadow:0 4px 16px ${accent}66}
-/* HERO */
-.hero{min-height:100vh;position:relative;display:flex;align-items:center;background-image:${bgImg};background-size:cover;background-position:center;padding-top:64px}
-.hero::before{content:'';position:absolute;inset:0;background:linear-gradient(105deg,${bg1}f8 0%,${bg1}d0 40%,${bg2}99 70%,transparent 100%)}
-.hero::after{content:'';position:absolute;inset:0;background-image:linear-gradient(rgba(255,255,255,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.025) 1px,transparent 1px);background-size:50px 50px;pointer-events:none}
-.hero-inner{position:relative;z-index:2;max-width:1160px;margin:0 auto;padding:80px 32px;display:grid;grid-template-columns:1fr 480px;gap:40px;align-items:center}
-.hero-copy{display:flex;flex-direction:column;gap:20px}
-.hero-chip{display:inline-flex;align-items:center;gap:9px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);border-radius:24px;padding:6px 18px;width:fit-content}
-.hero-chip .dot{width:8px;height:8px;border-radius:50%;background:${dotColor};box-shadow:0 0 10px ${dotColor}cc}
-.hero-chip span{font-size:11px;font-weight:700;color:rgba(255,255,255,.8);letter-spacing:2px;text-transform:uppercase}
-.hero-eyebrow{font-size:13px;font-weight:600;color:${accentLight};letter-spacing:2px;text-transform:uppercase}
-.hero-h1{font-size:clamp(36px,4vw,64px);font-weight:900;color:#fff;line-height:1.05;letter-spacing:-2px}
-.hero-h1 em{font-style:normal;color:${accentLight}}
-.hero-bar{width:56px;height:3px;background:linear-gradient(90deg,${accent},${accentLight});border-radius:2px}
-.hero-desc{font-size:16px;color:rgba(255,255,255,.55);line-height:1.7;max-width:520px}
-.hero-actions{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
-.btn-primary{background:${accent};color:#fff;font-size:14px;font-weight:700;padding:14px 32px;border-radius:10px;letter-spacing:.5px;box-shadow:0 6px 24px ${accent}88;border:1.5px solid rgba(255,255,255,.15)}
-.btn-secondary{color:rgba(255,255,255,.6);font-size:13px;font-weight:500;padding:14px 24px;border:1.5px solid rgba(255,255,255,.15);border-radius:10px}
-.hero-badge{background:linear-gradient(135deg,${badgeColor},${badgeColor}cc);border-radius:12px;padding:14px 24px;display:inline-block;box-shadow:0 6px 24px ${badgeColor}88;border-top:1px solid rgba(255,255,255,.2)}
-.hero-badge-v{font-size:36px;font-weight:900;color:#fff;line-height:1;letter-spacing:-1px}
-.hero-badge-l{font-size:10px;font-weight:700;color:rgba(255,255,255,.85);letter-spacing:2px;text-transform:uppercase;margin-top:4px}
-.hero-validity{font-size:11px;color:rgba(255,255,255,.35);letter-spacing:.5px;margin-top:8px}
-/* Hero produto */
-.hero-product{position:relative;display:flex;align-items:flex-end;justify-content:center;min-height:440px}
-.hero-product-glow{position:absolute;bottom:-40px;left:50%;transform:translateX(-50%);width:360px;height:360px;background:radial-gradient(circle,${accent}40 0%,transparent 65%);pointer-events:none}
-.hero-product-img{position:relative;z-index:1;max-width:400px;width:100%;object-fit:contain;mix-blend-mode:multiply;filter:drop-shadow(0 24px 48px rgba(0,0,0,.7))}
-/* FEATURES */
-.features{background:#f7f9fb;padding:80px 32px}
-.section-inner{max-width:1160px;margin:0 auto}
-.section-label{font-size:12px;font-weight:700;color:${accent};letter-spacing:2.5px;text-transform:uppercase;margin-bottom:10px}
-.section-title{font-size:clamp(28px,3vw,44px);font-weight:900;color:#1a1a1a;line-height:1.1;letter-spacing:-1px;margin-bottom:48px}
-.section-title em{font-style:normal;color:${accent}}
-.features-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:24px}
-.feat-card{background:#fff;border-radius:16px;padding:28px 24px;border:1px solid rgba(0,0,0,.06);box-shadow:0 2px 12px rgba(0,0,0,.04)}
-.feat-num{font-size:44px;font-weight:900;color:${accent};opacity:.15;line-height:1;margin-bottom:8px;letter-spacing:-2px}
-.feat-title{font-size:16px;font-weight:700;color:#1a1a1a;margin-bottom:8px}
-.feat-desc{font-size:13px;color:#777;line-height:1.65}
-/* PRODUCTS */
-.products{padding:80px 32px;background:#fff}
-.products-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:28px;margin-top:48px}
-.prod-card{background:#fff;border:1px solid rgba(0,0,0,.07);border-radius:16px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.05)}
-.prod-card-img{height:220px;background:${bg1};display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}
-.prod-card-img::before{content:'';position:absolute;inset:0;background:linear-gradient(135deg,${bg1},${bg2})}
-.prod-card-img img{position:relative;z-index:1;max-width:80%;max-height:180px;object-fit:contain;mix-blend-mode:multiply;filter:drop-shadow(0 8px 20px rgba(0,0,0,.5))}
-.prod-card-body{padding:20px 20px 24px}
-.prod-card-tag{font-size:10px;font-weight:700;color:${accent};text-transform:uppercase;letter-spacing:1.5px;margin-bottom:6px}
-.prod-card-name{font-size:16px;font-weight:700;color:#1a1a1a;margin-bottom:8px}
-.prod-card-desc{font-size:12px;color:#888;line-height:1.6;margin-bottom:16px}
-.prod-card-cta{display:inline-block;background:${accent};color:#fff;font-size:12px;font-weight:700;padding:9px 20px;border-radius:7px;letter-spacing:.5px}
-/* CTA SECTION */
-.cta-section{background:${bg1};padding:80px 32px;text-align:center;position:relative;overflow:hidden}
-.cta-section::before{content:'';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:600px;height:600px;background:radial-gradient(circle,${accent}20 0%,transparent 65%);pointer-events:none}
-.cta-section .section-inner{position:relative;z-index:1}
-.cta-tagline{font-size:13px;font-weight:600;color:${accentLight};letter-spacing:2px;text-transform:uppercase;margin-bottom:16px}
-.cta-h2{font-size:clamp(28px,3.5vw,52px);font-weight:900;color:#fff;letter-spacing:-1.5px;line-height:1.05;margin-bottom:16px}
-.cta-h2 em{font-style:normal;color:${accentLight}}
-.cta-sub{font-size:15px;color:rgba(255,255,255,.5);margin-bottom:36px;line-height:1.6}
-.cta-btns{display:flex;gap:16px;justify-content:center;flex-wrap:wrap}
-/* FOOTER */
-footer{background:#0a0a0a;padding:32px;text-align:center;border-top:1px solid rgba(255,255,255,.06)}
-footer p{font-size:12px;color:rgba(255,255,255,.3);letter-spacing:.5px}
-@media(max-width:768px){
-  .hero-inner,.features-grid,.products-grid{grid-template-columns:1fr}
-  .hero-product{min-height:260px}
-  .hero-product-img{max-width:260px}
-}
-</style></head><body>
-<nav><div class="nav-inner">
-  <div class="nav-brand"><div class="nav-dot"></div><span class="nav-name">${d.brand||"Marca"}</span></div>
-  <a href="#cta" class="nav-cta">${d.cta||"Solicitar Proposta"}</a>
-</div></nav>
-
-<section class="hero">
-<div class="hero-inner">
-  <div class="hero-copy">
-    <div class="hero-chip"><span class="dot"></span><span>${d.brand||"Marca"}</span></div>
-    <span class="hero-eyebrow">${d.eyebrow||d.tag||"Oferta Exclusiva"}</span>
-    <h1 class="hero-h1">${d.headline}<br><em>${d.highlight||""}</em></h1>
-    <div class="hero-bar"></div>
-    <p class="hero-desc">${d.description||d.subline||""}</p>
-    <div>
-      <div class="hero-badge">
-        <div class="hero-badge-v">${d.badge_value||""} ${d.badge_sup||""}</div>
-        <div class="hero-badge-l">${d.badge_label||"Promoção"}</div>
-      </div>
-      <p class="hero-validity">&#x23F1; ${d.validity||"Válido por tempo limitado"}</p>
-    </div>
-    <div class="hero-actions">
-      <a href="#cta" class="btn-primary">${d.cta||"Solicitar Proposta"}</a>
-      <a href="#products" class="btn-secondary">Ver Produtos &#8594;</a>
-    </div>
-  </div>
-  <div class="hero-product">
-    <div class="hero-product-glow"></div>
-    <img src="${prodImg}" alt="Produto" class="hero-product-img" onerror="this.style.opacity=0"/>
-  </div>
-</div>
-</section>
-
-<section class="features">
-<div class="section-inner">
-  <p class="section-label">Por Que ${d.brand||"Nós"}?</p>
-  <h2 class="section-title">Qualidade que você pode <em>confiar</em></h2>
-  <div class="features-grid">
-    <div class="feat-card"><div class="feat-num">01</div><h3 class="feat-title">${d.feat1_title||"Precisão"}</h3><p class="feat-desc">${d.feat1_desc||"Tecnologia de ponta para resultados precisos e repetíveis no seu laboratório."}</p></div>
-    <div class="feat-card"><div class="feat-num">02</div><h3 class="feat-title">${d.feat2_title||"Durabilidade"}</h3><p class="feat-desc">${d.feat2_desc||"Construção robusta e materiais de alta qualidade para uso intensivo."}</p></div>
-    <div class="feat-card"><div class="feat-num">03</div><h3 class="feat-title">${d.feat3_title||"Suporte Técnico"}</h3><p class="feat-desc">${d.feat3_desc||"Equipe especializada disponível para assistência técnica e treinamento."}</p></div>
-  </div>
-</div>
-</section>
-
-<section class="products" id="products">
-<div class="section-inner">
-  <p class="section-label">Linha de Produtos</p>
-  <h2 class="section-title">${d.products_title||"Equipamentos em <em>Destaque</em>"}</h2>
-  <div class="products-grid">
-    <div class="prod-card"><div class="prod-card-img"><img src="${prodImg}" alt="Produto 1" onerror="this.style.opacity=0"/></div><div class="prod-card-body"><p class="prod-card-tag">${d.brand||"Marca"}</p><h3 class="prod-card-name">${d.prod1_name||d.headline||"Produto"}</h3><p class="prod-card-desc">${d.prod1_desc||d.description||""}</p><a href="#cta" class="prod-card-cta">Solicitar</a></div></div>
-    <div class="prod-card"><div class="prod-card-img"><img src="${prodImg2}" alt="Produto 2" onerror="this.style.opacity=0"/></div><div class="prod-card-body"><p class="prod-card-tag">${d.brand||"Marca"}</p><h3 class="prod-card-name">${d.prod2_name||d.subline||"Produto"}</h3><p class="prod-card-desc">${d.prod2_desc||d.description||""}</p><a href="#cta" class="prod-card-cta">Solicitar</a></div></div>
-    <div class="prod-card"><div class="prod-card-img"><img src="${prodImg3}" alt="Produto 3" onerror="this.style.opacity=0"/></div><div class="prod-card-body"><p class="prod-card-tag">${d.brand||"Marca"}</p><h3 class="prod-card-name">${d.prod3_name||"Produto"}</h3><p class="prod-card-desc">${d.prod3_desc||d.description||""}</p><a href="#cta" class="prod-card-cta">Solicitar</a></div></div>
-  </div>
-</div>
-</section>
-
-<section class="cta-section" id="cta">
-<div class="section-inner">
-  <p class="cta-tagline">${d.eyebrow||"Aproveite Agora"}</p>
-  <h2 class="cta-h2">${d.headline} <em>${d.highlight||""}</em></h2>
-  <p class="cta-sub">${d.footer_text||"Entre em contato com nossa equipe e receba uma proposta personalizada."}</p>
-  <div class="cta-btns">
-    <a href="#" class="btn-primary" style="font-size:15px;padding:16px 40px">${d.cta||"Solicitar Proposta"}</a>
-    <a href="#" class="btn-secondary" style="font-size:13px;padding:16px 28px;color:rgba(255,255,255,.5)">${d.cta2||"WhatsApp"}</a>
-  </div>
-</div>
-</section>
-
-<footer><p>&copy; ${new Date().getFullYear()} ${d.brand||"Marca"} &bull; Todos os direitos reservados</p></footer>
-</body></html>`;
-}
-
-// ═══════════════════════════════════════════════════════════════
-// SYSTEM PROMPTS
-// ═══════════════════════════════════════════════════════════════
-const SYSTEM_PROMPTS={
-  email:(brandCtx)=>`Você é um especialista em e-mail marketing. A partir do briefing recebido, retorne APENAS um objeto JSON válido — sem explicações, sem markdown, sem texto extra.
-${brandCtx?`\nIDENTIDADE DA MARCA:\n${brandCtx}\n`:""}
-Campos:
-{
-  "brand":"Nome da marca",
-  "subject":"Assunto do e-mail (máx 60 chars)",
-  "preheader":"Texto de previsualização (máx 80 chars)",
-  "headline":"Título principal (máx 5 palavras)",
-  "highlight":"Palavra em destaque (máx 3 palavras)",
-  "subline":"Subtítulo (máx 10 palavras)",
-  "description":"Parágrafo principal (máx 35 palavras)",
-  "badge_value":"Número ou texto (ex: COMPRE 3)",
-  "badge_sup":"Sufixo (ex: % ou vazio)",
-  "badge_label":"Label badge (ex: LEVE 4)",
-  "validity":"Texto de validade",
-  "cta":"CTA primário (máx 4 palavras)",
-  "cta2":"CTA secundário (máx 4 palavras)",
-  "section_title":"Título da seção de features",
-  "feat1_title":"Feature 1 título","feat1_desc":"Feature 1 descrição",
-  "feat2_title":"Feature 2 título","feat2_desc":"Feature 2 descrição",
-  "footer_text":"Texto do rodapé (máx 12 palavras)",
-  "address":"Endereço ou cidade",
-  "bg_search_query":"Query fundo em inglês",
-  "search_query_1":"Query produto 1 em inglês"
-}
-Retorne SOMENTE o JSON.`,
-
-  banner:(brandCtx)=>`Você é um copywriter especialista em marketing visual. Retorne APENAS um objeto JSON válido.
-${brandCtx?`\nIDENTIDADE DA MARCA (CORES OBRIGATÓRIAS):\n${brandCtx}\n`:""}
-{
-  "brand":"Nome da marca",
-  "headline":"Título (máx 4 palavras)",
-  "highlight":"Destaque (máx 3 palavras)",
-  "subline":"Subtítulo (máx 8 palavras)",
-  "description":"Descrição (máx 20 palavras)",
-  "badge_value":"Ex: COMPRE 3",
-  "badge_sup":"Ex: % ou vazio",
-  "badge_label":"Ex: LEVE 4",
-  "validity":"Texto de validade",
-  "cta":"CTA (máx 5 palavras)",
-  "bg_search_query":"Query fundo em inglês",
-  "search_query_1":"Query produto 1",
-  "search_query_2":"Query produto 2",
-  "search_query_3":"Query produto 3"
-}
-Retorne SOMENTE o JSON.`,
-
-  instagram:(brandCtx)=>`Você é copywriter de social media. Retorne APENAS um objeto JSON válido.
-${brandCtx?`\nIDENTIDADE DA MARCA:\n${brandCtx}\n`:""}
-{
-  "brand":"Nome da marca",
-  "tag":"Tag curta",
-  "headline":"Título (máx 3 palavras)",
-  "highlight":"Destaque (máx 2 palavras)",
-  "subline":"Subtítulo (máx 12 palavras)",
-  "badge_value":"Ex: COMPRE 3",
-  "badge_sup":"Ex: %",
-  "badge_label":"Ex: LEVE 4",
-  "validity":"Texto de validade",
-  "cta":"CTA (máx 4 palavras)",
-  "bg_search_query":"Query fundo em inglês",
-  "search_query_1":"Query produto em inglês"
-}
-Retorne SOMENTE o JSON.`,
-
-  linkedin:(brandCtx)=>`Você é copywriter de marketing B2B. Retorne APENAS um objeto JSON válido.
-${brandCtx?`\nIDENTIDADE DA MARCA:\n${brandCtx}\n`:""}
-{
-  "brand":"Nome da marca",
-  "category":"Categoria (ex: Equipamentos Laboratoriais)",
-  "eyebrow":"Eyebrow (máx 5 palavras)",
-  "headline":"Título (máx 5 palavras)",
-  "highlight":"Destaque (máx 2 palavras)",
-  "subline":"Subtítulo (máx 8 palavras)",
-  "description":"Corpo do texto (máx 25 palavras)",
-  "badge_value":"Ex: 15",
-  "badge_sup":"Ex: %",
-  "badge_label":"Ex: Desconto",
-  "validity":"Texto do CTA secundário (máx 4 palavras)",
-  "cta":"CTA principal (máx 4 palavras)",
-  "bg_search_query":"Query fundo em inglês",
-  "search_query_1":"Query produto em inglês"
-}
-Retorne SOMENTE o JSON.`,
-
-  landing:(brandCtx)=>`Você é especialista em landing pages de conversão. Retorne APENAS um objeto JSON válido.
-${brandCtx?`\nIDENTIDADE DA MARCA:\n${brandCtx}\n`:""}
-{
-  "brand":"Nome da marca",
-  "eyebrow":"Eyebrow (máx 5 palavras)",
-  "headline":"H1 principal (máx 5 palavras)",
-  "highlight":"Palavra de destaque (máx 3 palavras)",
-  "subline":"Subtítulo (máx 10 palavras)",
-  "description":"Parágrafo hero (máx 30 palavras)",
-  "badge_value":"Texto oferta","badge_sup":"","badge_label":"Label oferta",
-  "validity":"Validade da oferta",
-  "cta":"CTA principal","cta2":"CTA secundário",
-  "feat1_title":"Feature 1","feat1_desc":"Descrição feature 1 (máx 20 palavras)",
-  "feat2_title":"Feature 2","feat2_desc":"Descrição feature 2 (máx 20 palavras)",
-  "feat3_title":"Feature 3","feat3_desc":"Descrição feature 3 (máx 20 palavras)",
-  "products_title":"Título da seção de produtos",
-  "prod1_name":"Nome produto 1","prod1_desc":"Desc produto 1",
-  "prod2_name":"Nome produto 2","prod2_desc":"Desc produto 2",
-  "prod3_name":"Nome produto 3","prod3_desc":"Desc produto 3",
-  "footer_text":"Texto CTA final (máx 15 palavras)",
-  "bg_search_query":"Query fundo em inglês",
-  "search_query_1":"Query produto 1 em inglês",
-  "search_query_2":"Query produto 2 em inglês",
-  "search_query_3":"Query produto 3 em inglês"
-}
-Retorne SOMENTE o JSON.`,
-
-  datasheet:`Você é especialista em marketing técnico. Gere uma ficha técnica em Markdown com: Visão Geral, Características, Especificações (tabela), Benefícios, Casos de Uso, CTA. Português do Brasil.`,
-  text:`Você é copywriter sênior. Escreva conteúdo persuasivo em português do Brasil. Use Markdown quando ajudar.`,
-};
-
-// ═══════════════════════════════════════════════════════════════
-// EXPRESS
-// ═══════════════════════════════════════════════════════════════
-const app=express();
-app.use(express.json());
-app.use(express.static(path.join(__dirname,"dist/client")));
-
-async function ollamaJSON(prompt,model){
-  const res=await fetch(`${OLLAMA_URL}/api/generate`,{
-    method:"POST",
-    headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({model,prompt,stream:false,options:{num_predict:900,temperature:0.2}}),
-  });
-  if(!res.ok) throw new Error(`Ollama ${res.status}`);
-  const{response}=await res.json();
-  const match=response.match(/\{[\s\S]*\}/);
-  if(!match) throw new Error("JSON inválido: "+response.slice(0,200));
-  return JSON.parse(match[0]);
-}
-
-app.post("/api/chat",async(req,res)=>{
-  const{prompt,intent="text",model=DEFAULT_MODEL}=req.body??{};
-  if(!prompt?.trim()) return res.status(400).json({error:"Campo 'prompt' é obrigatório"});
-  console.log(`[chat] intent=${intent} model=${model} prompt=${prompt.slice(0,80)}`);
-
-  // ── TEMPLATE INTENTS ──
-  if(TEMPLATE_INTENTS.has(intent)||intent==="email"||intent==="landing"){
-    const brandIdentity=detectBrand(prompt);
-    const brandCtx=[
-      `Marca: ${brandIdentity.displayName||("(genérica)")}`,
-      `Paleta: ${brandIdentity.palette}`,
-      `bg1: ${brandIdentity.bg1}`,
-      `bg2: ${brandIdentity.bg2}`,
-      `accent: ${brandIdentity.accent}`,
-    ].join("\n");
-    console.log(`[brand] ${brandIdentity.displayName||"genérica"} | ${brandIdentity.palette}`);
-
-    const systemFn=SYSTEM_PROMPTS[intent];
-    const systemPrompt=typeof systemFn==="function"?systemFn(brandCtx):systemFn;
-    const fullPrompt=`${systemPrompt}\n\nBriefing:\n${prompt.trim()}`;
-
-    let data;
-    try{
-      data=await ollamaJSON(fullPrompt,model);
-      console.log(`[chat] JSON:`,JSON.stringify(data).slice(0,200));
-    }catch(err){
-      console.error(`[chat] ERRO JSON:`,err.message);
-      return res.status(502).json({error:`Erro ao gerar dados: ${err.message}`});
-    }
-
-    // Aplica identidade da marca
-    data.bg1=brandIdentity.bg1;
-    data.bg2=brandIdentity.bg2;
-    data.accent=brandIdentity.accent;
-    data.accentLight=brandIdentity.accentLight;
-    data.badgeColor=brandIdentity.badgeColor;
-    data.dotColor=brandIdentity.dotColor;
-
-    // Busca imagens
-    const needsImages=["banner","instagram","linkedin","landing"].includes(intent);
-    if(needsImages){
-      const bgQuery=data.bg_search_query||brandIdentity.bgSearchQuery;
-      let q1,q2,q3;
-      if(brandIdentity.productQueries){
-        [q1,q2,q3]=brandIdentity.productQueries;
-        console.log(`[img] productQueries "${brandIdentity.displayName}":`,brandIdentity.productQueries);
-      }else{
-        q1=data.search_query_1||"laboratory equipment product white background";
-        q2=data.search_query_2||"scientific instrument isolated";
-        q3=data.search_query_3||"laboratory product professional";
-        console.log(`[img] queries LLM:`, [q1,q2,q3]);
-      }
-      try{
-        const[bgUrl,img1,img2,img3]=await searchProductImages([bgQuery,q1,q2,q3]);
-        if(bgUrl) data.bg_image_url=bgUrl;
-        if(img1)  data.product_img_1=img1;
-        if(img2)  data.product_img_2=img2;
-        if(img3)  data.product_img_3=img3;
-      }catch(e){console.log(`[img] fallback:`,e.message);}
-    }
-
-    // Para email: busca 1 imagem de produto
-    if(intent==="email"){
-      const bgQuery=data.bg_search_query||brandIdentity.bgSearchQuery;
-      const pQ=brandIdentity.productQueries?brandIdentity.productQueries[0]:data.search_query_1||"laboratory equipment professional";
-      try{
-        const[bgUrl,img1]=await searchProductImages([bgQuery,pQ]);
-        if(bgUrl) data.bg_image_url=bgUrl;
-        if(img1)  data.product_img_1=img1;
-      }catch(e){console.log(`[img email] fallback:`,e.message);}
-    }
-
-    const TEMPLATES={banner:bannerTemplate,instagram:instagramTemplate,linkedin:linkedinTemplate,email:emailTemplate,landing:landingTemplate};
-    const templateFn=TEMPLATES[intent]||bannerTemplate;
-    const html=templateFn(data);
-    console.log(`[chat] HTML ${intent} bytes=${html.length}`);
-
-    res.setHeader("Content-Type","text/event-stream");
-    res.setHeader("Cache-Control","no-cache, no-transform");
-    res.setHeader("Connection","keep-alive");
-    res.setHeader("X-Accel-Buffering","no");
-    res.write(`data: ${JSON.stringify(html)}\n\n`);
-    res.write("data: [DONE]\n\n");
-    res.end();
-    return;
+  if (!prompt) {
+    return res.status(400).json({ error: "Falta prompt" });
   }
 
-  // ── STREAMING (datasheet, text) ──
-  const systemRaw=SYSTEM_PROMPTS[intent]??SYSTEM_PROMPTS.text;
-  const systemPrompt=typeof systemRaw==="function"?systemRaw(""):systemRaw;
-  const fullPrompt=`${systemPrompt}\n\nPedido:\n${prompt.trim()}`;
-  const isHtml=HTML_INTENTS.has(intent);
+  const isVisualIntent = ["banner", "email", "instagram"].includes(intent);
+
+  const contextRules = reasoning
+    ? `\n\n[DIRETRIZ ESTRATÉGICA]\nObjetivo: ${reasoning.objective}\nFunil: ${reasoning.funnelStage}\nTom: ${reasoning.tone}`
+    : "";
+
+  let finalSystemPrompt = "";
+  let finalUserPrompt = prompt;
+
+  if (isVisualIntent) {
+    let strategicCopy;
+    try {
+      strategicCopy = await runCopywriterAgentExpress(prompt, intent, model, contextRules);
+      console.log(`[Agent1] Copy gerado para "${intent}":\n${strategicCopy.slice(0, 200)}...`);
+    } catch (err) {
+      console.error("[Agent1] ERRO:", err);
+      return res.status(502).json({ error: `Agente 1 (Copywriter) falhou: ${err}` });
+    }
+    finalSystemPrompt = buildDesignerPrompt(intent, strategicCopy);
+    finalUserPrompt = `Renderize o HTML com base no copy acima. Diretrizes de marca do utilizador: ${prompt}`;
+  } else {
+    const singleAgentSystem = {
+      text: `Você é um Copywriter Sénior B2B. Escreva texto direto, sem jargões de IA. Use Markdown.${contextRules}`,
+      datasheet: `Você é um Engenheiro de Produto. Escreva conteúdo técnico e preciso em Markdown.${contextRules}`,
+    };
+    finalSystemPrompt = singleAgentSystem[intent] ?? singleAgentSystem.text;
+  }
 
   let ollamaRes;
-  try{
-    ollamaRes=await fetch(`${OLLAMA_URL}/api/generate`,{
-      method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({model,prompt:fullPrompt,stream:true,options:{num_predict:isHtml?2048:1024,temperature:isHtml?0.3:0.7}}),
+  try {
+    ollamaRes = await fetch(`${OLLAMA_URL}/api/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model,
+        system: finalSystemPrompt,
+        prompt: finalUserPrompt.trim(),
+        stream: true,
+      }),
     });
-  }catch(err){return res.status(502).json({error:`Ollama inacessível: ${err.message}`});}
-
-  if(!ollamaRes.ok||!ollamaRes.body){
-    const text=await ollamaRes.text().catch(()=>"");
-    return res.status(502).json({error:`Ollama ${ollamaRes.status}: ${text}`});
+  } catch (err) {
+    console.error("[Agent2] Fetch error:", err);
+    return res.status(502).json({ error: `Ollama stream error: ${err}` });
   }
 
-  res.setHeader("Content-Type","text/event-stream");
-  res.setHeader("Cache-Control","no-cache, no-transform");
-  res.setHeader("Connection","keep-alive");
-  res.setHeader("X-Accel-Buffering","no");
+  if (!ollamaRes.ok) {
+    const txt = await ollamaRes.text().catch(() => "");
+    return res.status(502).json({ error: `Ollama respondeu ${ollamaRes.status}: ${txt}` });
+  }
 
-  const reader=ollamaRes.body.getReader();
-  const decoder=new TextDecoder();
-  let lineBuffer="",htmlAccum="",htmlStarted=false;
-  const sendToken=(t)=>res.write(`data: ${JSON.stringify(t)}\n\n`);
-  const finish=()=>{if(isHtml&&!htmlStarted&&htmlAccum)sendToken(stripMarkdownWrapper(htmlAccum));res.write("data: [DONE]\n\n");res.end();};
-  const pump=async()=>{
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.flushHeaders();
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  for await (const chunk of ollamaRes.body) {
+    buffer += decoder.decode(chunk, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const json = JSON.parse(line);
+        if (json.response) res.write(`data: ${JSON.stringify(json.response)}\n\n`);
+        if (json.done) {
+          res.write("data: [DONE]\n\n");
+          res.end();
+          return;
+        }
+      } catch { /* linha inválida */ }
+    }
+  }
+  res.write("data: [DONE]\n\n");
+  res.end();
+});
+
+// ═══════════════════════════════════════════════════════════════
+// POST /api/translate — registado diretamente
+// ═══════════════════════════════════════════════════════════════
+app.post("/api/translate", async (req, res) => {
+  const { prompt, model = DEFAULT_MODEL } = req.body ?? {};
+  if (!prompt) return res.json({ englishPrompt: prompt });
+  try {
+    const r = await fetch(`${OLLAMA_URL}/api/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model,
+        prompt: `Translate the following marketing image brief into a concise, vivid English prompt for an image generator. Return ONLY the English prompt — no quotes, no preface, no explanation.\n\n${prompt}`,
+        stream: false,
+      }),
+    });
+    if (!r.ok) return res.json({ englishPrompt: prompt });
+    const data = await r.json();
+    const englishPrompt = (data.response ?? prompt).trim().replace(/^["']|["']$/g, "");
+    return res.json({ englishPrompt });
+  } catch {
+    return res.json({ englishPrompt: prompt });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// POST /api/generate-banner — template legado (server-express)
+// ═══════════════════════════════════════════════════════════════
+app.post("/api/generate-banner", async (req,res)=>{
+  const body=req.body||{};
+  const prompt=body.prompt||"";
+  const model=body.model||DEFAULT_MODEL;
+  const brand=detectBrand(prompt);
+
+  let productImages=[null,null,null];
+  if(brand.productQueries){
     try{
-      const{done,value}=await reader.read();
-      if(done){finish();return;}
-      lineBuffer+=decoder.decode(value,{stream:true});
-      const lines=lineBuffer.split("\n");
-      lineBuffer=lines.pop()??"";
-      for(const line of lines){
-        if(!line.trim()) continue;
-        let parsed;try{parsed=JSON.parse(line);}catch{continue;}
-        const token=parsed.response??"";
-        if(isHtml){
-          if(!htmlStarted){htmlAccum+=token;const idx=htmlAccum.toLowerCase().indexOf("<!doctype");if(idx!==-1){htmlStarted=true;sendToken(htmlAccum.slice(idx));htmlAccum="";}}
-          else{if(token&&!/^`+$/.test(token.trim()))sendToken(token);}
-        }else{if(token)sendToken(token);}
-        if(parsed.done){finish();return;}
-      }
-      pump();
-    }catch(err){res.write(`data: ${JSON.stringify({error:err.message})}\n\n`);finish();}
-  };
-  req.on("close",()=>reader.cancel());
-  pump();
-});
+      productImages=await searchProductImages(brand.productQueries);
+    }catch(e){
+      console.error("[banner] searchProductImages error:",e);
+    }
+  }
 
-function stripMarkdownWrapper(text){
-  return text.replace(/^```(?:html)?\s*/i,"").replace(/\s*```\s*$/i,"").trim();
-}
+  const schema=`Gere SOMENTE um JSON válido (sem markdown, sem blocos de código) no formato:
+{"headline":"...","highlight":"...","subline":"...","description":"...","badge_value":"...","badge_sup":"...","badge_label":"...","validity":"...","cta":"..."}
 
-const assetsDir=path.join(__dirname,"dist/server/assets");
-const serverFile=readdirSync(assetsDir).find(f=>f.startsWith("server-")&&f.endsWith(".js"));
-if(!serverFile) throw new Error("server-*.js não encontrado em dist/server/assets/");
-console.log(`📦 Handler SSR: ${serverFile}`);
-const{default:handler}=await import(`./dist/server/assets/${serverFile}`);
+Contexto da marca: ${brand.palette}
+Briefing: ${prompt}`;
 
-app.use(async(req,res)=>{
+  let ollamaData;
   try{
-    const url=new URL(req.url,`http://localhost:${PORT}`);
-    const headers={};
-    for(const[k,v] of Object.entries(req.headers)){if(v!=null) headers[k]=Array.isArray(v)?v.join(", "):v;}
-    const response=await handler.fetch(new Request(url.toString(),{headers}));
-    res.status(response.status);
-    response.headers.forEach((v,k)=>res.setHeader(k,v));
-    res.end(await response.text());
-  }catch(err){res.status(500).send(`<pre>SSR Error: ${err.message}</pre>`);}
+    const or=await fetch(`${OLLAMA_URL}/api/generate`,{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({model,prompt:schema,stream:false}),
+    });
+    ollamaData=await or.json();
+  }catch(e){
+    return res.status(502).json({error:"Ollama unavailable"});
+  }
+
+  let fields={};
+  try{
+    const raw=(ollamaData.response||"").trim();
+    const m=raw.match(/\{[\s\S]*\}/);
+    if(m) fields=JSON.parse(m[0]);
+  }catch(e){
+    console.error("[banner] JSON parse error",e);
+  }
+
+  const d={
+    ...brand,
+    brand:brand.displayName,
+    bg_image_url:null,
+    product_img_1:productImages[0],
+    product_img_2:productImages[1],
+    product_img_3:productImages[2],
+    headline:fields.headline||"Precisão que transforma",
+    highlight:fields.highlight||"",
+    subline:fields.subline||"",
+    description:fields.description||"",
+    badge_value:fields.badge_value||"3",
+    badge_sup:fields.badge_sup||"%",
+    badge_label:fields.badge_label||"de Desconto",
+    validity:fields.validity||"Oferta por tempo limitado",
+    cta:fields.cta||"Ver Oferta",
+  };
+
+  res.setHeader("Content-Type","text/html;charset=utf-8");
+  res.send(bannerTemplate(d));
 });
 
-app.listen(PORT,"0.0.0.0",()=>console.log(`✅ BrieFlow on :${PORT}`));
+// ═══════════════════════════════════════════════════════════════
+// SSR HANDLER DO TANSTACK START — para todas as outras rotas
+// ═══════════════════════════════════════════════════════════════
+const { createExpressApp } = await import("./dist/server/server.js");
+const tanstackHandler = await createExpressApp();
+app.use(tanstackHandler);
+
+app.listen(PORT, () => {
+  console.log(`[BrieFlow] Servidor em http://0.0.0.0:${PORT}`);
+  console.log(`[BrieFlow] Ollama: ${OLLAMA_URL} | Modelo: ${DEFAULT_MODEL}`);
+});
