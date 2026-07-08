@@ -74,7 +74,7 @@ function ChatRoute() {
     "classifying" | "planning" | "generating" | "validating" | "rendering" | undefined
   >();
   const [brandProfile, setBrandProfile] = useState<BrandProfile | undefined>();
-  
+
   const currentUserPrompt = useRef<string>("");
   const [selectedArtifact, setSelectedArtifact] = useState<Artifact | undefined>();
   const abortRef = useRef<(() => void) | null>(null);
@@ -120,7 +120,7 @@ function ChatRoute() {
         html: extractHtml(streamingText),
         title: "A gerar...",
         prompt: currentUserPrompt.current,
-        intent: loadingIntent
+        intent: loadingIntent,
       };
     }
     return {
@@ -155,7 +155,7 @@ function ChatRoute() {
 
       return parts.join("\n\n");
     },
-    [thread, brandProfile]
+    [thread, brandProfile],
   );
 
   const handleSend = useCallback(
@@ -165,6 +165,7 @@ function ChatRoute() {
       currentUserPrompt.current = text;
       const contextualPrompt = buildContextualPrompt(text);
 
+      // ── Atualização do perfil de marca ────────────────────────────────────
       const brandPatch = extractBrandInfo(text);
       const hasBrandInfo = Object.keys(brandPatch).length > 0;
       const isSetupRequest = isBrandSetupRequest(text);
@@ -175,6 +176,7 @@ function ChatRoute() {
         setBrandProfile(getBrandProfile(threadId));
       }
 
+      // Persiste a mensagem do utilizador
       const userMsg: Message = {
         id: generateId(),
         role: "user",
@@ -184,46 +186,62 @@ function ChatRoute() {
       appendMessage(thread.id, userMsg);
       refresh();
 
+      // ── Deteção de intenção inicial ───────────────────────────────────────
       let intent = detectIntent(text);
       const objective = detectCopyObjective(text);
       const funnelStage = detectFunnelStage(text, objective);
       const tone = suggestTone(intent as any, objective, text);
 
-      // --- HERANÇA DE CONTEXTO (PREFLIGHT) ---
-      // Se a última mensagem foi uma pergunta de preflight do agente,
-      // e o usuário respondeu com poucas palavras, herdamos a intenção original.
-      const lastMsg = thread.messages[thread.messages.length - 1];
-      const isAnsweringPreflight = lastMsg?.role === "assistant" && (lastMsg.reasoning?.questions?.length ?? 0) > 0;
-      
-      if (isAnsweringPreflight && intent === "text") {
-         intent = (lastMsg.reasoning?.intent as any) || "text";
+      // ── MEMÓRIA DE INTENÇÃO (Intent Memory) ───────────────────────────────
+      // Se a última mensagem do assistente foi um preflight (pediu clarificação)
+      // e o utilizador respondeu com uma mensagem curta (< 8 palavras),
+      // herdamos a intenção original em vez de assumir "text".
+      const messages = thread.messages;
+      const lastAssistantMsg = [...messages].reverse().find((m) => m.role === "assistant");
+      const isAnsweringPreflight =
+        lastAssistantMsg?.reasoning?.questions != null &&
+        (lastAssistantMsg.reasoning.questions as string[]).length > 0;
+      const isShortAnswer = text.trim().split(/\s+/).length < 8;
+
+      if (isAnsweringPreflight && intent === "text" && isShortAnswer) {
+        intent = (lastAssistantMsg?.reasoning?.intent as any) ?? "text";
       }
 
-      // --- PREFLIGHT: VALIDATION BLOCK ---
-      if (intent !== "image" && intent !== "text") {
+      // ── PREFLIGHT: INTERCEÇÃO ANTES DA GERAÇÃO ────────────────────────────
+      // Para intenções visuais, verifica se o briefing tem dados suficientes.
+      // Se não tiver, injeta uma mensagem do assistente a pedir clarificação
+      // e PARA a geração (early return).
+      const isVisualIntent = ["banner", "instagram", "email"].includes(intent);
+      if (isVisualIntent) {
         const missingFields = detectMissingBriefing(contextualPrompt, intent as any);
         if (missingFields.length > 0) {
-           const questions = buildBriefingQuestions(missingFields);
-           const reply = `Antes de gerar o ${intent.toUpperCase()}, percebi que faltam algumas informações estratégicas:\n\n` +
-                         questions.map(q => `- **${q}**`).join('\n') +
-                         `\n\nPor favor, forneça esses detalhes para garantir o melhor resultado, ou configure o perfil da marca acima.`;
+          const questions = buildBriefingQuestions(missingFields);
+          const intentLabel =
+            intent === "banner" ? "Banner" :
+            intent === "instagram" ? "Post de Instagram" :
+            intent === "email" ? "E-mail HTML" : intent.toUpperCase();
 
-           const assistantId = generateId();
-           appendMessage(thread.id, {
-             id: assistantId,
-             role: "assistant",
-             content: reply,
-             createdAt: Date.now(),
-             reasoning: {
-               intent,
-               questions: missingFields
-             }
-           });
-           refresh();
-           return; 
+          const reply =
+            `Antes de gerar o **${intentLabel}**, preciso de mais alguns detalhes estratégicos para garantir o melhor resultado:\n\n` +
+            questions.map((q) => `— ${q}`).join("\n") +
+            `\n\nResponda a estas perguntas e eu começo imediatamente.`;
+
+          appendMessage(thread.id, {
+            id: generateId(),
+            role: "assistant",
+            content: reply,
+            createdAt: Date.now(),
+            reasoning: {
+              intent,
+              questions: missingFields,
+            },
+          });
+          refresh();
+          return; // ← PARA AQUI — sem geração até o briefing estar completo
         }
       }
 
+      // ── INÍCIO DA GERAÇÃO ─────────────────────────────────────────────────
       setIsStreaming(true);
       setStreamingText("");
       setLoadingIntent(intent);
@@ -236,12 +254,7 @@ function ChatRoute() {
         role: "assistant",
         content: "",
         createdAt: Date.now(),
-        reasoning: {
-          intent,
-          objective,
-          funnelStage,
-          tone
-        }
+        reasoning: { intent, objective, funnelStage, tone },
       };
       appendMessage(thread.id, placeholder);
       refresh();
@@ -276,59 +289,63 @@ function ChatRoute() {
           abortRef.current = null;
           refresh();
         } else {
-          const abort = callOllama(contextualPrompt, intent as any, {
-            onToken: (token) => {
-              setStreamingText((prev) => prev + token);
-            },
-            onDone: (fullText) => {
-              let artifact: Artifact;
-              let reply: string;
+          const abort = callOllama(
+            contextualPrompt,
+            intent as any,
+            {
+              onToken: (token) => {
+                setStreamingText((prev) => prev + token);
+              },
+              onDone: (fullText) => {
+                let artifact: Artifact;
+                let reply: string;
 
-              if (
-                intent === "banner" ||
-                intent === "instagram" ||
-                intent === "email" ||
-                looksLikeHtml(fullText)
-              ) {
-                const html = extractHtml(fullText);
-                const titles: Record<string, string> = {
-                  banner: "Banner",
-                  instagram: "Post Instagram",
-                  email: "E-mail HTML",
-                };
-                const title = titles[intent] ?? "HTML";
-                artifact = { kind: "html", html, title, prompt: text, intent };
-                reply = `✅ ${title} pronto! Veja a prévia e copie o código no painel ao lado.`;
-              } else if (intent === "datasheet") {
-                artifact = { kind: "markdown", markdown: fullText, title: "Ficha Técnica" };
-                reply = "✅ Ficha técnica gerada! Use **Exportar PDF** no painel ao lado.";
-              } else {
-                artifact = { kind: "markdown", markdown: fullText };
-                reply = "✅ Conteúdo pronto! Veja o resultado completo no painel ao lado.";
-              }
+                if (
+                  intent === "banner" ||
+                  intent === "instagram" ||
+                  intent === "email" ||
+                  looksLikeHtml(fullText)
+                ) {
+                  const html = extractHtml(fullText);
+                  const titles: Record<string, string> = {
+                    banner: "Banner",
+                    instagram: "Post Instagram",
+                    email: "E-mail HTML",
+                  };
+                  const title = titles[intent] ?? "HTML";
+                  artifact = { kind: "html", html, title, prompt: text, intent };
+                  reply = `✅ **${title}** pronto! Copie o código ou faça download no painel ao lado.`;
+                } else if (intent === "datasheet") {
+                  artifact = { kind: "markdown", markdown: fullText, title: "Ficha Técnica" };
+                  reply = "✅ Ficha técnica gerada! Use **Exportar PDF** no painel ao lado.";
+                } else {
+                  artifact = { kind: "markdown", markdown: fullText };
+                  reply = "✅ Conteúdo pronto! Veja o resultado completo no painel ao lado.";
+                }
 
-              setThreadContentType(thread.id, intent as ContentType);
-              updateMessage(thread.id, assistantId, { content: reply, artifact });
-              setIsStreaming(false);
-              setStreamingText("");
-              setLoadingIntent(undefined);
-              setLoadingStage(undefined);
-              abortRef.current = null;
-              refresh();
+                setThreadContentType(thread.id, intent as ContentType);
+                updateMessage(thread.id, assistantId, { content: reply, artifact });
+                setIsStreaming(false);
+                setStreamingText("");
+                setLoadingIntent(undefined);
+                setLoadingStage(undefined);
+                abortRef.current = null;
+                refresh();
+              },
+              onError: (msg) => {
+                updateMessage(thread.id, assistantId, { content: `⚠️ ${msg}` });
+                toast.error(msg);
+                setIsStreaming(false);
+                setStreamingText("");
+                setLoadingIntent(undefined);
+                setLoadingStage(undefined);
+                abortRef.current = null;
+                refresh();
+              },
             },
-            onError: (msg) => {
-              updateMessage(thread.id, assistantId, { content: `⚠️ ${msg}` });
-              toast.error(msg);
-              setIsStreaming(false);
-              setStreamingText("");
-              setLoadingIntent(undefined);
-              setLoadingStage(undefined);
-              abortRef.current = null;
-              refresh();
-            },
-          }, undefined, {
-            objective, funnelStage, tone
-          }); 
+            undefined,
+            { objective, funnelStage, tone },
+          );
           abortRef.current = abort;
         }
       } catch (err) {
@@ -343,7 +360,7 @@ function ChatRoute() {
         refresh();
       }
     },
-    [thread, refresh, buildContextualPrompt, threadId]
+    [thread, refresh, buildContextualPrompt, threadId],
   );
 
   const handleStop = useCallback(() => {
@@ -360,7 +377,7 @@ function ChatRoute() {
       deleteThread(id);
       refresh();
     },
-    [refresh]
+    [refresh],
   );
 
   const handleSaveBrand = useCallback(
@@ -368,9 +385,9 @@ function ChatRoute() {
       const current = getBrandProfile(threadId) ?? { threadId, updatedAt: Date.now() };
       saveBrandProfile({ ...current, ...patch, threadId });
       setBrandProfile(getBrandProfile(threadId));
-      toast.success("Perfil de marca salvo para esta conversa!");
+      toast.success("Perfil de marca guardado para esta conversa!");
     },
-    [threadId]
+    [threadId],
   );
 
   return (
@@ -407,14 +424,31 @@ function ChatRoute() {
     </div>
   );
 }
+
+/**
+ * extractHtml — extrai o bloco de código HTML de uma resposta do LLM.
+ *
+ * Usa String.fromCharCode(96, 96, 96) para gerar as crases de forma
+ * programática, evitando que o build do Vite interprete as crases literais
+ * dentro de template literals como delimitadores de template.
+ */
 export function extractHtml(raw: string): string {
-  // Usando String.fromCharCode(96) para gerar as crases de forma programática.
-  // Isso evita que o botão de copiar do chat quebre a formatação.
+  // Gera o padrão de 3 crases sem usar crases literais no source
   const ticks = String.fromCharCode(96, 96, 96);
   const pattern = ticks + "(?:html)?\\s*([\\s\\S]*?)" + ticks;
   const regex = new RegExp(pattern, "i");
   const fence = raw.match(regex);
-  
-  if (fence) return fence[1].trim();
+
+  if (fence && fence[1]) return fence[1].trim();
+
+  // Fallback: se não encontrou código fenceado, verifica se o raw IS HTML
+  if (/<!doctype html/i.test(raw) || /^\s*<html/i.test(raw)) {
+    return raw.trim();
+  }
+
+  // Extrai a primeira ocorrência de uma tag HTML completa
+  const htmlStart = raw.search(/<!doctype html|<html[\s>]/i);
+  if (htmlStart !== -1) return raw.slice(htmlStart).trim();
+
   return raw.trim();
 }

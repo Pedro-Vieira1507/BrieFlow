@@ -34,10 +34,10 @@ export function ArtifactPanel({ artifact, loading, loadingIntent }: Props) {
 
       <div className="thin-scroll flex-1 overflow-auto bg-[var(--background)]">
         {artifact.kind === "html" && view === "preview" && (
-          <ScaledHtmlPreview 
-            html={artifact.html} 
-            userPrompt={artifact.prompt ?? ""} 
-            intent={artifact.intent} 
+          <ScaledHtmlPreview
+            html={artifact.html}
+            userPrompt={artifact.prompt ?? ""}
+            intent={artifact.intent}
           />
         )}
         {artifact.kind === "html" && view === "code" && (
@@ -69,81 +69,125 @@ export function ArtifactPanel({ artifact, loading, loadingIntent }: Props) {
   );
 }
 
-const PT_TO_EN: [RegExp, string][] = [
-  [/brownie/gi, "brownie"],
-  [/recheado/gi, "filled"],
+// ============================================================================
+// SCALED HTML PREVIEW
+// Escala o iframe de forma dinâmica baseada na intenção.
+// transform-origin: top left para evitar corte do lado esquerdo durante escala.
+// ============================================================================
+
+/** Dimensões reais de cada formato de artefato visual */
+const ARTIFACT_DIMENSIONS: Record<string, { w: number; h: number }> = {
+  banner:    { w: 1200, h: 500 },
+  instagram: { w: 1080, h: 1080 },
+  email:     { w: 600,  h: 800 },
+  default:   { w: 1200, h: 900 },
+};
+
+function getArtifactDimensions(intent?: string): { w: number; h: number } {
+  if (!intent) return ARTIFACT_DIMENSIONS.default;
+  return ARTIFACT_DIMENSIONS[intent] ?? ARTIFACT_DIMENSIONS.default;
+}
+
+/**
+ * sanitizeHtml — remove scripts e corrige URLs de imagens sem domínio Pollinations.
+ *
+ * Extração robusta do prompt de imagem do Pollinations:
+ * 1. Tenta extrair diretamente do src da primeira <img> com pollinations.ai
+ * 2. Fallback: constrói uma descrição traduzida a partir do userPrompt
+ * Não depende de regex frágil de comentários HTML.
+ */
+function sanitizeHtml(html: string, userPrompt: string): string {
+  // Extração robusta: tenta pegar o primeiro URL de pollinations já no HTML
+  const pollinationsMatch = html.match(
+    /https:\/\/image\.pollinations\.ai\/prompt\/([^?"'\s]+)/i,
+  );
+
+  let fallbackUrl: string;
+  if (pollinationsMatch) {
+    // Já tem URL do Pollinations — reutiliza como fallback para imagens faltantes
+    fallbackUrl = `https://image.pollinations.ai/prompt/${pollinationsMatch[1]}?width=800&height=500&nologo=true`;
+  } else {
+    // Constrói descrição genérica a partir do prompt do utilizador
+    const description = buildProductDescription(userPrompt);
+    const encoded = encodeURIComponent(description);
+    fallbackUrl = `https://image.pollinations.ai/prompt/${encoded}?width=800&height=500&nologo=true`;
+  }
+
+  return (
+    html
+      // Remove scripts injetados
+      .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
+      // Substitui imagens que não são do Pollinations pelo fallback
+      .replace(
+        /(<img[^>]*\ssrc=["'])(?!https:\/\/image\.pollinations\.ai)([^"']*?)(["'])/gi,
+        `$1${fallbackUrl}$3`,
+      )
+  );
+}
+
+/** Conjunto de substituições PT → EN para construir descrições de produto */
+const PT_TO_EN_MAP: [RegExp, string][] = [
+  [/pipeta|pipette/gi, "laboratory pipette"],
+  [/brownie/gi, "brownie pastry"],
+  [/recheado/gi, "filled pastry"],
   [/sanduiche|sanduíche/gi, "sandwich"],
   [/bolo/gi, "cake"],
   [/doce|confei|confeitaria/gi, "pastry confectionery"],
-  [/chocolate/gi, "chocolate"],
-  [/morango/gi, "strawberry"],
-  [/instrumento|equipamento/gi, "instrument equipment"],
+  [/chocolate/gi, "chocolate product"],
+  [/morango/gi, "strawberry product"],
+  [/instrumento|equipamento/gi, "laboratory instrument equipment"],
   [/laboratório|laboratorio/gi, "laboratory"],
-  [/cosmético|cosmetico|beleza/gi, "cosmetics beauty"],
-  [/roupa|moda|fashion/gi, "fashion clothing"],
-  [/alimento|comida|restaurante/gi, "food restaurant"],
-  [/tecnologia|tech/gi, "technology"],
+  [/cosmético|cosmetico|beleza/gi, "cosmetics product"],
+  [/roupa|moda|fashion/gi, "fashion clothing item"],
+  [/alimento|comida|restaurante/gi, "food product"],
+  [/tecnologia|tech/gi, "technology device"],
   [/imobiliário|imóvel/gi, "real estate property"],
 ];
 
-function buildFallbackDescription(userPrompt: string): string {
-  let translated = userPrompt;
-  for (const [pt, en] of PT_TO_EN) {
-    translated = translated.replace(pt, en);
+function buildProductDescription(prompt: string): string {
+  let desc = prompt.toLowerCase();
+  for (const [pt, en] of PT_TO_EN_MAP) {
+    desc = desc.replace(pt, en);
   }
-  const words = translated
+  const keywords = desc
     .replace(/[^a-z\s]/gi, " ")
     .split(/\s+/)
     .filter((w) => w.length > 3)
     .slice(0, 6)
     .join(" ");
-  return `${words} professional marketing photography`;
+  return `${keywords}, professional macro product photography, isolated on pure white background, no humans, nobody, no people`;
 }
 
-function sanitizeHtml(html: string, userPrompt: string): string {
-  const analyseMatch = html.match(
-    /Descri[\u00e7c][\u00e3a]o(?:[^:]*)?:\s*([^\n\r]+)/i
-  );
-  const pollinationsDesc = analyseMatch
-    ? analyseMatch[1].trim().replace(/["']/g, "")
-    : buildFallbackDescription(userPrompt);
-
-  const encodedDesc = encodeURIComponent(pollinationsDesc);
-  const fallbackUrl = `https://image.pollinations.ai/prompt/${encodedDesc}?width=800&height=500&nologo=true`;
-
-  return (
-    html
-      .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
-      .replace(
-        /(<img[^>]*\ssrc=["'])(?!https:\/\/image\.pollinations\.ai)([^"']*?)(["'])/gi,
-        `$1${fallbackUrl}$3`
-      )
-  );
-}
-
-function ScaledHtmlPreview({ html, userPrompt, intent }: { html: string; userPrompt: string; intent?: string }) {
+function ScaledHtmlPreview({
+  html,
+  userPrompt,
+  intent,
+}: {
+  html: string;
+  userPrompt: string;
+  intent?: string;
+}) {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
 
-  // Define proporções reais baseadas na intenção
-  let REAL_W = 1200;
-  let REAL_H = 900;
-  if (intent === "banner") { REAL_H = 500; }
-  else if (intent === "instagram") { REAL_W = 1080; REAL_H = 1080; }
-  else if (intent === "email") { REAL_W = 600; REAL_H = 800; } 
+  const { w: REAL_W, h: REAL_H } = getArtifactDimensions(intent);
 
   useEffect(() => {
     const el = wrapperRef.current;
     if (!el) return;
 
+    const updateScale = (containerWidth: number) => {
+      if (containerWidth > 0) setScale(containerWidth / REAL_W);
+    };
+
+    // ResizeObserver para recalcular a escala dinamicamente
     const observer = new ResizeObserver((entries) => {
       const width = entries[0]?.contentRect.width ?? el.clientWidth;
-      if (width > 0) setScale(width / REAL_W);
+      updateScale(width);
     });
 
     observer.observe(el);
-    const w = el.clientWidth;
-    if (w > 0) setScale(w / REAL_W);
+    updateScale(el.clientWidth);
 
     return () => observer.disconnect();
   }, [REAL_W]);
@@ -154,8 +198,7 @@ function ScaledHtmlPreview({ html, userPrompt, intent }: { html: string; userPro
   return (
     <div
       ref={wrapperRef}
-      // Removemos o 'flex justify-center' e adicionamos 'relative' para âncora absoluta
-      className="w-full overflow-hidden bg-white shadow-inner relative"
+      className="relative w-full overflow-hidden bg-white shadow-inner"
       style={{ height: scaledH > 0 ? scaledH : "auto", minHeight: "100%" }}
     >
       <iframe
@@ -165,19 +208,27 @@ function ScaledHtmlPreview({ html, userPrompt, intent }: { html: string; userPro
           width: `${REAL_W}px`,
           height: `${REAL_H}px`,
           transform: `scale(${scale})`,
-          transformOrigin: "top left", // Escala travada no canto superior esquerdo
+          // transform-origin: top left evita que o lado esquerdo do design
+          // seja cortado durante a escala de CSS
+          transformOrigin: "top left",
           border: "none",
           display: "block",
           backgroundColor: "#fff",
-          position: "absolute", // Previne vazamento do bounding box original
+          // position: absolute previne que o bounding box original
+          // do iframe (no tamanho real, antes da escala) empurre o layout
+          position: "absolute",
           top: 0,
-          left: 0
+          left: 0,
         }}
         srcDoc={cleanHtml}
       />
     </div>
   );
 }
+
+// ============================================================================
+// TOOLBAR, ICONS, LABELS
+// ============================================================================
 
 function Toolbar({
   artifact,
@@ -259,6 +310,10 @@ function labelFor(a: Artifact) {
   return "Texto gerado";
 }
 
+// ============================================================================
+// UTILITIES
+// ============================================================================
+
 function copy(text: string, msg: string) {
   navigator.clipboard.writeText(text).then(() => toast.success(msg));
 }
@@ -292,9 +347,9 @@ async function exportPdf() {
   const el = document.getElementById("print-area");
   if (!el) return;
   try {
-    const mod = (await import("html2pdf.js")).default as (el: HTMLElement) => {
-      set: (opts: Record<string, unknown>) => { save: () => Promise<void> };
-    };
+    const mod = (await import("html2pdf.js")).default as (
+      el: HTMLElement,
+    ) => { set: (opts: Record<string, unknown>) => { save: () => Promise<void> } };
     await mod(el)
       .set({
         margin: 12,
@@ -309,6 +364,10 @@ async function exportPdf() {
   }
 }
 
+// ============================================================================
+// EMPTY & LOADING STATES
+// ============================================================================
+
 function EmptyState() {
   return (
     <div className="flex h-full flex-col items-center justify-center px-8 text-center text-muted-foreground">
@@ -320,7 +379,7 @@ function EmptyState() {
       </div>
       <h2 className="text-xl font-semibold text-foreground">Painel de Artefatos</h2>
       <p className="mt-2 max-w-sm text-sm">
-        Peça um e-mail, uma imagem ou uma ficha técnica no chat ao lado. O resultado aparece aqui, pronto para copiar ou exportar.
+        Peça um e-mail, um banner ou uma ficha técnica no chat ao lado. O resultado aparece aqui, pronto para copiar ou exportar.
       </p>
     </div>
   );
@@ -335,14 +394,18 @@ function Tile({ icon, label }: { icon: React.ReactNode; label: string }) {
   );
 }
 
-function LoadingState({ intent }: { intent: "image" | "email" | "banner" | "instagram" | "datasheet" | "text" | string }) {
+function LoadingState({
+  intent,
+}: {
+  intent: "image" | "email" | "banner" | "instagram" | "datasheet" | "text" | string;
+}) {
   const labels: Record<string, string> = {
-    image: "Gerando imagem no Pollinations…",
-    email: "Compondo o e-mail HTML seguro…",
-    banner: "Desenhando layout do banner…",
-    instagram: "Estruturando post de Instagram…",
-    datasheet: "Estruturando ficha técnica…",
-    text: "Escrevendo conteúdo…",
+    image:     "A gerar imagem no Pollinations…",
+    email:     "Agente 1 a escrever copy · Agente 2 a montar o e-mail…",
+    banner:    "Agente 1 a escrever copy · Agente 2 a desenhar o banner…",
+    instagram: "Agente 1 a escrever copy · Agente 2 a criar o post…",
+    datasheet: "A estruturar ficha técnica…",
+    text:      "A escrever conteúdo…",
   };
   return (
     <div className="flex h-full flex-col items-center justify-center gap-6 px-8 text-center">
@@ -352,8 +415,8 @@ function LoadingState({ intent }: { intent: "image" | "email" | "banner" | "inst
         <Sparkles className="absolute inset-0 m-auto h-7 w-7 text-primary-foreground" />
       </div>
       <div>
-        <p className="font-medium text-foreground">{labels[intent] || "Processando conteúdo..."}</p>
-        <p className="mt-1 text-sm text-muted-foreground">Isso pode levar alguns segundos.</p>
+        <p className="font-medium text-foreground">{labels[intent] ?? "A processar…"}</p>
+        <p className="mt-1 text-sm text-muted-foreground">A pipeline multi-agente está a trabalhar.</p>
       </div>
       <div className="w-full max-w-sm space-y-2">
         <div className="h-3 animate-pulse rounded bg-muted" />
