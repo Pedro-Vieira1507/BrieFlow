@@ -130,7 +130,7 @@ function ScaledHtmlPreview({ html, userPrompt, intent }: { html: string; userPro
   let REAL_H = 900;
   if (intent === "banner") { REAL_H = 500; }
   else if (intent === "instagram") { REAL_W = 1080; REAL_H = 1080; }
-  else if (intent === "email") { REAL_W = 600; REAL_H = 800; } // Padrão clássico de e-mail marketing
+  else if (intent === "email") { REAL_W = 600; REAL_H = 800; } 
 
   useEffect(() => {
     const el = wrapperRef.current;
@@ -154,20 +154,24 @@ function ScaledHtmlPreview({ html, userPrompt, intent }: { html: string; userPro
   return (
     <div
       ref={wrapperRef}
-      className="w-full overflow-hidden bg-white shadow-inner flex justify-center"
+      // Removemos o 'flex justify-center' e adicionamos 'relative' para âncora absoluta
+      className="w-full overflow-hidden bg-white shadow-inner relative"
       style={{ height: scaledH > 0 ? scaledH : "auto", minHeight: "100%" }}
     >
       <iframe
         title="Preview"
         sandbox="allow-same-origin"
         style={{
-          width: REAL_W,
-          height: REAL_H,
+          width: `${REAL_W}px`,
+          height: `${REAL_H}px`,
           transform: `scale(${scale})`,
-          transformOrigin: "top center", // Centraliza em vez de encostar na esquerda
+          transformOrigin: "top left", // Escala travada no canto superior esquerdo
           border: "none",
           display: "block",
-          backgroundColor: "#fff" // Previne fundos transparentes feios
+          backgroundColor: "#fff",
+          position: "absolute", // Previne vazamento do bounding box original
+          top: 0,
+          left: 0
         }}
         srcDoc={cleanHtml}
       />
