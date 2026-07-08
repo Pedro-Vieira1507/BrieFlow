@@ -407,3 +407,7 @@ function ChatRoute() {
     </div>
   );
 }
+export function extractHtml(raw: string): string {
+  // Usando new RegExp para evitar problemas com formatação de blocos de código
+  const regex = new RegExp("
+http://googleusercontent.com/immersive_entry_chip/0
