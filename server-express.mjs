@@ -4,15 +4,19 @@
  * Stack  : TanStack Start + Vite SSR (sem Nitro)
  * Build  : dist/client/  +  dist/server/server.js
  *
- * Dois bugs corrigidos nesta versão:
- *   1. dist/server/server.js exporta o handler como DEFAULT EXPORT (não createExpressApp)
- *   2. Express v5 / path-to-regexp v8 não aceita "*" — usar "/{*path}" ou sendFile directo
+ * COMO O TANSTACK START EXPORTA O HANDLER SSR:
+ *   O build Vite SSR gera dist/server/server.js com dois exports:
+ *     - default  → o módulo compilado (objecto)
+ *     - t        → o handler HTTP (req, res, next) para Express/Connect
+ *
+ *   Usamos o export "t" directamente como app.use(t).
+ *   O TanStack Start SSR não gera dist/client/index.html —
+ *   o HTML é gerado dinamicamente pelo handler SSR.
  */
 
 import express    from "express";
 import path       from "path";
 import { fileURLToPath } from "url";
-import { createRequire } from "module";
 
 const __dirname     = path.dirname(fileURLToPath(import.meta.url));
 const PORT          = process.env.PORT         || 3000;
@@ -70,7 +74,7 @@ async function searchOneImage(query){
     const vqdRes=await fetch(`https://duckduckgo.com/?q=${encodeURIComponent(query)}&ia=images`,{headers:{"User-Agent":"Mozilla/5.0"},signal:ctrl.signal});
     if(!vqdRes.ok) throw new Error("vqd fetch failed");
     const vqdHtml=await vqdRes.text();
-    const m=vqdHtml.match(/vqd=['"](\d+-\d+-\d+|\.?[\d\w-]+)['"]/);
+    const m=vqdHtml.match(/vqd=['"]([\d\w-]+)['"]/);
     if(!m) throw new Error("vqd not found");
     const imgRes=await fetch(`https://duckduckgo.com/i.js?q=${encodeURIComponent(query)}&type=photo&vqd=${m[1]}&o=json&p=1`,{headers:{"User-Agent":"Mozilla/5.0","Accept":"application/json","Referer":"https://duckduckgo.com/"},signal:ctrl.signal});
     if(!imgRes.ok) throw new Error("img fetch failed");
@@ -126,20 +130,7 @@ const TEMPLATES_MAP={banner:BANNER_TEMPLATE,instagram:INSTAGRAM_TEMPLATE,email:E
 
 function buildDesignerPrompt(intent,strategicCopy){
   const template=TEMPLATES_MAP[intent]??TEMPLATES_MAP.banner;
-  return `Você é o Diretor de Arte HTML — coder de precisão nível agência.
-
-COPY GERADO PELO COPYWRITER:
-${strategicCopy}
-
-REGRAS ABSOLUTAS:
-1. Use o template HTML exato abaixo. NÃO altere CSS.
-2. Substitua TODOS os placeholders pelo copy acima.
-3. [PRIMARY_COLOR]: derive cor sólida da marca. Se não indicado, use #1a1a2e.
-4. URL Pollinations: descrição em inglês + negative prompts: "${POLLINATIONS_NEG}". NUNCA humanos. SEED = número 1000-9999.
-5. Retorne APENAS o HTML completo. Sem explicações, sem markdown.
-
-TEMPLATE OBRIGATÓRIO:
-${template}`;
+  return `Você é o Diretor de Arte HTML — coder de precisão nível agência.\n\nCOPY GERADO PELO COPYWRITER:\n${strategicCopy}\n\nREGRAS ABSOLUTAS:\n1. Use o template HTML exato abaixo. NÃO altere CSS.\n2. Substitua TODOS os placeholders pelo copy acima.\n3. [PRIMARY_COLOR]: derive cor sólida da marca. Se não indicado, use #1a1a2e.\n4. URL Pollinations: descrição em inglês + negative prompts: "${POLLINATIONS_NEG}". NUNCA humanos. SEED = número 1000-9999.\n5. Retorne APENAS o HTML completo. Sem explicações, sem markdown.\n\nTEMPLATE OBRIGATÓRIO:\n${template}`;
 }
 
 async function runCopywriterAgent(prompt,intent,model,ctxRules=""){
@@ -169,7 +160,7 @@ function bannerTemplate(d){
 }
 
 // ═══════════════════════════════════════════════════════════════
-// EXPRESS APP
+// EXPRESS APP — API routes registadas ANTES do SSR
 // ═══════════════════════════════════════════════════════════════
 const app = express();
 app.use(express.json({ limit: "4mb" }));
@@ -262,7 +253,7 @@ app.post("/api/translate", async (req, res) => {
   } catch { return res.json({ englishPrompt: prompt }); }
 });
 
-// ── POST /api/generate-banner (legado) ────────────────────────
+// ── POST /api/generate-banner (legado) ───────────────────────
 app.post("/api/generate-banner", async (req,res) => {
   const body=req.body||{},prompt=body.prompt||"",model=body.model||DEFAULT_MODEL;
   const brand=detectBrand(prompt);
@@ -284,57 +275,48 @@ app.post("/api/generate-banner", async (req,res) => {
 // ═══════════════════════════════════════════════════════════════
 // SSR TanStack Start — dist/server/server.js
 //
-// COMO FUNCIONA O BUILD DO TANSTACK START + VITE SSR:
-//   dist/server/server.js exporta o handler como DEFAULT EXPORT.
-//   Não é uma factory — é directamente um handler (req,res,next).
-//   Para usar com Express, fazemos app.use(handler).
+// O build Vite SSR expõe dois exports:
+//   - default  → objecto compilado do módulo
+//   - t        → o handler HTTP (req, res, next) para Express
 //
-// FIX EXPRESS v5: a wildcard "*" é inválida em path-to-regexp v8.
-//   Usamos app.use() sem path (captura tudo) em vez de app.get("*",...).
+// Estratégia de montagem (por ordem de preferência):
+//   1. export "t"            — handler directo (confirmado nos logs)
+//   2. export "default"      — se for função, tenta usar directamente
+//   3. export "handler"      — nome alternativo usado em algumas versões
+//   4. Qualquer export que seja função (excepto "default" se não for função)
+//   5. Fallback SPA 503
 // ═══════════════════════════════════════════════════════════════
 const ssrPath = path.join(__dirname, "dist/server/server.js");
 
 try {
   const ssrModule = await import(ssrPath);
+  const keys = Object.keys(ssrModule);
+  console.log(`[BrieFlow] dist/server/server.js carregado. Exports: ${keys.join(", ")}`);
 
-  // O TanStack Start exporta o handler Express como default export
-  // Pode ser: default export = handler function, ou default = { default: handler }
+  // Estratégia de resolução do handler
   const ssrHandler =
-    typeof ssrModule.default === "function"
-      ? ssrModule.default
-      : typeof ssrModule.default?.default === "function"
-        ? ssrModule.default.default
-        : null;
+    // 1. export "t" — confirmado pelos logs anteriores
+    (typeof ssrModule.t === "function" ? ssrModule.t : null) ??
+    // 2. export "default" directo como função
+    (typeof ssrModule.default === "function" ? ssrModule.default : null) ??
+    // 3. export "handler"
+    (typeof ssrModule.handler === "function" ? ssrModule.handler : null) ??
+    // 4. qualquer outro export que seja função (primeiro encontrado)
+    keys.reduce((found, k) => found ?? (typeof ssrModule[k] === "function" && k !== "default" ? ssrModule[k] : null), null);
 
   if (!ssrHandler) {
-    // Inspeccionamos o que o módulo exporta para facilitar debug futuro
-    const keys = Object.keys(ssrModule).join(", ");
-    console.warn(`[BrieFlow] dist/server/server.js encontrado mas sem handler reconhecível.`);
-    console.warn(`           Exports disponíveis: ${keys}`);
-    console.warn(`           A usar modo SPA até corrigir.`);
-    // SPA fallback sem wildcard (Express v5 safe)
-    app.use((req, res) => {
-      res.sendFile(path.join(__dirname, "dist/client/index.html"));
-    });
+    console.error(`[BrieFlow] Nenhum handler encontrado em dist/server/server.js.`);
+    console.error(`           Exports: ${keys.join(", ")}`);
+    console.error(`           Tipos: ${keys.map(k=>`${k}=${typeof ssrModule[k]}`).join(", ")}`);
+    app.use((_req, res) => res.status(503).send("BrieFlow SSR: handler não encontrado. Verifique os logs."));
   } else {
     app.use(ssrHandler);
-    console.log("[BrieFlow] TanStack Start SSR activo (default export).");
+    console.log("[BrieFlow] ✓ TanStack Start SSR activo.");
   }
 
 } catch (e) {
-  if (e.code === "ERR_MODULE_NOT_FOUND" || e.message?.includes("Cannot find module")) {
-    console.warn("[BrieFlow] dist/server/server.js não encontrado — modo SPA.");
-    console.warn("           Execute 'npm run build' para activar SSR.");
-  } else {
-    console.error("[BrieFlow] Erro ao carregar SSR:", e.message);
-  }
-  // SPA fallback sem wildcard (Express v5 safe)
-  app.use((req, res) => {
-    const spa = path.join(__dirname, "dist/client/index.html");
-    res.sendFile(spa, (err) => {
-      if (err) res.status(503).send("BrieFlow: execute npm run build.");
-    });
-  });
+  console.error("[BrieFlow] Erro ao carregar dist/server/server.js:", e.message);
+  app.use((_req, res) => res.status(503).send("BrieFlow: execute 'npm run build' e reinicie o servidor."));
 }
 
 // ═══════════════════════════════════════════════════════════════
