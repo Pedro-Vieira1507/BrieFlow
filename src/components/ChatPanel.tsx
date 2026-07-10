@@ -1,14 +1,25 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { ArrowUp, Eye, Sparkles, User2, Square, Building2, ChevronDown, ChevronUp, Brain, Target, Zap } from "lucide-react";
+import {
+  ArrowUp,
+  Eye,
+  Sparkles,
+  User2,
+  Square,
+  Building2,
+  ChevronDown,
+  ChevronUp,
+  Brain,
+  Target,
+  Zap,
+} from "lucide-react";
 import ReactMarkdown from "react-markdown";
-import type { Message } from "@/lib/chat-storage";
-import type { Artifact } from "@/lib/chat-storage";
+import type { Message, Artifact } from "@/lib/chat-storage";
 import type { BrandProfile } from "@/lib/brand-memory";
 
 interface Props {
-  messages: Message[];
+  messages?: Message[];
   onSend: (text: string) => void;
   onStop?: () => void;
   isStreaming?: boolean;
@@ -16,7 +27,6 @@ interface Props {
   brandProfile?: BrandProfile;
   onSaveBrand?: (patch: Partial<BrandProfile>) => void;
   loadingStage?: "classifying" | "planning" | "generating" | "validating" | "rendering";
-  /** Chamado ao clicar em "Visualizar" numa mensagem com artefato */
   onViewArtifact?: (artifact: Artifact) => void;
 }
 
@@ -24,8 +34,8 @@ export function ChatPanel({
   messages,
   onSend,
   onStop,
-  isStreaming,
-  streamingText,
+  isStreaming = false,
+  streamingText = "",
   brandProfile,
   onSaveBrand,
   loadingStage,
@@ -35,13 +45,16 @@ export function ChatPanel({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
+  const safeMessages = useMemo(() => messages ?? [], [messages]);
+  const messageCount = safeMessages.length;
+
   useEffect(() => {
     textareaRef.current?.focus();
-  }, [messages.length, isStreaming]);
+  }, [messageCount, isStreaming]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages.length, isStreaming, streamingText]);
+  }, [messageCount, isStreaming, streamingText]);
 
   function submit() {
     const text = input.trim();
@@ -52,27 +65,30 @@ export function ChatPanel({
 
   return (
     <div className="flex h-full flex-col">
-      {/* Barra de contexto de marca */}
       {(brandProfile?.companyName || onSaveBrand) && (
         <BrandContextBar profile={brandProfile} onEdit={onSaveBrand} />
       )}
 
-      {/* Mensagens */}
       <div className="thin-scroll flex-1 overflow-y-auto px-5 py-6">
-        {messages.length === 0 ? (
-          <EmptyChat onPick={(p) => onSend(p)} />
+        {messageCount === 0 ? (
+          <EmptyChat onPick={onSend} />
         ) : (
           <div className="mx-auto flex max-w-2xl flex-col gap-5">
-            {messages.map((m) => (
-              <MessageRow key={m.id} message={m} onViewArtifact={onViewArtifact} />
+            {safeMessages.map((message, index) => (
+              <MessageRow
+                key={message?.id ?? `${message?.role ?? "message"}-${index}`}
+                message={message}
+                onViewArtifact={onViewArtifact}
+              />
             ))}
+
             {isStreaming && <Typing stage={loadingStage} />}
+
             <div ref={bottomRef} />
           </div>
         )}
       </div>
 
-      {/* Input */}
       <div className="border-t border-border bg-background/60 px-4 py-4 backdrop-blur">
         <div className="mx-auto max-w-2xl">
           <div className="flex items-end gap-2 rounded-2xl border border-border bg-card/80 p-2 shadow-sm focus-within:ring-2 focus-within:ring-primary/40">
@@ -90,8 +106,15 @@ export function ChatPanel({
               rows={1}
               className="min-h-[44px] resize-none border-0 bg-transparent focus-visible:ring-0"
             />
+
             {isStreaming ? (
-              <Button size="icon" variant="secondary" onClick={onStop} aria-label="Parar">
+              <Button
+                size="icon"
+                variant="secondary"
+                onClick={onStop}
+                aria-label="Parar"
+                disabled={!onStop}
+              >
                 <Square className="h-4 w-4" />
               </Button>
             ) : (
@@ -100,6 +123,7 @@ export function ChatPanel({
               </Button>
             )}
           </div>
+
           <p className="mt-2 text-center text-xs text-muted-foreground">
             Enter para enviar · Shift+Enter para nova linha · Conectado ao Ollama local
           </p>
@@ -109,7 +133,6 @@ export function ChatPanel({
   );
 }
 
-/** Barra superior com resumo do perfil de marca da conversa */
 function BrandContextBar({
   profile,
   onEdit,
@@ -121,9 +144,14 @@ function BrandContextBar({
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState<Partial<BrandProfile>>(profile ?? {});
 
+  useEffect(() => {
+    setForm(profile ?? {});
+  }, [profile]);
+
   if (!profile?.companyName && !editing) {
     return (
       <button
+        type="button"
         onClick={() => setEditing(true)}
         className="flex w-full items-center gap-2 border-b border-border bg-muted/30 px-4 py-2 text-left text-xs text-muted-foreground transition hover:bg-muted/50"
       >
@@ -134,31 +162,36 @@ function BrandContextBar({
   }
 
   if (editing) {
+    const fields: [keyof BrandProfile, string][] = [
+      ["companyName", "Empresa"],
+      ["sector", "Setor"],
+      ["primaryColor", "Cor principal"],
+      ["toneOfVoice", "Tom de voz"],
+      ["targetAudience", "Público-alvo"],
+      ["extra", "Notas extras"],
+    ];
+
     return (
       <div className="border-b border-border bg-muted/30 px-4 py-3">
         <p className="mb-2 text-xs font-medium text-foreground">Perfil de marca — esta conversa</p>
+
         <div className="grid grid-cols-2 gap-2 text-xs">
-          {([
-            ["companyName", "Empresa"],
-            ["sector", "Setor"],
-            ["primaryColor", "Cor principal"],
-            ["toneOfVoice", "Tom de voz"],
-            ["targetAudience", "Público-alvo"],
-            ["extra", "Notas extras"],
-          ] as [keyof BrandProfile, string][]).map(([key, label]) => (
-            <div key={key} className={key === "extra" ? "col-span-2" : ""}>
+          {fields.map(([key, label]) => (
+            <div key={String(key)} className={key === "extra" ? "col-span-2" : ""}>
               <label className="mb-0.5 block text-[10px] text-muted-foreground">{label}</label>
               <input
                 type="text"
-                value={(form[key] as string) ?? ""}
-                onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
+                value={String(form?.[key] ?? "")}
+                onChange={(e) => setForm((prev) => ({ ...prev, [key]: e.target.value }))}
                 className="w-full rounded border border-border bg-background px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-primary/50"
               />
             </div>
           ))}
         </div>
+
         <div className="mt-2 flex gap-2">
           <button
+            type="button"
             onClick={() => {
               onEdit?.(form);
               setEditing(false);
@@ -167,8 +200,13 @@ function BrandContextBar({
           >
             Salvar
           </button>
+
           <button
-            onClick={() => setEditing(false)}
+            type="button"
+            onClick={() => {
+              setForm(profile ?? {});
+              setEditing(false);
+            }}
             className="rounded px-3 py-1 text-xs text-muted-foreground hover:bg-muted"
           >
             Cancelar
@@ -180,16 +218,23 @@ function BrandContextBar({
 
   return (
     <div className="border-b border-border bg-muted/20">
-      <button
-        onClick={() => setExpanded((v) => !v)}
-        className="flex w-full items-center gap-2 px-4 py-2 text-left text-xs text-muted-foreground transition hover:bg-muted/30"
-      >
-        <Building2 className="h-3.5 w-3.5 shrink-0 text-primary" />
-        <span className="flex-1 font-medium text-foreground">{profile?.companyName}</span>
-        {profile?.sector && <span className="text-muted-foreground">{profile.sector}</span>}
+      <div className="flex w-full items-center gap-2 px-4 py-2 text-left text-xs text-muted-foreground">
         <button
-          onClick={(e) => {
-            e.stopPropagation();
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="flex min-w-0 flex-1 items-center gap-2 text-left transition hover:text-foreground"
+        >
+          <Building2 className="h-3.5 w-3.5 shrink-0 text-primary" />
+          <span className="truncate font-medium text-foreground">
+            {profile?.companyName ?? "Perfil de marca"}
+          </span>
+          {profile?.sector && <span className="truncate text-muted-foreground">{profile.sector}</span>}
+          {expanded ? <ChevronUp className="h-3 w-3 shrink-0" /> : <ChevronDown className="h-3 w-3 shrink-0" />}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
             setForm(profile ?? {});
             setEditing(true);
           }}
@@ -197,8 +242,8 @@ function BrandContextBar({
         >
           Editar
         </button>
-        {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-      </button>
+      </div>
+
       {expanded && (
         <div className="grid grid-cols-2 gap-1 px-4 pb-2 text-[10px] text-muted-foreground">
           {profile?.toneOfVoice && <span>Tom: {profile.toneOfVoice}</span>}
@@ -212,66 +257,67 @@ function BrandContextBar({
   );
 }
 
-/**
- * AgentReasoning — exibe raciocínio estratégico do agente
- * (formato, objetivo, funil, tom) antes do botão de artefato.
- * Renderizado apenas quando a mensagem tem metadata de reasoning.
- */
 function AgentReasoning({ reasoning }: { reasoning: NonNullable<Message["reasoning"]> }) {
   const [open, setOpen] = useState(false);
 
   const pills = [
-    reasoning.intent     && { icon: <Zap className="h-3 w-3" />,    label: reasoning.intent },
-    reasoning.objective  && { icon: <Target className="h-3 w-3" />, label: reasoning.objective },
-    reasoning.tone       && { icon: <Brain className="h-3 w-3" />,  label: reasoning.tone },
+    reasoning?.intent ? { icon: <Zap className="h-3 w-3" />, label: reasoning.intent } : null,
+    reasoning?.objective ? { icon: <Target className="h-3 w-3" />, label: reasoning.objective } : null,
+    reasoning?.tone ? { icon: <Brain className="h-3 w-3" />, label: reasoning.tone } : null,
   ].filter(Boolean) as { icon: React.ReactNode; label: string }[];
+
+  const questions = reasoning?.questions ?? [];
 
   return (
     <div className="mb-2">
-      {/* Pills resumo — sempre visíveis */}
-      <div className="flex flex-wrap gap-1.5 mb-1">
-        {pills.map((p, i) => (
+      <div className="mb-1 flex flex-wrap gap-1.5">
+        {pills.map((pill, index) => (
           <span
-            key={i}
+            key={`${pill.label}-${index}`}
             className="inline-flex items-center gap-1 rounded-full border border-border bg-muted/40 px-2 py-0.5 text-[10px] text-muted-foreground"
           >
-            {p.icon}
-            {p.label}
+            {pill.icon}
+            {pill.label}
           </span>
         ))}
-        {reasoning.funnelStage && (
+
+        {reasoning?.funnelStage && (
           <span className="inline-flex items-center gap-1 rounded-full border border-primary/20 bg-primary/5 px-2 py-0.5 text-[10px] text-primary/70">
             funil: {reasoning.funnelStage}
           </span>
         )}
       </div>
 
-      {/* Detalhes expandíveis */}
-      {reasoning.summary && (
-        <button
-          onClick={() => setOpen((v) => !v)}
-          className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition"
-        >
-          <Brain className="h-3 w-3" />
-          {open ? "Ocultar raciocínio" : "Ver raciocínio estratégico"}
-          {open ? <ChevronUp className="h-2.5 w-2.5" /> : <ChevronDown className="h-2.5 w-2.5" />}
-        </button>
-      )}
-      {open && reasoning.summary && (
-        <div className="mt-1.5 rounded-lg border border-border bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground leading-relaxed">
-          <ReactMarkdown>{reasoning.summary}</ReactMarkdown>
-        </div>
+      {reasoning?.summary && (
+        <>
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            className="flex items-center gap-1 text-[10px] text-muted-foreground transition hover:text-foreground"
+          >
+            <Brain className="h-3 w-3" />
+            {open ? "Ocultar raciocínio" : "Ver raciocínio estratégico"}
+            {open ? <ChevronUp className="h-2.5 w-2.5" /> : <ChevronDown className="h-2.5 w-2.5" />}
+          </button>
+
+          {open && (
+            <div className="mt-1.5 rounded-lg border border-border bg-muted/20 px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
+              <ReactMarkdown>{reasoning.summary}</ReactMarkdown>
+            </div>
+          )}
+        </>
       )}
 
-      {/* Perguntas de briefing pendentes */}
-      {reasoning.questions && reasoning.questions.length > 0 && (
+      {questions.length > 0 && (
         <div className="mt-2 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2">
-          <p className="text-[10px] font-medium text-amber-600 mb-1.5">Para resultados mais precisos, informe:</p>
+          <p className="mb-1.5 text-[10px] font-medium text-amber-600">
+            Para resultados mais precisos, informe:
+          </p>
           <ul className="space-y-1">
-            {reasoning.questions.map((q, i) => (
-              <li key={i} className="text-[11px] text-muted-foreground flex gap-1.5">
-                <span className="text-amber-500 shrink-0">{i + 1}.</span>
-                {q}
+            {questions.map((question, index) => (
+              <li key={`${question}-${index}`} className="flex gap-1.5 text-[11px] text-muted-foreground">
+                <span className="shrink-0 text-amber-500">{index + 1}.</span>
+                <span>{question}</span>
               </li>
             ))}
           </ul>
@@ -288,9 +334,13 @@ function MessageRow({
   message: Message;
   onViewArtifact?: (artifact: Artifact) => void;
 }) {
-  const isUser = message.role === "user";
-  const hasArtifact = !isUser && !!message.artifact;
-  const hasReasoning = !isUser && !!message.reasoning;
+  const isUser = message?.role === "user";
+  const artifact = message?.artifact;
+  const reasoning = message?.reasoning;
+  const content = message?.content ?? "";
+
+  const hasArtifact = !isUser && !!artifact;
+  const hasReasoning = !isUser && !!reasoning;
 
   return (
     <div className={`flex gap-3 ${isUser ? "flex-row-reverse" : ""}`}>
@@ -301,6 +351,7 @@ function MessageRow({
       >
         {isUser ? <User2 className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
       </div>
+
       <div
         className={
           isUser
@@ -308,21 +359,20 @@ function MessageRow({
             : "max-w-[85%] text-sm text-foreground"
         }
       >
-        {/* Raciocínio estratégico — antes do conteúdo */}
-        {hasReasoning && <AgentReasoning reasoning={message.reasoning!} />}
+        {hasReasoning && reasoning && <AgentReasoning reasoning={reasoning} />}
 
         {isUser ? (
-          <p className="whitespace-pre-wrap leading-relaxed">{message.content}</p>
+          <p className="whitespace-pre-wrap leading-relaxed">{content}</p>
         ) : (
           <div className="prose-chat">
-            <ReactMarkdown>{message.content || "…"}</ReactMarkdown>
+            <ReactMarkdown>{content || "…"}</ReactMarkdown>
           </div>
         )}
 
-        {/* Botão Visualizar — aparece apenas em mensagens do agente que têm artefato */}
-        {hasArtifact && onViewArtifact && (
+        {hasArtifact && onViewArtifact && artifact && (
           <button
-            onClick={() => onViewArtifact(message.artifact!)}
+            type="button"
+            onClick={() => onViewArtifact(artifact)}
             className="mt-2 flex items-center gap-1.5 rounded-lg border border-border bg-card/80 px-3 py-1.5 text-xs font-medium text-foreground transition hover:border-primary/60 hover:bg-card hover:text-primary"
           >
             <Eye className="h-3.5 w-3.5" />
@@ -334,8 +384,11 @@ function MessageRow({
   );
 }
 
-/** Indicador de carregamento com estágios detalhados */
-function Typing({ stage }: { stage?: "classifying" | "planning" | "generating" | "validating" | "rendering" }) {
+function Typing({
+  stage,
+}: {
+  stage?: "classifying" | "planning" | "generating" | "validating" | "rendering";
+}) {
   const stageLabel =
     stage === "classifying"
       ? "Classificando pedido e detectando intenção..."
@@ -352,15 +405,15 @@ function Typing({ stage }: { stage?: "classifying" | "planning" | "generating" |
       <div className="flex h-8 w-8 items-center justify-center rounded-full bg-accent text-accent-foreground">
         <Sparkles className="h-4 w-4" />
       </div>
+
       <div className="flex flex-col gap-1">
         <div className="flex items-center gap-1.5 rounded-2xl bg-muted px-3 py-2.5">
           <Dot delay="0ms" />
           <Dot delay="150ms" />
           <Dot delay="300ms" />
         </div>
-        {stage && (
-          <span className="px-1 text-[10px] text-muted-foreground">{stageLabel}</span>
-        )}
+
+        {stage && <span className="px-1 text-[10px] text-muted-foreground">{stageLabel}</span>}
       </div>
     </div>
   );
@@ -375,18 +428,20 @@ function Dot({ delay }: { delay: string }) {
   );
 }
 
-function EmptyChat({ onPick }: { onPick: (s: string) => void }) {
+function EmptyChat({ onPick }: { onPick: (suggestion: string) => void }) {
   const suggestions = [
     "Crie um e-mail HTML de Black Friday para um e-commerce de tênis com foco em conversão",
     "Gere um banner Shimadzu com 3% de desconto em azul escuro e vermelho",
     "Monte uma ficha técnica de um fone bluetooth premium com especificações técnicas",
     "Escreva 3 legendas de Instagram para lançamento de SaaS de gestão financeira",
   ];
+
   return (
     <div className="mx-auto flex max-w-xl flex-col items-center gap-6 pt-16 text-center">
       <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/15 text-primary">
         <Sparkles className="h-7 w-7" />
       </div>
+
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Agente de Marketing</h1>
         <p className="mt-2 text-sm text-muted-foreground">
@@ -396,14 +451,16 @@ function EmptyChat({ onPick }: { onPick: (s: string) => void }) {
           O agente classifica seu pedido, planeja a estrutura e valida a saída antes de entregar.
         </p>
       </div>
+
       <div className="grid w-full gap-2 sm:grid-cols-2">
-        {suggestions.map((s) => (
+        {suggestions.map((suggestion) => (
           <button
-            key={s}
-            onClick={() => onPick(s)}
+            key={suggestion}
+            type="button"
+            onClick={() => onPick(suggestion)}
             className="rounded-xl border border-border bg-card/60 px-4 py-3 text-left text-sm transition hover:border-primary/60 hover:bg-card"
           >
-            {s}
+            {suggestion}
           </button>
         ))}
       </div>
