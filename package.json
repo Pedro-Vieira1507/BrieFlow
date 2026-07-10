@@ -3,12 +3,11 @@
   "private": true,
   "sideEffects": false,
   "type": "module",
-  {
   "scripts": {
+    "dev": "vite dev",
     "build": "vite build",
     "start": "node dist/server/server.js"
-  }
-},
+  },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
     "@radix-ui/react-accordion": "^1.2.12",
