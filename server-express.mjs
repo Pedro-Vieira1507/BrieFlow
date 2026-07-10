@@ -351,7 +351,7 @@ app.post("/api/chat", async (req, res) => {
           res.end();
           return;
         }
-      } catch {}
+      } catch { }
     }
   }
 
@@ -532,10 +532,10 @@ try {
   const keys = Object.keys(ssrModule);
   console.log(`[BrieFlow] dist/server/server.js carregado. Exports: ${keys.join(", ")}`);
 
-  const startEntry = ssrModule?.default;
+  const startHandler = ssrModule?.default;
 
-  if (typeof startEntry?.fetch !== "function") {
-    console.error("[BrieFlow] SSR inválido: default.fetch não encontrado.");
+  if (typeof startHandler !== "function") {
+    console.error("[BrieFlow] SSR inválido: export default não é uma função.");
     console.error(`[BrieFlow] Exports disponíveis: ${keys.join(", ")}`);
 
     app.use((_req, res) => {
@@ -547,14 +547,14 @@ try {
     app.use(async (req, res, next) => {
       try {
         const webReq = await nodeRequestToWebRequest(req);
-        const webRes = await startEntry.fetch(webReq);
+        const webRes = await startHandler(webReq);
         await sendWebResponseToNode(webRes, res);
       } catch (err) {
         next(err);
       }
     });
 
-    console.log("[BrieFlow] ✓ TanStack Start SSR activo (default.fetch).");
+    console.log("[BrieFlow] ✓ TanStack Start SSR activo (default handler).");
   }
 } catch (e) {
   console.error("[BrieFlow] Erro ao carregar dist/server/server.js:", e.message);
