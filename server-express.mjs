@@ -1,19 +1,15 @@
 /**
  * BrieFlow — Production Server
  *
- * Stack  : TanStack Start + Vite SSR (sem Nitro)
- * Build  : dist/client/ + dist/server/server.js
+ * Stack  : TanStack Start + Vite
+ * Deploy : Express + SPA fallback
+ * Build  : dist/client/
  *
- * COMO O TANSTACK START EXPORTA O SSR:
- *   O build Vite SSR exporta um server entry em formato Fetch API:
- *     default.fetch(request) => Response
- *
- *   O export "t" visto nos logs é renderErrorPage, não o app SSR principal.
- *   Portanto, a integração correta com Express é:
- *     Express req/res -> Web Request -> startEntry.fetch() -> Web Response -> Express res
- *
- *   O TanStack Start SSR não depende de dist/client/index.html para renderizar HTML.
- *   Os assets de dist/client continuam a ser servidos por express.static.
+ * NOTA:
+ * O bundle SSR atual em dist/server/server.js está a falhar no arranque
+ * dentro de H3Event/srvx. Para colocar o BrieFlow estável em produção,
+ * este servidor mantém todas as APIs no Express e serve o frontend
+ * compilado de dist/client como SPA.
  */
 
 import express from "express";
@@ -108,7 +104,7 @@ const BRAND_IDENTITIES = {
 };
 
 function detectBrand(prompt) {
-  const lower = prompt.toLowerCase();
+  const lower = String(prompt || "").toLowerCase();
   for (const [key, id] of Object.entries(BRAND_IDENTITIES)) {
     if (key === "brand_generic") continue;
     if (lower.includes(key) || lower.includes(id.displayName.toLowerCase())) return id;
@@ -121,6 +117,7 @@ function detectBrand(prompt) {
 // ═══════════════════════════════════════════════════════════════
 async function searchOneImage(query) {
   if (!query) return null;
+
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 8000);
 
@@ -163,7 +160,7 @@ async function searchOneImage(query) {
 }
 
 async function searchProductImages(queries) {
-  const timeout = new Promise((r) => setTimeout(() => r(queries.map(() => null)), 14000));
+  const timeout = new Promise((resolve) => setTimeout(() => resolve(queries.map(() => null)), 14000));
   return Promise.race([Promise.all(queries.map((q) => searchOneImage(q))), timeout]);
 }
 
@@ -209,6 +206,7 @@ const TEMPLATES_MAP = {
 
 function buildDesignerPrompt(intent, strategicCopy) {
   const template = TEMPLATES_MAP[intent] ?? TEMPLATES_MAP.banner;
+
   return `Você é o Diretor de Arte HTML — coder de precisão nível agência.
 
 COPY GERADO PELO COPYWRITER:
@@ -227,6 +225,7 @@ ${template}`;
 
 async function runCopywriterAgent(prompt, intent, model, ctxRules = "") {
   const system = (STRATEGIST_SYSTEM[intent] ?? STRATEGIST_SYSTEM.banner) + ctxRules;
+
   const res = await fetch(`${OLLAMA_URL}/api/generate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -255,11 +254,13 @@ function bannerTemplate(d) {
   const bgImg = d.bg_image_url
     ? `url('${d.bg_image_url}')`
     : `url('https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?w=1400&q=80')`;
+
   const FALLBACKS = [
     "https://images.unsplash.com/photo-1532187863486-abf9dbad1b69?w=400&q=80",
     "https://images.unsplash.com/photo-1581092160607-ee22621dd758?w=400&q=80",
     "https://images.unsplash.com/photo-1554475901-4538ddfbccc2?w=400&q=80",
   ];
+
   const imgs = [d.product_img_1 || FALLBACKS[0], d.product_img_2 || FALLBACKS[1], d.product_img_3 || FALLBACKS[2]];
   const badgeGrad = `linear-gradient(135deg,${badgeColor} 0%,${badgeColor}cc 100%)`;
   const badgeShadow = `0 8px 28px ${badgeColor}88,0 0 0 1px rgba(255,255,255,.12)`;
@@ -268,11 +269,10 @@ function bannerTemplate(d) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// EXPRESS APP — APIs antes do SSR
+// EXPRESS APP
 // ═══════════════════════════════════════════════════════════════
 const app = express();
 app.use(express.json({ limit: "4mb" }));
-app.use(express.static(path.join(__dirname, "dist/client")));
 
 // ── POST /api/chat ────────────────────────────────────────────
 app.post("/api/chat", async (req, res) => {
@@ -289,6 +289,7 @@ app.post("/api/chat", async (req, res) => {
 
   if (isVisual) {
     let copy;
+
     try {
       copy = await runCopywriterAgent(prompt, intent, model, ctxRules);
       console.log(`[Agent1] ${intent} copy:\n${copy.slice(0, 200)}...`);
@@ -296,6 +297,7 @@ app.post("/api/chat", async (req, res) => {
       console.error("[Agent1] ERRO:", err);
       return res.status(502).json({ error: `Agente 1 falhou: ${err}` });
     }
+
     systemPrompt = buildDesignerPrompt(intent, copy);
     userPrompt = `Renderize o HTML. Diretrizes de marca: ${prompt}`;
   } else {
@@ -351,7 +353,7 @@ app.post("/api/chat", async (req, res) => {
           res.end();
           return;
         }
-      } catch { }
+      } catch {}
     }
   }
 
@@ -376,6 +378,7 @@ app.post("/api/translate", async (req, res) => {
     });
 
     if (!r.ok) return res.json({ englishPrompt: prompt });
+
     const data = await r.json();
     return res.json({
       englishPrompt: (data.response ?? prompt).trim().replace(/^["']|["']$/g, ""),
@@ -450,120 +453,13 @@ Briefing: ${prompt}`;
 });
 
 // ═══════════════════════════════════════════════════════════════
-// ADAPTADOR EXPRESS -> FETCH API (TanStack Start SSR)
+// STATIC CLIENT + SPA FALLBACK
 // ═══════════════════════════════════════════════════════════════
-function getRawBody(req) {
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-    req.on("data", (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
-    req.on("end", () => resolve(Buffer.concat(chunks)));
-    req.on("error", reject);
-  });
-}
+app.use(express.static(path.join(__dirname, "dist/client"), { index: false }));
 
-async function nodeRequestToWebRequest(req) {
-  const origin = `http://${req.headers.host || `127.0.0.1:${PORT}`}`;
-  const url = new URL(req.originalUrl || req.url, origin);
-
-  const headers = new Headers();
-  for (const [key, value] of Object.entries(req.headers)) {
-    if (Array.isArray(value)) {
-      for (const v of value) headers.append(key, String(v));
-    } else if (value != null) {
-      headers.set(key, String(value));
-    }
-  }
-
-  const method = (req.method || "GET").toUpperCase();
-  const hasBody = !["GET", "HEAD"].includes(method);
-  const rawBody = hasBody ? await getRawBody(req) : undefined;
-
-  const init = {
-    method,
-    headers,
-  };
-
-  if (hasBody && rawBody && rawBody.length > 0) {
-    init.body = rawBody;
-    init.duplex = "half";
-  }
-
-  return new Request(url, init);
-}
-
-async function sendWebResponseToNode(webRes, res) {
-  res.status(webRes.status);
-
-  for (const [key, value] of webRes.headers.entries()) {
-    if (key.toLowerCase() === "set-cookie") {
-      const existing = res.getHeader("Set-Cookie");
-      if (!existing) {
-        res.setHeader("Set-Cookie", value);
-      } else {
-        const arr = Array.isArray(existing) ? existing : [existing];
-        res.setHeader("Set-Cookie", [...arr, value]);
-      }
-    } else {
-      res.setHeader(key, value);
-    }
-  }
-
-  if (!webRes.body) {
-    res.end();
-    return;
-  }
-
-  const reader = webRes.body.getReader();
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    res.write(Buffer.from(value));
-  }
-  res.end();
-}
-
-// ═══════════════════════════════════════════════════════════════
-// SSR TanStack Start — dist/server/server.js
-// ═══════════════════════════════════════════════════════════════
-const ssrPath = path.join(__dirname, "dist/server/server.js");
-
-try {
-  const ssrModule = await import(ssrPath);
-  const keys = Object.keys(ssrModule);
-  console.log(`[BrieFlow] dist/server/server.js carregado. Exports: ${keys.join(", ")}`);
-
-  const startHandler = ssrModule?.default;
-
-  if (typeof startHandler !== "function") {
-    console.error("[BrieFlow] SSR inválido: export default não é uma função.");
-    console.error(`[BrieFlow] Exports disponíveis: ${keys.join(", ")}`);
-
-    app.use((_req, res) => {
-      res
-        .status(503)
-        .send("BrieFlow online, mas o SSR do TanStack Start não foi carregado corretamente.");
-    });
-  } else {
-    app.use(async (req, res, next) => {
-      try {
-        const webReq = await nodeRequestToWebRequest(req);
-        const webRes = await startHandler(webReq);
-        await sendWebResponseToNode(webRes, res);
-      } catch (err) {
-        next(err);
-      }
-    });
-
-    console.log("[BrieFlow] ✓ TanStack Start SSR activo (default handler).");
-  }
-} catch (e) {
-  console.error("[BrieFlow] Erro ao carregar dist/server/server.js:", e.message);
-  app.use((_req, res) => {
-    res
-      .status(503)
-      .send("BrieFlow online, mas o bundle SSR não pôde ser carregado.");
-  });
-}
+app.get("*", (_req, res) => {
+  res.sendFile(path.join(__dirname, "dist/client/index.html"));
+});
 
 // ═══════════════════════════════════════════════════════════════
 // ERROR HANDLER
