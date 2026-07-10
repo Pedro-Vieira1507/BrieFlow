@@ -27,7 +27,7 @@ pm2 delete briflow || true
 pm2 delete briflow-api || true
 
 echo "===> Iniciando frontend SSR em 3000"
-PORT=3000 pm2 start dist/server/server.js --name briflow
+PORT=3000 pm2 start .output/server/index.mjs --name briflow
 
 echo "===> Iniciando API Express em 3001"
 PORT=3001 pm2 start server-express.mjs --name briflow-api
