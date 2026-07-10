@@ -1,20 +1,6 @@
-/**
- * BrieFlow — Production Server
- *
- * Stack  : TanStack Start + Vite
- * Deploy : Express + SPA fallback
- * Build  : dist/client/
- *
- * NOTA:
- * O bundle SSR atual em dist/server/server.js está a falhar no arranque
- * dentro de H3Event/srvx. Para colocar o BrieFlow estável em produção,
- * este servidor mantém todas as APIs no Express e serve o frontend
- * compilado de dist/client como SPA.
- */
-
 import express from "express";
 import path from "path";
-import { fileURLToPath } from "url";
+import { fileURLToPath, pathToFileURL } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
@@ -206,7 +192,6 @@ const TEMPLATES_MAP = {
 
 function buildDesignerPrompt(intent, strategicCopy) {
   const template = TEMPLATES_MAP[intent] ?? TEMPLATES_MAP.banner;
-
   return `Você é o Diretor de Arte HTML — coder de precisão nível agência.
 
 COPY GERADO PELO COPYWRITER:
@@ -268,13 +253,9 @@ function bannerTemplate(d) {
   return `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><meta name="viewport" content="width=1200"><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;900&display=swap" rel="stylesheet"><style>*{margin:0;padding:0;box-sizing:border-box}body{width:1200px;height:400px;overflow:hidden;font-family:'Montserrat',sans-serif}.banner{width:1200px;height:400px;background-image:${bgImg};background-size:cover;background-position:center;display:grid;grid-template-columns:420px 1fr 300px;position:relative;overflow:hidden}.banner::before{content:'';position:absolute;inset:0;background:linear-gradient(105deg,${bg1}f5 0%,${bg1}cc 35%,${bg1}88 55%,${bg2}66 75%,${bg2}cc 100%);z-index:0}.col-left{padding:36px 24px 36px 48px;display:flex;flex-direction:column;justify-content:center;position:relative;z-index:3}.brand-tag{display:inline-flex;align-items:center;gap:8px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.18);border-radius:20px;padding:4px 14px;margin-bottom:16px;width:fit-content}.brand-tag .dot{width:7px;height:7px;background:${dotColor};border-radius:50%}.brand-tag span{font-size:11px;font-weight:600;color:rgba(255,255,255,.75);letter-spacing:1.5px;text-transform:uppercase}.headline{font-size:34px;font-weight:900;color:#fff;line-height:1.1;letter-spacing:-.5px;margin-bottom:8px}.headline em{font-style:normal;color:${accentLight}}.subline{font-size:13px;font-weight:600;color:rgba(255,255,255,.6);margin-bottom:10px}.description{font-size:12px;color:rgba(255,255,255,.45);line-height:1.65;max-width:280px}.col-center{display:flex;align-items:flex-end;justify-content:center;padding:0 8px;position:relative;z-index:3;overflow:visible}.prod-float{position:relative;display:flex;align-items:flex-end;justify-content:center;flex-shrink:0}.prod-float--left{width:160px;height:340px;margin-right:-20px;transform:rotate(-4deg) translateY(8px);z-index:4}.prod-float--center{width:220px;height:380px;z-index:6}.prod-float--right{width:160px;height:340px;margin-left:-20px;transform:rotate(4deg) translateY(8px);z-index:4}.prod-img{width:100%;height:100%;object-fit:contain;mix-blend-mode:multiply;filter:drop-shadow(0 16px 32px rgba(0,0,0,.55))}.col-right{padding:36px 44px 36px 20px;display:flex;flex-direction:column;align-items:flex-end;justify-content:center;position:relative;z-index:3}.badge{background:${badgeGrad};border-radius:14px;padding:16px 22px;text-align:center;margin-bottom:14px;box-shadow:${badgeShadow};min-width:175px}.badge-value{font-size:44px;font-weight:900;color:#fff;line-height:1;letter-spacing:-2px}.badge-value sup{font-size:18px;vertical-align:super}.badge-label{font-size:10px;font-weight:600;color:rgba(255,255,255,.85);letter-spacing:2px;text-transform:uppercase;margin-top:2px}.validity{font-size:10px;color:rgba(255,255,255,.45);margin-bottom:12px;text-align:right}.cta{display:block;background:linear-gradient(135deg,${accent} 0%,${accent}cc 100%);color:#fff;font-family:'Montserrat',sans-serif;font-size:13px;font-weight:700;padding:12px 22px;border-radius:8px;text-decoration:none;text-align:center;width:100%}</style></head><body><div class="banner"><div class="col-left"><div class="brand-tag"><span class="dot"></span><span>${d.brand || "Marca"}</span></div><h1 class="headline">${d.headline}<br><em>${d.highlight || ""}</em></h1><p class="subline">${d.subline || ""}</p><p class="description">${d.description || ""}</p></div><div class="col-center"><div class="prod-float prod-float--left"><img src="${imgs[0]}" alt="Produto 1" class="prod-img" loading="lazy" onerror="this.style.opacity=0"/></div><div class="prod-float prod-float--center"><img src="${imgs[1]}" alt="Produto 2" class="prod-img" loading="lazy" onerror="this.style.opacity=0"/></div><div class="prod-float prod-float--right"><img src="${imgs[2]}" alt="Produto 3" class="prod-img" loading="lazy" onerror="this.style.opacity=0"/></div></div><div class="col-right"><div class="badge"><div class="badge-value">${d.badge_value || "3"}<sup>${d.badge_sup || ""}</sup></div><div class="badge-label">${d.badge_label || "de Desconto"}</div></div><p class="validity">⏱ ${d.validity || "Oferta por tempo limitado"}</p><a href="#" class="cta">${d.cta || "Saiba Mais"}</a></div></div></body></html>`;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// EXPRESS APP
-// ═══════════════════════════════════════════════════════════════
 const app = express();
 app.use(express.json({ limit: "4mb" }));
 
-// ── POST /api/chat ────────────────────────────────────────────
 app.post("/api/chat", async (req, res) => {
   const { prompt, intent = "text", model = DEFAULT_MODEL, reasoning } = req.body ?? {};
   if (!prompt) return res.status(400).json({ error: "Falta prompt" });
@@ -361,7 +342,6 @@ app.post("/api/chat", async (req, res) => {
   res.end();
 });
 
-// ── POST /api/translate ───────────────────────────────────────
 app.post("/api/translate", async (req, res) => {
   const { prompt, model = DEFAULT_MODEL } = req.body ?? {};
   if (!prompt) return res.json({ englishPrompt: prompt });
@@ -388,7 +368,6 @@ app.post("/api/translate", async (req, res) => {
   }
 });
 
-// ── POST /api/generate-banner (legado) ───────────────────────
 app.post("/api/generate-banner", async (req, res) => {
   const body = req.body || {};
   const prompt = body.prompt || "";
@@ -452,19 +431,125 @@ Briefing: ${prompt}`;
   res.send(bannerTemplate(d));
 });
 
-// ═══════════════════════════════════════════════════════════════
-// STATIC CLIENT + SPA FALLBACK
-// ═══════════════════════════════════════════════════════════════
-app.use(express.static(path.join(__dirname, "dist/client"), { index: false }));
+// Assets estáticos gerados pelo Vite
+app.use("/assets", express.static(path.join(__dirname, "dist/client/assets"), { index: false }));
 
-app.use((req, res, next) => {
-  if (req.path.startsWith("/api/")) return next();
-  res.sendFile(path.join(__dirname, "dist/client/index.html"));
+function getRawBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on("data", (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+    req.on("end", () => resolve(Buffer.concat(chunks)));
+    req.on("error", reject);
+  });
+}
+
+async function nodeRequestToWebRequest(req) {
+  const origin = `http://${req.headers.host || `127.0.0.1:${PORT}`}`;
+  const url = new URL(req.originalUrl || req.url, origin);
+
+  const headers = new Headers();
+  for (const [key, value] of Object.entries(req.headers)) {
+    if (Array.isArray(value)) {
+      for (const v of value) headers.append(key, String(v));
+    } else if (value != null) {
+      headers.set(key, String(value));
+    }
+  }
+
+  const method = (req.method || "GET").toUpperCase();
+  const hasBody = !["GET", "HEAD"].includes(method);
+  const rawBody = hasBody ? await getRawBody(req) : undefined;
+
+  const init = { method, headers };
+
+  if (hasBody && rawBody && rawBody.length > 0) {
+    init.body = rawBody;
+    init.duplex = "half";
+  }
+
+  return new Request(url, init);
+}
+
+async function sendWebResponseToNode(webRes, res) {
+  res.status(webRes.status);
+
+  for (const [key, value] of webRes.headers.entries()) {
+    if (key.toLowerCase() === "set-cookie") {
+      const existing = res.getHeader("Set-Cookie");
+      if (!existing) {
+        res.setHeader("Set-Cookie", value);
+      } else {
+        const arr = Array.isArray(existing) ? existing : [existing];
+        res.setHeader("Set-Cookie", [...arr, value]);
+      }
+    } else {
+      res.setHeader(key, value);
+    }
+  }
+
+  if (!webRes.body) {
+    res.end();
+    return;
+  }
+
+  const reader = webRes.body.getReader();
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    res.write(Buffer.from(value));
+  }
+  res.end();
+}
+
+const ssrPath = path.join(__dirname, "dist/server/server.js");
+
+let startHandler = null;
+
+try {
+  const ssrModule = await import(pathToFileURL(ssrPath).href);
+  const maybeDefault = ssrModule?.default;
+
+  if (typeof maybeDefault?.fetch === "function") {
+    startHandler = (request) => maybeDefault.fetch(request);
+    console.log("[BrieFlow] ✓ SSR handler carregado via default.fetch()");
+  } else if (typeof maybeDefault === "function") {
+    startHandler = (request) => maybeDefault(request);
+    console.log("[BrieFlow] ✓ SSR handler carregado via default()");
+  } else {
+    console.error("[BrieFlow] SSR inválido: export default sem função/fetch.");
+    console.error("[BrieFlow] Exports disponíveis:", Object.keys(ssrModule));
+  }
+} catch (e) {
+  console.error("[BrieFlow] Erro ao carregar dist/server/server.js:", e);
+}
+
+if (startHandler) {
+  app.use(async (req, res, next) => {
+    if (req.path.startsWith("/api/")) return next();
+    if (req.path.startsWith("/assets/")) return next();
+
+    try {
+      const webReq = await nodeRequestToWebRequest(req);
+      const webRes = await startHandler(webReq);
+      await sendWebResponseToNode(webRes, res);
+    } catch (err) {
+      next(err);
+    }
+  });
+} else {
+  app.use((req, res, next) => {
+    if (req.path.startsWith("/api/")) return next();
+    if (req.path.startsWith("/assets/")) return next();
+    res.status(503).send("BrieFlow online, mas o SSR do TanStack Start não foi carregado corretamente.");
+  });
+}
+
+app.use((err, _req, res, _next) => {
+  console.error("[BrieFlow] Erro não tratado:", err);
+  if (res.headersSent) return;
+  res.status(500).send("Erro interno do servidor.");
 });
 
-// ═══════════════════════════════════════════════════════════════
-// START
-// ═══════════════════════════════════════════════════════════════
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`\n[BrieFlow] ✓ Servidor em http://0.0.0.0:${PORT}`);
   console.log(`[BrieFlow] Ollama: ${OLLAMA_URL} | Modelo: ${DEFAULT_MODEL}\n`);
