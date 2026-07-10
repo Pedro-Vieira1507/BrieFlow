@@ -457,17 +457,8 @@ Briefing: ${prompt}`;
 // ═══════════════════════════════════════════════════════════════
 app.use(express.static(path.join(__dirname, "dist/client"), { index: false }));
 
-app.get("*", (_req, res) => {
+app.get("/{*splat}", (_req, res) => {
   res.sendFile(path.join(__dirname, "dist/client/index.html"));
-});
-
-// ═══════════════════════════════════════════════════════════════
-// ERROR HANDLER
-// ═══════════════════════════════════════════════════════════════
-app.use((err, _req, res, _next) => {
-  console.error("[BrieFlow] Erro não tratado:", err);
-  if (res.headersSent) return;
-  res.status(500).send("Erro interno do servidor.");
 });
 
 // ═══════════════════════════════════════════════════════════════
