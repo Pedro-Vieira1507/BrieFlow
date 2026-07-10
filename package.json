@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",
-    "start": "node .output/server/index.mjs",
+    "start": "node dist/server/server.js",
     "start:api": "node server-express.mjs"
   },
   "dependencies": {
@@ -47,6 +47,7 @@
     "cmdk": "^1.1.1",
     "date-fns": "^4.1.0",
     "embla-carousel-react": "^8.6.0",
+    "express": "^5.2.1",
     "html2pdf.js": "^0.14.0",
     "input-otp": "^1.4.2",
     "lucide-react": "^0.575.0",
