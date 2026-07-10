@@ -1,9 +1,6 @@
 import express from "express";
-import path from "path";
-import { fileURLToPath, pathToFileURL } from "url";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3001;
 const OLLAMA_URL = process.env.OLLAMA_URL ?? "http://127.0.0.1:11434";
 const DEFAULT_MODEL = process.env.OLLAMA_MODEL ?? "qwen2.5:14b";
 
@@ -146,7 +143,9 @@ async function searchOneImage(query) {
 }
 
 async function searchProductImages(queries) {
-  const timeout = new Promise((resolve) => setTimeout(() => resolve(queries.map(() => null)), 14000));
+  const timeout = new Promise((resolve) =>
+    setTimeout(() => resolve(queries.map(() => null)), 14000)
+  );
   return Promise.race([Promise.all(queries.map((q) => searchOneImage(q))), timeout]);
 }
 
@@ -246,7 +245,11 @@ function bannerTemplate(d) {
     "https://images.unsplash.com/photo-1554475901-4538ddfbccc2?w=400&q=80",
   ];
 
-  const imgs = [d.product_img_1 || FALLBACKS[0], d.product_img_2 || FALLBACKS[1], d.product_img_3 || FALLBACKS[2]];
+  const imgs = [
+    d.product_img_1 || FALLBACKS[0],
+    d.product_img_2 || FALLBACKS[1],
+    d.product_img_3 || FALLBACKS[2],
+  ];
   const badgeGrad = `linear-gradient(135deg,${badgeColor} 0%,${badgeColor}cc 100%)`;
   const badgeShadow = `0 8px 28px ${badgeColor}88,0 0 0 1px rgba(255,255,255,.12)`;
 
@@ -254,7 +257,26 @@ function bannerTemplate(d) {
 }
 
 const app = express();
+
 app.use(express.json({ limit: "4mb" }));
+
+app.use((req, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  if (req.method === "OPTIONS") return res.sendStatus(204);
+  next();
+});
+
+app.get("/health", (_req, res) => {
+  res.json({
+    ok: true,
+    service: "brieflow-api",
+    port: Number(PORT),
+    ollama: OLLAMA_URL,
+    model: DEFAULT_MODEL,
+  });
+});
 
 app.post("/api/chat", async (req, res) => {
   const { prompt, intent = "text", model = DEFAULT_MODEL, reasoning } = req.body ?? {};
@@ -310,36 +332,50 @@ app.post("/api/chat", async (req, res) => {
     return res.status(502).json({ error: `Ollama ${ollamaRes.status}: ${txt}` });
   }
 
-  res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
   res.setHeader("Connection", "keep-alive");
   res.setHeader("X-Accel-Buffering", "no");
-  res.flushHeaders();
+  res.flushHeaders?.();
 
   const decoder = new TextDecoder();
   let buf = "";
 
-  for await (const chunk of ollamaRes.body) {
-    buf += decoder.decode(chunk, { stream: true });
-    const lines = buf.split("\n");
-    buf = lines.pop() ?? "";
+  try {
+    for await (const chunk of ollamaRes.body) {
+      buf += decoder.decode(chunk, { stream: true });
+      const lines = buf.split("\n");
+      buf = lines.pop() ?? "";
 
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      try {
-        const j = JSON.parse(line);
-        if (j.response) res.write(`data: ${JSON.stringify(j.response)}\n\n`);
-        if (j.done) {
-          res.write("data: [DONE]\n\n");
-          res.end();
-          return;
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const j = JSON.parse(line);
+          if (j.response) res.write(`data: ${JSON.stringify(j.response)}\n\n`);
+          if (j.done) {
+            res.write("data: [DONE]\n\n");
+            res.end();
+            return;
+          }
+        } catch {
+          // ignora linhas inválidas do stream
         }
-      } catch {}
+      }
     }
-  }
 
-  res.write("data: [DONE]\n\n");
-  res.end();
+    res.write("data: [DONE]\n\n");
+    res.end();
+  } catch (err) {
+    console.error("[chat] stream error:", err);
+    if (!res.headersSent) {
+      return res.status(500).json({ error: "Falha ao processar o stream." });
+    }
+    try {
+      res.write(`data: ${JSON.stringify("[ERRO] Falha no stream.")}\n\n`);
+      res.write("data: [DONE]\n\n");
+    } catch {}
+    res.end();
+  }
 });
 
 app.post("/api/translate", async (req, res) => {
@@ -352,7 +388,9 @@ app.post("/api/translate", async (req, res) => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         model,
-        prompt: `Translate this marketing brief to concise vivid English for an image generator. Return ONLY the English prompt.\n\n${prompt}`,
+        prompt:
+          "Translate this marketing brief to concise vivid English for an image generator. Return ONLY the English prompt.\n\n" +
+          prompt,
         stream: false,
       }),
     });
@@ -395,6 +433,12 @@ Briefing: ${prompt}`;
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ model, prompt: schema, stream: false }),
     });
+
+    if (!or.ok) {
+      const txt = await or.text().catch(() => "");
+      return res.status(502).json({ error: `Ollama ${or.status}: ${txt}` });
+    }
+
     ollamaData = await or.json();
   } catch {
     return res.status(502).json({ error: "Ollama indisponível" });
@@ -427,130 +471,25 @@ Briefing: ${prompt}`;
     cta: fields.cta || "Ver Oferta",
   };
 
-  res.setHeader("Content-Type", "text/html;charset=utf-8");
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
   res.send(bannerTemplate(d));
 });
 
-// Assets estáticos gerados pelo Vite
-app.use("/assets", express.static(path.join(__dirname, "dist/client/assets"), { index: false }));
-
-function getRawBody(req) {
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-    req.on("data", (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
-    req.on("end", () => resolve(Buffer.concat(chunks)));
-    req.on("error", reject);
+app.use((req, res) => {
+  res.status(404).json({
+    error: "Rota não encontrada",
+    path: req.originalUrl,
+    available: ["/health", "/api/chat", "/api/translate", "/api/generate-banner"],
   });
-}
-
-async function nodeRequestToWebRequest(req) {
-  const origin = `http://${req.headers.host || `127.0.0.1:${PORT}`}`;
-  const url = new URL(req.originalUrl || req.url, origin);
-
-  const headers = new Headers();
-  for (const [key, value] of Object.entries(req.headers)) {
-    if (Array.isArray(value)) {
-      for (const v of value) headers.append(key, String(v));
-    } else if (value != null) {
-      headers.set(key, String(value));
-    }
-  }
-
-  const method = (req.method || "GET").toUpperCase();
-  const hasBody = !["GET", "HEAD"].includes(method);
-  const rawBody = hasBody ? await getRawBody(req) : undefined;
-
-  const init = { method, headers };
-
-  if (hasBody && rawBody && rawBody.length > 0) {
-    init.body = rawBody;
-    init.duplex = "half";
-  }
-
-  return new Request(url, init);
-}
-
-async function sendWebResponseToNode(webRes, res) {
-  res.status(webRes.status);
-
-  for (const [key, value] of webRes.headers.entries()) {
-    if (key.toLowerCase() === "set-cookie") {
-      const existing = res.getHeader("Set-Cookie");
-      if (!existing) {
-        res.setHeader("Set-Cookie", value);
-      } else {
-        const arr = Array.isArray(existing) ? existing : [existing];
-        res.setHeader("Set-Cookie", [...arr, value]);
-      }
-    } else {
-      res.setHeader(key, value);
-    }
-  }
-
-  if (!webRes.body) {
-    res.end();
-    return;
-  }
-
-  const reader = webRes.body.getReader();
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    res.write(Buffer.from(value));
-  }
-  res.end();
-}
-
-const ssrPath = path.join(__dirname, "dist/server/server.js");
-
-let startHandler = null;
-
-try {
-  const ssrModule = await import(pathToFileURL(ssrPath).href);
-  const maybeDefault = ssrModule?.default;
-
-  if (typeof maybeDefault?.fetch === "function") {
-    startHandler = (request) => maybeDefault.fetch(request);
-    console.log("[BrieFlow] ✓ SSR handler carregado via default.fetch()");
-  } else if (typeof maybeDefault === "function") {
-    startHandler = (request) => maybeDefault(request);
-    console.log("[BrieFlow] ✓ SSR handler carregado via default()");
-  } else {
-    console.error("[BrieFlow] SSR inválido: export default sem função/fetch.");
-    console.error("[BrieFlow] Exports disponíveis:", Object.keys(ssrModule));
-  }
-} catch (e) {
-  console.error("[BrieFlow] Erro ao carregar dist/server/server.js:", e);
-}
-
-if (startHandler) {
-  app.use(async (req, res, next) => {
-    if (req.path.startsWith("/api/")) return next();
-    if (req.path.startsWith("/assets/")) return next();
-
-    try {
-      const webReq = await nodeRequestToWebRequest(req);
-      const webRes = await startHandler(webReq);
-      await sendWebResponseToNode(webRes, res);
-    } catch (err) {
-      next(err);
-    }
-  });
-} else {
-  app.use((req, res, next) => {
-    if (req.path.startsWith("/api/")) return next();
-    if (req.path.startsWith("/assets/")) return next();
-    res.status(503).send("BrieFlow online, mas o SSR do TanStack Start não foi carregado corretamente.");
-  });
-}
+});
 
 app.use((err, _req, res, _next) => {
-  console.error("[BrieFlow] Erro não tratado:", err);
+  console.error("[BrieFlow API] Erro não tratado:", err);
   if (res.headersSent) return;
-  res.status(500).send("Erro interno do servidor.");
+  res.status(500).json({ error: "Erro interno do servidor." });
 });
 
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`\n[BrieFlow] ✓ Servidor em http://0.0.0.0:${PORT}`);
-  console.log(`[BrieFlow] Ollama: ${OLLAMA_URL} | Modelo: ${DEFAULT_MODEL}\n`);
+  console.log(`\n[BrieFlow API] ✓ Servidor em http://0.0.0.0:${PORT}`);
+  console.log(`[BrieFlow API] Ollama: ${OLLAMA_URL} | Modelo: ${DEFAULT_MODEL}\n`);
 });
