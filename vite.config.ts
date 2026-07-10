@@ -22,7 +22,7 @@ export default defineConfig({
     ssr: {
       build: {
         rollupOptions: {
-          input: "./server.ts",
+          input: "./src/server.ts",
         },
       },
     },
