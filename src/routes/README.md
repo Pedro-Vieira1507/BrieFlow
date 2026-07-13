@@ -19,3 +19,10 @@ is `src/routes/__root.tsx`.
 | `__root.tsx` | app shell — wraps every page; preserve `<Outlet />` |
 
 `routeTree.gen.ts` is auto-generated. Don't edit it by hand.
+
+## API Routes
+
+Files in `src/routes/api/` that are not meant to be route components should be
+prefixed with `-` (e.g., `-chat.ts`, `-translate.ts`) to exclude them from the
+route tree. These files are registered manually in `server-express.mjs` and
+provide server-side API endpoints.
