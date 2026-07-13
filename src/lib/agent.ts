@@ -32,26 +32,30 @@ export interface PreflightResult {
   reasoningSummary?: string;
 }
 
+const API_BASE = import.meta.env.PROD
+  ? "http://129.213.132.69:3001"
+  : "";
+
 /** Campos obrigatórios mínimos por intent */
 const REQUIRED_FIELDS: Record<Exclude<Intent, "image">, string[]> = {
-  email:     ["oferta ou produto", "público"],
-  banner:    ["produto ou oferta"],
+  email: ["oferta ou produto", "público"],
+  banner: ["produto ou oferta"],
   instagram: ["produto ou oferta"],
-  linkedin:  ["empresa", "objetivo"],
-  landing:   ["marca", "produto", "CTA"],
+  linkedin: ["empresa", "objetivo"],
+  landing: ["marca", "produto", "CTA"],
   datasheet: ["produto", "atributos principais"],
-  text:      [],
+  text: [],
 };
 
 /** Perguntas padrão para campos ausentes */
 const FIELD_QUESTIONS: Record<string, string> = {
-  "oferta ou produto":    "Qual é o produto ou oferta principal que devo destacar?",
-  "público":             "Quem é o público-alvo? (cargo, setor, principal dor)",
-  "produto ou oferta":   "Qual produto ou oferta principal devo comunicar?",
-  "marca":               "Qual é o nome da marca ou empresa?",
-  "empresa":             "Qual é o nome da empresa e o setor de atuação?",
-  "objetivo":            "Qual é o objetivo? (conversão, awareness, lançamento, engajamento)",
-  "CTA":                 "Qual é a ação esperada do utilizador? (ex: solicitar orçamento, baixar ebook)",
+  "oferta ou produto": "Qual é o produto ou oferta principal que devo destacar?",
+  "público": "Quem é o público-alvo? (cargo, setor, principal dor)",
+  "produto ou oferta": "Qual produto ou oferta principal devo comunicar?",
+  "marca": "Qual é o nome da marca ou empresa?",
+  "empresa": "Qual é o nome da empresa e o setor de atuação?",
+  "objetivo": "Qual é o objetivo? (conversão, awareness, lançamento, engajamento)",
+  "CTA": "Qual é a ação esperada do utilizador? (ex: solicitar orçamento, baixar ebook)",
   "atributos principais": "Quais são os 3 atributos técnicos mais importantes do produto?",
 };
 
@@ -74,43 +78,58 @@ export function detectMissingBriefing(
       case "oferta ou produto":
       case "produto ou oferta":
       case "produto": {
-        // Considera preenchido se: há noun (palavra longa), nome próprio, ou term de produto
-        const hasProduto = (
-          /\b(produto|serviço|app|software|plataforma|equipamento|solução|sistema|kit|pacote|oferta|promoção|desconto|\d+%|lançamento)\b/i.test(p) ||
+        const hasProduto =
+          /\b(produto|serviço|app|software|plataforma|equipamento|solução|sistema|kit|pacote|oferta|promoção|desconto|\d+%|lançamento)\b/i.test(
+            p,
+          ) ||
           /[A-Z][a-zA-Z]{2,}/.test(prompt) ||
-          wordCount >= 6
-        );
+          wordCount >= 6;
         if (!hasProduto) missing.push(field);
         break;
       }
+
       case "público": {
-        const hasPublico = (
-          /\b(público|persona|cliente|consumidor|profissional|empresa|b2b|b2c|gestor|diretor|ceo|cto|médico|engenheiro|estudante|equipe|time)\b/i.test(p) ||
-          wordCount >= 10
-        );
+        const hasPublico =
+          /\b(público|persona|cliente|consumidor|profissional|empresa|b2b|b2c|gestor|diretor|ceo|cto|médico|engenheiro|estudante|equipe|time)\b/i.test(
+            p,
+          ) ||
+          wordCount >= 10;
         if (!hasPublico) missing.push(field);
         break;
       }
+
       case "marca": {
         const hasMarca = /[A-Z][a-zA-Z]{1,}/.test(prompt) || wordCount >= 8;
         if (!hasMarca) missing.push(field);
         break;
       }
+
       case "empresa": {
-        const hasEmpresa = /[A-Z][a-zA-Z]{1,}/.test(prompt) || /\b(empresa|agência|startup|corp|ltd|ltda|inc)\b/i.test(p);
+        const hasEmpresa =
+          /[A-Z][a-zA-Z]{1,}/.test(prompt) ||
+          /\b(empresa|agência|startup|corp|ltd|ltda|inc)\b/i.test(p);
         if (!hasEmpresa) missing.push(field);
         break;
       }
+
       case "objetivo": {
-        const hasObj = /\b(objetivo|converter|vendas?|awareness|lançamento|engajamento|promover|divulgar|captar|gerar leads?)\b/i.test(p) || wordCount >= 8;
+        const hasObj =
+          /\b(objetivo|converter|vendas?|awareness|lançamento|engajamento|promover|divulgar|captar|gerar leads?)\b/i.test(
+            p,
+          ) || wordCount >= 8;
         if (!hasObj) missing.push(field);
         break;
       }
+
       case "CTA": {
-        const hasCta = /\b(comprar|compre|solicitar|solicite|baixar|baixe|acessar|acesse|cadastrar|contratar|saiba mais|clique|entre em contato|agendar|agende|demonstração|orçamento)\b/i.test(p) || wordCount >= 12;
+        const hasCta =
+          /\b(comprar|compre|solicitar|solicite|baixar|baixe|acessar|acesse|cadastrar|contratar|saiba mais|clique|entre em contato|agendar|agende|demonstração|orçamento)\b/i.test(
+            p,
+          ) || wordCount >= 12;
         if (!hasCta) missing.push(field);
         break;
       }
+
       case "atributos principais": {
         if (wordCount < 8) missing.push(field);
         break;
@@ -162,27 +181,36 @@ export function inheritIntentFromContext(
 
 export function detectCopyObjective(prompt: string): CopyObjective {
   const p = prompt.toLowerCase();
-  if (/\b(lan\u00e7amento|launch|novo|estreia|novidade)\b/.test(p)) return "lancamento";
-  if (/\b(comprar|compre|desconto|oferta|promo\u00e7\u00e3o|converter|convers\u00e3o|vendas?)\b/.test(p)) return "conversao";
-  if (/\b(awareness|marca|brand|reconhecimento|presen\u00e7a|institucional|apresentar)\b/.test(p)) return "awareness";
-  if (/\b(engajamento|curtida|compartilhar|intera\u00e7\u00e3o|comunidade|seguidores?)\b/.test(p)) return "engajamento";
+  if (/\b(lançamento|launch|novo|estreia|novidade)\b/.test(p)) return "lancamento";
+  if (/\b(comprar|compre|desconto|oferta|promoção|converter|conversão|vendas?)\b/.test(p))
+    return "conversao";
+  if (/\b(awareness|marca|brand|reconhecimento|presença|institucional|apresentar)\b/.test(p))
+    return "awareness";
+  if (/\b(engajamento|curtida|compartilhar|interação|comunidade|seguidores?)\b/.test(p))
+    return "engajamento";
   return "conversao";
 }
 
 export function detectFunnelStage(prompt: string, objective: CopyObjective): FunnelStage {
   const p = prompt.toLowerCase();
-  if (/\b(desconto|oferta|compre|black friday|promo\u00e7\u00e3o|cta|solicite|fechar|pedido)\b/.test(p)) return "conversion";
-  if (/\b(comparar|avaliar|benef\u00edcio|por que|vantagem|diferencial)\b/.test(p)) return "consideration";
-  if (/\b(awareness|marca|brand|conhecer|apresentar|introdu\u00e7\u00e3o|novidade|lan\u00e7amento)\b/.test(p)) return "awareness";
-  if (/\b(fideliza\u00e7\u00e3o|reten\u00e7\u00e3o|cliente|renova\u00e7\u00e3o|upsell|exclusivo para)\b/.test(p)) return "retention";
+  if (/\b(desconto|oferta|compre|black friday|promoção|cta|solicite|fechar|pedido)\b/.test(p))
+    return "conversion";
+  if (/\b(comparar|avaliar|benefício|por que|vantagem|diferencial)\b/.test(p))
+    return "consideration";
+  if (/\b(awareness|marca|brand|conhecer|apresentar|introdução|novidade|lançamento)\b/.test(p))
+    return "awareness";
+  if (/\b(fidelização|retenção|cliente|renovação|upsell|exclusivo para)\b/.test(p))
+    return "retention";
   return objective === "conversao" ? "conversion" : "awareness";
 }
 
 export function suggestTone(intent: Intent, objective: CopyObjective, prompt: string): string {
   const p = prompt.toLowerCase();
-  if (/\b(t\u00e9cnico|cient\u00edfico|laborat\u00f3rio|medical|pharma|b2b|enterprise|industrial)\b/.test(p)) return "t\u00e9cnico-profissional";
-  if (/\b(premium|luxo|exclusivo|sofisticado|alto padr\u00e3o)\b/.test(p)) return "premium";
-  if (/\b(descontra\u00eddo|informal|jovem|divertido|criativo|viral)\b/.test(p)) return "descontra\u00eddo";
+  if (/\b(técnico|científico|laboratório|medical|pharma|b2b|enterprise|industrial)\b/.test(p))
+    return "técnico-profissional";
+  if (/\b(premium|luxo|exclusivo|sofisticado|alto padrão)\b/.test(p)) return "premium";
+  if (/\b(descontraído|informal|jovem|divertido|criativo|viral)\b/.test(p))
+    return "descontraído";
   if (intent === "linkedin") return "profissional-B2B";
   if (objective === "lancamento") return "entusiasmado-aspiracional";
   if (objective === "conversao") return "direto-persuasivo";
@@ -199,37 +227,38 @@ export function buildReasoningSummary(params: {
   multipleOutputs?: boolean;
   outputCount?: number;
 }): string {
-  const { intent, objective, funnelStage, tone, missingFields, multipleOutputs, outputCount } = params;
+  const { intent, objective, funnelStage, tone, missingFields, multipleOutputs, outputCount } =
+    params;
 
   const intentLabels: Record<Intent, string> = {
-    email:     "E-mail HTML",
-    banner:    "Banner 1200×500",
+    email: "E-mail HTML",
+    banner: "Banner 1200×500",
     instagram: "Post Instagram 1080×1080",
-    linkedin:  "Post LinkedIn",
-    landing:   "Landing Page",
+    linkedin: "Post LinkedIn",
+    landing: "Landing Page",
     datasheet: "Ficha Técnica",
-    text:      "Texto / Copy",
-    image:     "Imagem",
+    text: "Texto / Copy",
+    image: "Imagem",
   };
 
   const objectiveLabels: Record<CopyObjective, string> = {
-    conversao:     "conversão",
-    awareness:     "awareness de marca",
-    lancamento:    "lançamento",
-    engajamento:   "engajamento",
+    conversao: "conversão",
+    awareness: "awareness de marca",
+    lancamento: "lançamento",
+    engajamento: "engajamento",
     institucional: "institucional",
   };
 
   const funnelLabels: Record<FunnelStage, string> = {
-    awareness:     "topo de funil",
+    awareness: "topo de funil",
     consideration: "meio de funil",
-    conversion:    "fundo de funil",
-    retention:     "retenção",
+    conversion: "fundo de funil",
+    retention: "retenção",
   };
 
   const lines: string[] = [];
   lines.push(`**Formato:** ${intentLabels[intent]}`);
-  lines.push(`**Objetivo:** ${objectiveLabels[objective]} \u00b7 **Funil:** ${funnelLabels[funnelStage]}`);
+  lines.push(`**Objetivo:** ${objectiveLabels[objective]} · **Funil:** ${funnelLabels[funnelStage]}`);
   lines.push(`**Tom:** ${tone}`);
 
   if (multipleOutputs && outputCount && outputCount > 1) {
@@ -237,7 +266,9 @@ export function buildReasoningSummary(params: {
   }
 
   if (missingFields.length > 0) {
-    lines.push(`\n⚠️ **Dados parciais:** ${missingFields.join(", ")}. Gerando com as informações disponíveis.`);
+    lines.push(
+      `\n⚠️ **Dados parciais:** ${missingFields.join(", ")}. Gerando com as informações disponíveis.`,
+    );
   }
 
   return lines.join("\n");
@@ -249,15 +280,19 @@ export function detectIntent(prompt: string): Intent {
   if (/\b(banner|banners)\b/.test(p)) return "banner";
   if (/\b(instagram|insta|post\s+ig|post\s+insta|reel)\b/.test(p)) return "instagram";
   if (/\b(linkedin|linked\s+in|post\s+linkedin)\b/.test(p)) return "linkedin";
-  if (/\b(imagem|imagens|foto|ilustra|art\s?work|logo|visual|criativo|gere\s+uma\s+imagem)\b/.test(p)) return "image";
+  if (/\b(imagem|imagens|foto|ilustra|art\s?work|logo|visual|criativo|gere\s+uma\s+imagem)\b/.test(p))
+    return "image";
   if (/\b(e-?mail|email|newsletter|html|marketing direto|disparo)\b/.test(p)) return "email";
-  if (/\b(ficha\s+t[eé]cnica|datasheet|especifica|spec|pdf|one[- ]?pager)\b/.test(p)) return "datasheet";
+  if (/\b(ficha\s+t[eé]cnica|datasheet|especifica|spec|pdf|one[- ]?pager)\b/.test(p))
+    return "datasheet";
   return "text";
 }
 
 export function detectMultipleOutputs(prompt: string): { multiple: boolean; count: number } {
-  const match = prompt.match(/\b([2-9]|\d{2})\s+(legendas?|opções?|versões?|variações?|alternativas?|copies?|textos?|headlines?)\b/i);
-  if (match) return { multiple: true, count: parseInt(match[1]) };
+  const match = prompt.match(
+    /\b([2-9]|\d{2})\s+(legendas?|opções?|versões?|variações?|alternativas?|copies?|textos?|headlines?)\b/i,
+  );
+  if (match) return { multiple: true, count: parseInt(match[1], 10) };
   return { multiple: false, count: 1 };
 }
 
@@ -279,14 +314,16 @@ export function callOllama(
   reasoning?: { objective: string; funnelStage: string; tone: string },
 ): () => void {
   const ctrl = new AbortController();
+
   if (signal) {
     signal.addEventListener("abort", () => ctrl.abort());
   }
 
-  (async () => {
+  void (async () => {
     let res: Response;
+
     try {
-      res = await fetch("/api/chat", {
+      res = await fetch(`${API_BASE}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt, intent, reasoning }),
@@ -313,17 +350,21 @@ export function callOllama(
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
+
         buf += dec.decode(value, { stream: true });
         const lines = buf.split("\n");
         buf = lines.pop() ?? "";
+
         for (const line of lines) {
           const trimmed = line.trim();
           if (!trimmed.startsWith("data:")) continue;
+
           const data = trimmed.slice(5).trim();
           if (data === "[DONE]") {
             callbacks.onDone(full);
             return;
           }
+
           try {
             const token = JSON.parse(data) as string;
             full += token;
@@ -367,7 +408,6 @@ export function extractHtml(text: string): string {
   const doctype = text.match(/<(!DOCTYPE\s+html|html)[\s\S]*<\/html>/i);
   if (doctype) return doctype[0].trim();
 
-  // Se não encontrou estrutura, retorna o texto todo (o LLM pode ter emitido HTML puro)
   return text.trim();
 }
 
@@ -387,17 +427,18 @@ export async function translatePromptForImage(
   ptPrompt: string,
   signal?: AbortSignal,
 ): Promise<string> {
-  const OLLAMA_URL = "/api/translate-image-prompt";
   try {
-    const res = await fetch(OLLAMA_URL, {
+    const res = await fetch(`${API_BASE}/api/translate-image-prompt`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ prompt: ptPrompt }),
       signal,
     });
+
     if (!res.ok) throw new Error(`translate endpoint: ${res.status}`);
-    const data = await res.json() as { translated?: string };
-    return data.translated ?? ptPrompt;
+
+    const data = (await res.json()) as { translated?: string; englishPrompt?: string };
+    return data.translated ?? data.englishPrompt ?? ptPrompt;
   } catch {
     return ptPrompt;
   }
