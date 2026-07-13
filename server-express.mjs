@@ -260,11 +260,18 @@ const app = express();
 
 app.use(express.json({ limit: "4mb" }));
 
+// CORS middleware
 app.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
   if (req.method === "OPTIONS") return res.sendStatus(204);
+  next();
+});
+
+// Logging middleware
+app.use((req, _res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
   next();
 });
 
@@ -406,6 +413,33 @@ app.post("/api/translate", async (req, res) => {
   }
 });
 
+// Alias para compatibilidade com código cliente anterior
+// Mantém compatibilidade com versões anteriores do agent.ts
+app.post("/api/translate-image-prompt", async (req, res) => {
+  const { prompt, model = DEFAULT_MODEL } = req.body ?? {};
+  if (!prompt) return res.json({ translated: prompt, englishPrompt: prompt });
+
+  try {
+    const r = await fetch(`${OLLAMA_URL}/api/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model,
+        prompt: "Translate this marketing brief to concise vivid English for an image generator. Return ONLY the English prompt.\n\n" + prompt,
+        stream: false,
+      }),
+    });
+
+    if (!r.ok) return res.json({ translated: prompt, englishPrompt: prompt });
+
+    const data = await r.json();
+    const translated = (data.response ?? prompt).trim().replace(/^["']|["']$/g, "");
+    return res.json({ translated, englishPrompt: translated });
+  } catch {
+    return res.json({ translated: prompt, englishPrompt: prompt });
+  }
+});
+
 app.post("/api/generate-banner", async (req, res) => {
   const body = req.body || {};
   const prompt = body.prompt || "";
@@ -479,6 +513,7 @@ app.use((req, res) => {
   res.status(404).json({
     error: "Rota não encontrada",
     path: req.originalUrl,
+    available: ["/health", "/api/chat", "/api/translate", "/api/translate-image-prompt", "/api/generate-banner"],
     available: ["/health", "/api/chat", "/api/translate", "/api/generate-banner"],
   });
 });
