@@ -32,7 +32,11 @@ export interface PreflightResult {
   reasoningSummary?: string;
 }
 
-const API_BASE = "";
+// Detecta automaticamente o ambiente e a URL da API
+const API_BASE =
+  typeof window !== "undefined" && window.location.hostname === "localhost"
+    ? "http://localhost:3001"
+    : "";
 
 /** Campos obrigatórios mínimos por intent */
 const REQUIRED_FIELDS: Record<Exclude<Intent, "image">, string[]> = {
@@ -426,7 +430,7 @@ export async function translatePromptForImage(
   signal?: AbortSignal,
 ): Promise<string> {
   try {
-    const res = await fetch(`${API_BASE}/api/translate-image-prompt`, {
+    const res = await fetch(`${API_BASE}/api/translate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ prompt: ptPrompt }),
