@@ -32,9 +32,7 @@ export interface PreflightResult {
   reasoningSummary?: string;
 }
 
-const API_BASE = import.meta.env.PROD
-  ? "http://129.213.132.69:3001"
-  : "";
+const API_BASE = "";
 
 /** Campos obrigatórios mínimos por intent */
 const REQUIRED_FIELDS: Record<Exclude<Intent, "image">, string[]> = {
