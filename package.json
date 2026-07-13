@@ -6,8 +6,10 @@
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",
-    "start": "node .output/server/index.mjs",
-    "start:api": "node server-express.mjs"
+    "build:dev": "vite build --mode development",
+    "preview": "vite preview",
+    "lint": "eslint .",
+    "format": "prettier --write ."
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
@@ -47,15 +49,12 @@
     "cmdk": "^1.1.1",
     "date-fns": "^4.1.0",
     "embla-carousel-react": "^8.6.0",
-    "express": "^5.2.1",
-    "html2pdf.js": "^0.14.0",
     "input-otp": "^1.4.2",
     "lucide-react": "^0.575.0",
     "react": "^19.2.0",
     "react-day-picker": "^9.14.0",
     "react-dom": "^19.2.0",
     "react-hook-form": "^7.71.2",
-    "react-markdown": "^10.1.0",
     "react-resizable-panels": "^4.6.5",
     "recharts": "^2.15.4",
     "sonner": "^2.0.7",
@@ -68,6 +67,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.32.0",
+    "@lovable.dev/vite-tanstack-config": "^2.7.1",
     "@types/node": "^22.16.5",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
@@ -82,6 +82,6 @@
     "prettier": "^3.7.3",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.56.1",
-    "vite": "^8.1.0"
+    "vite": "^8.0.16"
   }
 }
