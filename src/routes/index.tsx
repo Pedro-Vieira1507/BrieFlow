@@ -1,28 +1,14 @@
+// routes/index.tsx
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { ChatPanel, type ChatMessage } from "@/components/briefflow/ChatPanel";
 import { PageBuilder } from "@/components/briefflow/PageBuilder";
 import { sendToOllama, type ChatTurn } from "@/lib/ollama";
-import type { BuilderState } from "@/types/builder";
+import type { BuilderState, BrandContext } from "@/types/builder";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/")({
-  head: () => ({
-    meta: [
-      { title: "BrieFlow | Live Page Builder para Marketing" },
-      {
-        name: "description",
-        content:
-          "Crie campanhas de e-mail, posts e banners com IA e edite tudo ao vivo no BrieFlow.",
-      },
-      { property: "og:title", content: "BrieFlow" },
-      {
-        property: "og:description",
-        content: "Chat inteligente + Live Page Builder para marketing digital.",
-      },
-    ],
-  }),
   component: Home,
 });
 
@@ -33,40 +19,41 @@ function uid() {
 function Home() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [builder, setBuilder] = useState<BuilderState>({ type: "none" });
+  const [scores, setScores] = useState<{persuasion: number, clarity: number, seo: number} | undefined>();
   const [loading, setLoading] = useState(false);
+  
+  const [brandContext, setBrandContext] = useState<BrandContext>({
+    persona: "Profissionais e empresas",
+    tone: "Profissional, inovador e persuasivo",
+    framework: "AIDA (Atenção, Interesse, Desejo, Ação)",
+  });
 
-  const handleSend = async (text: string) => {
+  const handleSend = async (text: string, isHiddenAction = false) => {
     const userMsg: ChatMessage = { id: uid(), role: "user", content: text };
-    const nextMessages = [...messages, userMsg];
-    setMessages(nextMessages);
+    
+    const nextMessages = isHiddenAction ? messages : [...messages, userMsg];
+    
+    if (!isHiddenAction) setMessages(nextMessages);
     setLoading(true);
 
-    const history: ChatTurn[] = nextMessages.map((m) => ({
+    const history: ChatTurn[] = [...messages, userMsg].map((m) => ({
       role: m.role,
       content: m.content,
     }));
 
     try {
-      const res = await sendToOllama(history);
-      setMessages((prev) => [
-        ...prev,
-        { id: uid(), role: "assistant", content: res.chat },
-      ]);
-
+      const res = await sendToOllama(history, brandContext);
+      if (!isHiddenAction) {
+        setMessages((prev) => [...prev, { id: uid(), role: "assistant", content: res.chat }]);
+      }
       if (res.builder && res.builder.type !== "none") {
         setBuilder({ ...res.builder, imageSeed: Math.floor(Math.random() * 1_000_000) });
       }
+      if(res.scores) {
+          setScores(res.scores)
+      }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Erro desconhecido";
-      toast.error(`Falha ao contatar o servidor: ${msg}`);
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: uid(),
-          role: "assistant",
-          content: `Não consegui contatar o servidor Ollama. Verifique VITE_OLLAMA_API_URL. (${msg})`,
-        },
-      ]);
+      toast.error(`Falha ao conectar: ${err instanceof Error ? err.message : err}`);
     } finally {
       setLoading(false);
     }
@@ -75,19 +62,25 @@ function Home() {
   return (
     <>
       <main className="flex h-[100dvh] w-screen flex-col overflow-hidden lg:flex-row">
-        
         <section className="flex h-1/2 shrink-0 flex-col border-b lg:h-full lg:w-[420px] lg:border-b-0 lg:border-r">
-          <ChatPanel messages={messages} onSend={handleSend} loading={loading} />
-        </section>
-
-        {/* A classe min-w-0 aqui é o que resolve o overflow e permite o banner escalar */}
-        <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
-          <PageBuilder
-            state={builder}
-            onChange={(patch) => setBuilder((prev) => ({ ...prev, ...patch }))}
+          <ChatPanel 
+            messages={messages} 
+            onSend={(t) => handleSend(t, false)} 
+            loading={loading}
+            brandContext={brandContext}
+            setBrandContext={setBrandContext}
           />
         </section>
 
+        <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-background relative">
+          <PageBuilder
+            state={builder}
+            onChange={(patch) => setBuilder((prev) => ({ ...prev, ...patch }))}
+            loading={loading}
+            onRefine={(prompt) => handleSend(prompt, true)}
+            scores={scores}
+          />
+        </section>
       </main>
       <Toaster richColors position="top-right" />
     </>
