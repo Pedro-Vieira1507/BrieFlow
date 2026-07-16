@@ -1,9 +1,9 @@
+// components/briefflow/SocialPreview.tsx
 import { useMemo, useState } from "react";
 import { Editable } from "./Editable";
 import type { BuilderState } from "@/types/builder";
-import { Button } from "@/components/ui/button";
 import { buildPollinationsUrl } from "@/lib/pollinations";
-import { RefreshCw, Loader2 } from "lucide-react";
+import { Loader2, Heart, MessageCircle, Send, Bookmark, MoreHorizontal } from "lucide-react";
 
 interface Props {
   state: BuilderState;
@@ -12,90 +12,73 @@ interface Props {
 
 export function SocialPreview({ state, onChange }: Props) {
   const [loading, setLoading] = useState(true);
+
+  // Proporção de Instagram (4:5)
   const url = useMemo(
-    () =>
-      state.imagePrompt
-        ? buildPollinationsUrl(state.imagePrompt, { seed: state.imageSeed })
-        : null,
+    () => state.imagePrompt ? buildPollinationsUrl(state.imagePrompt, { width: 1080, height: 1350, seed: state.imageSeed }) : null,
     [state.imagePrompt, state.imageSeed],
   );
 
   return (
-    <div className="mx-auto max-w-xl space-y-4">
-      <div className="overflow-hidden rounded-2xl border bg-card shadow-elegant">
-        <div className="relative aspect-square w-full bg-muted">
+    <div className="mx-auto max-w-[400px]">
+      <div className="overflow-hidden rounded-[20px] border border-slate-200 bg-white shadow-xl dark:border-slate-800 dark:bg-black">
+        
+        {/* IG HEADER MOCK */}
+        <div className="flex items-center justify-between px-4 py-3">
+           <div className="flex items-center gap-3">
+              <div className="size-8 rounded-full bg-gradient-to-tr from-amber-400 to-fuchsia-600 flex items-center justify-center p-[2px]">
+                 <div className="size-full rounded-full bg-white dark:bg-black border border-transparent" />
+              </div>
+              <span className="text-[13px] font-semibold text-slate-900 dark:text-white tracking-tight">Sua Marca</span>
+           </div>
+           <MoreHorizontal className="size-5 text-slate-500" />
+        </div>
+
+        {/* IG IMAGE */}
+        <div className="relative aspect-[4/5] w-full bg-slate-100 dark:bg-slate-900 border-y border-slate-100 dark:border-slate-900">
           {url ? (
             <>
-              {loading && (
-                <div className="absolute inset-0 flex items-center justify-center bg-gradient-subtle">
-                  <Loader2 className="size-8 animate-spin text-brand" />
-                </div>
-              )}
-              <img
-                key={url}
-                src={url}
-                alt={state.imagePrompt}
-                onLoad={() => setLoading(false)}
-                onError={() => setLoading(false)}
-                className="h-full w-full object-cover"
-              />
-              {state.title && (
-                <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent p-6">
-                  <Editable
-                    as="h2"
-                    value={state.title}
-                    onChange={(v) => onChange({ title: v })}
-                    className="text-2xl font-bold text-white drop-shadow"
-                  />
-                  {state.subtitle && (
-                    <Editable
-                      as="p"
-                      value={state.subtitle}
-                      onChange={(v) => onChange({ subtitle: v })}
-                      className="mt-1 text-sm text-white/90 drop-shadow"
-                    />
-                  )}
-                </div>
-              )}
+              {loading && <div className="absolute inset-0 flex items-center justify-center"><Loader2 className="size-6 animate-spin text-slate-400" /></div>}
+              <img key={url} src={url} alt={state.imagePrompt} onLoad={() => setLoading(false)} className="h-full w-full object-cover" />
             </>
           ) : (
-            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-              Sem imagem
-            </div>
+            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">Gerando visual...</div>
           )}
         </div>
-        <div className="space-y-3 p-5">
-          <Editable
-            as="p"
-            multiline
-            value={state.caption ?? "Escreva a legenda do post..."}
-            onChange={(v) => onChange({ caption: v })}
-            className="text-sm leading-relaxed text-foreground"
-          />
+
+        {/* IG ACTIONS MOCK */}
+        <div className="flex items-center justify-between px-4 py-3">
+           <div className="flex items-center gap-4">
+              <Heart className="size-6 text-slate-900 dark:text-white" />
+              <MessageCircle className="size-6 text-slate-900 dark:text-white" />
+              <Send className="size-6 text-slate-900 dark:text-white" />
+           </div>
+           <Bookmark className="size-6 text-slate-900 dark:text-white" />
+        </div>
+
+        {/* IG CAPTION */}
+        <div className="px-4 pb-5">
+          <p className="text-[13px] font-semibold mb-1 text-slate-900 dark:text-white">1,245 curtidas</p>
+          <div className="text-[13px] text-slate-900 dark:text-slate-100">
+             <span className="font-semibold mr-2">Sua Marca</span>
+             <Editable
+               as="span"
+               multiline
+               value={state.caption ?? "Escreva a legenda incrível aqui..."}
+               onChange={(v) => onChange({ caption: v })}
+               className="leading-relaxed whitespace-pre-wrap break-words"
+             />
+          </div>
+          
           {state.hashtags && state.hashtags.length > 0 && (
             <Editable
               as="p"
               value={state.hashtags.join(" ")}
               onChange={(v) => onChange({ hashtags: v.split(/\s+/).filter(Boolean) })}
-              className="text-sm font-medium text-brand"
+              className="text-[13px] text-blue-900 dark:text-blue-400 mt-2 break-words"
             />
           )}
         </div>
-      </div>
-      <div className="flex items-center justify-between rounded-xl border bg-surface p-3">
-        <div className="min-w-0 flex-1 truncate pr-3 text-xs text-muted-foreground">
-          Prompt: <span className="text-foreground">{state.imagePrompt}</span>
-        </div>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => {
-            setLoading(true);
-            onChange({ imageSeed: Math.floor(Math.random() * 1_000_000) });
-          }}
-        >
-          <RefreshCw className="mr-2 size-4" /> Nova imagem
-        </Button>
       </div>
     </div>
   );

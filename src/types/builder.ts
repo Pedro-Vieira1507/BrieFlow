@@ -12,12 +12,15 @@ export interface BuilderState {
   hashtags?: string[];
   imageSeed?: number;
   campaignAssets?: CampaignAsset[]; 
-  // NOVO: Para o agente propor o plano antes de gerar
   discoveryPlan?: {
     detectedContext: string;
     missingInfo: string;
     proposedStrategy: string;
   };
+  // NOVO: Campos Premium para E-mail
+  preheader?: string;
+  emailHeroImagePrompt?: string;
+  footerText?: string;
 }
 
 export interface BrandContext {
@@ -28,7 +31,7 @@ export interface BrandContext {
 
 export interface CampaignAsset {
   id: string;
-  type: "email" | "social" | "banner" | "landing_page_copy" | "script";
+  type: "email" | "social" | "banner";
   content: BuilderState;
   status: "draft" | "review" | "approved"; 
 }
