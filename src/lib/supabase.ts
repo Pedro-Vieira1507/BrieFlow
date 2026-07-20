@@ -1,20 +1,22 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { BuilderState } from "@/types/builder";
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error("Faltam as variáveis de ambiente do Supabase (VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY).");
-}
+export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
-
-// ==========================================
-// FUNÇÕES DE ASSET MANAGEMENT
-// ==========================================
+export const supabase: SupabaseClient | null = isSupabaseConfigured
+  ? createClient(supabaseUrl!, supabaseAnonKey!)
+  : null;
 
 export async function saveAssetToLibrary(name: string, state: BuilderState) {
+  if (!supabase) {
+    throw new Error(
+      "Supabase não configurado. Defina VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY.",
+    );
+  }
+
   const { data, error } = await supabase
     .from("assets")
     .insert([
@@ -37,6 +39,12 @@ export async function saveAssetToLibrary(name: string, state: BuilderState) {
 }
 
 export async function getSavedAssets() {
+  if (!supabase) {
+    throw new Error(
+      "Supabase não configurado. Defina VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY.",
+    );
+  }
+
   const { data, error } = await supabase
     .from("assets")
     .select("*")

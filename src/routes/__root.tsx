@@ -77,17 +77,17 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "BrieFlow — Marketing com IA e Live Page Builder" },
+      { title: "BrieFlow — Agente de Peças de Marketing com IA" },
       {
         name: "description",
         content:
-          "Chat inteligente + editor visual para criar campanhas de e-mail, posts e banners.",
+          "Agente conversacional que analisa seu site e gera banners, posts e e-mails marketing premium no painel lateral.",
       },
-      { property: "og:title", content: "BrieFlow" },
+      { property: "og:title", content: "BrieFlow Creative" },
       {
         property: "og:description",
         content:
-          "Chat inteligente + editor visual para criar campanhas de e-mail, posts e banners.",
+          "Agente conversacional que analisa seu site e gera banners, posts e e-mails marketing premium no painel lateral.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },

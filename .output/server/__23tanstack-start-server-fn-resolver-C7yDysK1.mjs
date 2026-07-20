@@ -1,0 +1,16 @@
+//#region node_modules/.nitro/vite/services/ssr/assets/__23tanstack-start-server-fn-resolver-C7yDysK1.js
+var manifest = { "bdfb90ff62430c1f7b847286a83a77ca7732c6b5e9ba61a16f7e09e20458552b": {
+	functionName: "scrapeWebsite_createServerFn_handler",
+	importer: () => import("./_ssr/scrape-site-Cq6tX0gC.mjs")
+} };
+async function getServerFnById(id, access) {
+	const serverFnInfo = manifest[id];
+	if (!serverFnInfo) throw new Error("Server function info not found for " + id);
+	const fnModule = serverFnInfo.module ?? await serverFnInfo.importer();
+	if (!fnModule) throw new Error("Server function module not resolved for " + id);
+	const action = fnModule[serverFnInfo.functionName];
+	if (!action) throw new Error("Server function module export not resolved for serverFn ID: " + id);
+	return action;
+}
+//#endregion
+export { getServerFnById as t };

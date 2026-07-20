@@ -1,3 +1,4 @@
+// components/briefflow/Editable.tsx — Corrigido (não sobrescreve durante edição)
 import { useEffect, useRef } from "react";
 
 interface EditableProps {
@@ -20,8 +21,12 @@ export function Editable({
   const ref = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
-    if (ref.current && ref.current.innerText !== value) {
-      ref.current.innerText = value;
+    // CORREÇÃO: Só atualiza o DOM se o elemento NÃO estiver focado.
+    // Isso evita pular o cursor e perder a posição durante a edição.
+    if (ref.current && document.activeElement !== ref.current) {
+      if (ref.current.innerText !== value) {
+        ref.current.innerText = value;
+      }
     }
   }, [value]);
 
@@ -31,7 +36,12 @@ export function Editable({
       contentEditable
       suppressContentEditableWarning
       data-placeholder={placeholder}
-      onBlur={(e) => onChange((e.target as HTMLElement).innerText)}
+      onBlur={(e) => {
+        const newText = (e.target as HTMLElement).innerText;
+        if (newText !== value) {
+          onChange(newText);
+        }
+      }}
       onKeyDown={(e) => {
         if (!multiline && e.key === "Enter") {
           e.preventDefault();
