@@ -192,6 +192,217 @@ async function fetchWebsite(url: string): Promise<SiteBrandData> {
   }
 }
 
+// ─── TIPOS DO SCRAPER DE PRODUTO ──────────────────────────────────────────────
+
+export interface ScrapedProductData {
+  sku: string;
+  name: string | null;
+  price: string | null;
+  availability: string | null;
+  imageUrl: string | null;
+  productUrl: string | null;
+  found: boolean;
+  error?: string;
+}
+
+// Gera URLs candidatas para buscar o produto pelo SKU no e-commerce.
+function buildProductSearchUrls(siteUrl: string, sku: string): string[] {
+  try {
+    const origin = new URL(siteUrl).origin;
+    const enc = encodeURIComponent(sku.trim());
+    return [
+      `${origin}/busca?q=${enc}`,
+      `${origin}/search?q=${enc}`,
+      `${origin}/pesquisa?q=${enc}`,
+      `${origin}/?s=${enc}`,
+      `${origin}/catalogsearch/result/?q=${enc}`,
+      `${origin}/buscar/${enc}`,
+      `${origin}/produto/${enc}`,
+      `${origin}/p/${enc}`,
+    ];
+  } catch {
+    return [];
+  }
+}
+
+// Extrai dados do produto de uma página HTML usando Open Graph, JSON-LD e padrões comuns.
+function extractProductData(
+  html: string,
+  baseUrl: string,
+  sku: string,
+): Omit<ScrapedProductData, "sku" | "found" | "productUrl"> {
+  // ── Nome ──────────────────────────────────────────────────────────────
+  const ogTitleMatch =
+    html.match(/<meta[^>]+(?:property|name)=["']og:title["'][^>]+content=["']([^"']+)["']/i) ??
+    html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["']og:title["']/i);
+  const titleTagMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  const rawName = (ogTitleMatch?.[1] ?? titleTagMatch?.[1] ?? "").trim().replace(/\s+/g, " ");
+
+  // ── Imagem ────────────────────────────────────────────────────────────
+  const ogImageMatch =
+    html.match(/<meta[^>]+(?:property|name)=["']og:image["'][^>]+content=["']([^"']+)["']/i) ??
+    html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["']og:image["']/i);
+  let imageUrl = resolveUrl(ogImageMatch?.[1]?.trim() ?? null, baseUrl);
+
+  // ── JSON-LD (Schema.org Product) ──────────────────────────────────────
+  let price: string | null = null;
+  let availability: string | null = null;
+  let jsonLdName: string | null = null;
+
+  const jsonLdBlocks = html.match(
+    /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi,
+  );
+
+  if (jsonLdBlocks) {
+    for (const block of jsonLdBlocks) {
+      const content = block.replace(/<script[^>]*>|<\/script>/gi, "");
+      try {
+        const data = JSON.parse(content) as Record<string, unknown>;
+
+        // Suporta @graph (array de schemas)
+        const candidates: Record<string, unknown>[] = Array.isArray(data["@graph"])
+          ? (data["@graph"] as Record<string, unknown>[])
+          : [data];
+
+        for (const item of candidates) {
+          const type = String(item["@type"] ?? "").toLowerCase();
+          if (!type.includes("product")) continue;
+
+          if (!jsonLdName && item.name) {
+            jsonLdName = String(item.name).trim();
+          }
+
+          if (!imageUrl) {
+            const imgField = item.image;
+            const imgRaw = Array.isArray(imgField) ? String(imgField[0]) : String(imgField ?? "");
+            if (imgRaw) imageUrl = resolveUrl(imgRaw, baseUrl);
+          }
+
+          // Preço via offers
+          const offers = item.offers as Record<string, unknown> | Record<string, unknown>[] | undefined;
+          if (offers && !price) {
+            const firstOffer = Array.isArray(offers) ? offers[0] : offers;
+            if (firstOffer) {
+              const rawPrice = firstOffer.price ?? firstOffer.lowPrice;
+              if (rawPrice !== undefined) {
+                const numPrice = parseFloat(String(rawPrice));
+                price = isNaN(numPrice)
+                  ? null
+                  : `R$ ${numPrice.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`;
+              }
+
+              // Disponibilidade
+              const avail = String(firstOffer.availability ?? "").toLowerCase();
+              if (avail.includes("instock") || avail.includes("preorder")) {
+                availability = "Disponível";
+              } else if (avail.includes("outofstock")) {
+                availability = "Indisponível";
+              }
+            }
+          }
+
+          break;
+        }
+      } catch {
+        // segue para o próximo bloco
+      }
+    }
+  }
+
+  // Fallback de preço via padrão de texto "R$ 999,00" na página
+  if (!price) {
+    const priceMatch = html.match(
+      /R\$\s*[\d.,]+(?:\s*\/\s*(?:un|pc|peça|kit|cx))?/i,
+    );
+    if (priceMatch) price = priceMatch[0].replace(/\s+/g, " ").trim();
+  }
+
+  // Fallback de disponibilidade
+  if (!availability) {
+    if (/em estoque|disponível|add to cart|comprar/i.test(html)) {
+      availability = "Disponível";
+    } else if (/sem estoque|esgotado|indisponível|out of stock/i.test(html)) {
+      availability = "Indisponível";
+    }
+  }
+
+  const name = jsonLdName || rawName || null;
+
+  return { name, price, availability, imageUrl };
+}
+
+function resolveUrl(url: string | null, base: string): string | null {
+  if (!url || url.startsWith("data:")) return null;
+  try {
+    if (/^https?:\/\//i.test(url)) return url;
+    return new URL(url, new URL(base).origin).toString();
+  } catch {
+    return null;
+  }
+}
+
+// Faz scraping de múltiplas URLs candidatas para encontrar dados do produto.
+async function scrapeProductBySku(
+  siteUrl: string,
+  sku: string,
+): Promise<ScrapedProductData> {
+  const candidates = buildProductSearchUrls(siteUrl, sku);
+
+  for (const candidateUrl of candidates) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10_000);
+
+      const res = await fetch(candidateUrl, {
+        signal: controller.signal,
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (compatible; BrieFlowBot/1.0; +https://brieflow.app)",
+          Accept: "text/html,application/xhtml+xml",
+        },
+        redirect: "follow",
+      });
+
+      clearTimeout(timeout);
+
+      if (!res.ok) continue;
+      if (!(res.headers.get("content-type") ?? "").includes("text/html")) continue;
+
+      const html = await res.text();
+      if (!html || html.length < 100) continue;
+
+      // Verifica se o SKU aparece na página (evita resultados irrelevantes)
+      if (!html.toLowerCase().includes(sku.toLowerCase())) continue;
+
+      const extracted = extractProductData(html, candidateUrl, sku);
+
+      if (extracted.name || extracted.imageUrl) {
+        return {
+          sku,
+          ...extracted,
+          productUrl: candidateUrl,
+          found: true,
+        };
+      }
+    } catch {
+      // Tenta próxima URL
+    }
+  }
+
+  return {
+    sku,
+    name: null,
+    price: null,
+    availability: null,
+    imageUrl: null,
+    productUrl: null,
+    found: false,
+    error: `Produto com SKU "${sku}" não foi encontrado no site. Verifique a referência ou forneça a URL direta da página do produto.`,
+  };
+}
+
+// ─── SERVER FUNCTIONS ─────────────────────────────────────────────────────────
+
 export const scrapeWebsite = createServerFn({ method: "POST" })
   .validator((data: { url: string }) => {
     if (!data?.url || typeof data.url !== "string") {
@@ -203,4 +414,21 @@ export const scrapeWebsite = createServerFn({ method: "POST" })
   })
   .handler(async ({ data }): Promise<SiteBrandData> => {
     return fetchWebsite(data.url);
+  });
+
+// Nova Server Function — busca produto por SKU e retorna dados estruturados.
+export const scrapeProductBySkuFn = createServerFn({ method: "POST" })
+  .validator((data: { siteUrl: string; sku: string }) => {
+    if (!data?.siteUrl || typeof data.siteUrl !== "string") {
+      throw new Error("URL do site obrigatória.");
+    }
+    if (!data?.sku || typeof data.sku !== "string") {
+      throw new Error("SKU obrigatório.");
+    }
+    const normalized = normalizeUrl(data.siteUrl);
+    if (!normalized) throw new Error("URL do site inválida.");
+    return { siteUrl: normalized, sku: data.sku.trim() };
+  })
+  .handler(async ({ data }): Promise<ScrapedProductData> => {
+    return scrapeProductBySku(data.siteUrl, data.sku);
   });
