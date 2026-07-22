@@ -1,4 +1,4 @@
-// types/builder.ts — Corrigido (tipos aprimorados e específicos)
+// src/types/builder.ts
 export type BuilderType =
   | "email"
   | "social"
@@ -17,6 +17,8 @@ export interface DiscoveryPlan {
   offer?: string;
   channels?: string[];
   websiteUrl?: string;
+  // NOVO — SKU/referência do produto solicitado pelo agente
+  productSku?: string | null;
 }
 
 // Tipos específicos por peça para validação mais rigorosa
@@ -28,6 +30,9 @@ export interface BannerContent {
   cta: string;
   imagePrompt: string;
   imageSeed?: number;
+  // NOVO — imagem real do produto (substitui Pollinations quando disponível)
+  productImageUrl?: string | null;
+  productSku?: string | null;
 }
 
 export interface EmailContent {
@@ -41,6 +46,9 @@ export interface EmailContent {
   cta: string;
   footerText?: string;
   imageSeed?: number;
+  // NOVO
+  productImageUrl?: string | null;
+  productSku?: string | null;
 }
 
 export interface SocialContent {
@@ -50,6 +58,9 @@ export interface SocialContent {
   hashtags: string[];
   imagePrompt: string;
   imageSeed?: number;
+  // NOVO
+  productImageUrl?: string | null;
+  productSku?: string | null;
 }
 
 export type AssetContent = BannerContent | EmailContent | SocialContent;
@@ -71,6 +82,9 @@ export interface BuilderState {
   preheader?: string;
   emailHeroImagePrompt?: string;
   footerText?: string;
+  // NOVO — imagem real do produto
+  productImageUrl?: string | null;
+  productSku?: string | null;
 }
 
 export interface SiteBrandData {
@@ -111,6 +125,6 @@ export interface SavedAsset {
 // Scores de qualidade para validação do conteúdo gerado
 export interface QualityScores {
   persuasion: number; // 0-100: força persuasiva do copy
-  clarity: number;     // 0-100: clareza e legibilidade
-  seo: number;         // 0-100: otimização para busca (quando aplicável)
+  clarity:    number; // 0-100: clareza e legibilidade
+  seo:        number; // 0-100: otimização para busca (quando aplicável)
 }
