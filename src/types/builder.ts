@@ -17,11 +17,9 @@ export interface DiscoveryPlan {
   offer?: string;
   channels?: string[];
   websiteUrl?: string;
-  // NOVO — SKU/referência do produto solicitado pelo agente
   productSku?: string | null;
 }
 
-// Tipos específicos por peça para validação mais rigorosa
 export interface BannerContent {
   type: "banner";
   brandName?: string;
@@ -30,9 +28,12 @@ export interface BannerContent {
   cta: string;
   imagePrompt: string;
   imageSeed?: number;
-  // NOVO — imagem real do produto (substitui Pollinations quando disponível)
   productImageUrl?: string | null;
   productSku?: string | null;
+  // Campos de Design Dinâmico
+  themeColor?: string;
+  secondaryColor?: string;
+  layoutStyle?: "diagonal" | "split" | "minimalist" | "centered";
 }
 
 export interface EmailContent {
@@ -46,9 +47,11 @@ export interface EmailContent {
   cta: string;
   footerText?: string;
   imageSeed?: number;
-  // NOVO
   productImageUrl?: string | null;
   productSku?: string | null;
+  // Campos de Design Dinâmico
+  themeColor?: string;
+  secondaryColor?: string;
 }
 
 export interface SocialContent {
@@ -58,9 +61,11 @@ export interface SocialContent {
   hashtags: string[];
   imagePrompt: string;
   imageSeed?: number;
-  // NOVO
   productImageUrl?: string | null;
   productSku?: string | null;
+  // Campos de Design Dinâmico
+  themeColor?: string;
+  secondaryColor?: string;
 }
 
 export type AssetContent = BannerContent | EmailContent | SocialContent;
@@ -78,13 +83,15 @@ export interface BuilderState {
   campaignAssets?: CampaignAsset[];
   discoveryPlan?: DiscoveryPlan;
   brandName?: string;
-  // Premium e-mail fields
   preheader?: string;
   emailHeroImagePrompt?: string;
   footerText?: string;
-  // NOVO — imagem real do produto
   productImageUrl?: string | null;
   productSku?: string | null;
+  // Campos de Design Dinâmico Gerais
+  themeColor?: string;
+  secondaryColor?: string;
+  layoutStyle?: "diagonal" | "split" | "minimalist" | "centered";
 }
 
 export interface SiteBrandData {
@@ -96,6 +103,7 @@ export interface SiteBrandData {
   bodySnippet: string;
   ogImage?: string;
   keywords?: string;
+  colors?: string[]; // Cores extraídas do site
 }
 
 export interface BrandContext {
@@ -122,9 +130,8 @@ export interface SavedAsset {
   content: string;
 }
 
-// Scores de qualidade para validação do conteúdo gerado
 export interface QualityScores {
-  persuasion: number; // 0-100: força persuasiva do copy
-  clarity:    number; // 0-100: clareza e legibilidade
-  seo:        number; // 0-100: otimização para busca (quando aplicável)
+  persuasion: number;
+  clarity: number;
+  seo: number;
 }

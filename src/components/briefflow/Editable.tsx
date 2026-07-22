@@ -1,5 +1,5 @@
-// components/briefflow/Editable.tsx — Corrigido (não sobrescreve durante edição)
 import { useEffect, useRef } from "react";
+import { Edit2 } from "lucide-react";
 
 interface EditableProps {
   value: string;
@@ -21,34 +21,37 @@ export function Editable({
   const ref = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
-    // CORREÇÃO: Só atualiza o DOM se o elemento NÃO estiver focado.
-    // Isso evita pular o cursor e perder a posição durante a edição.
     if (ref.current && document.activeElement !== ref.current) {
-      if (ref.current.innerText !== value) {
-        ref.current.innerText = value;
+      // Impede null ou string vazia quebrando marca (Fallback de segurança)
+      const safeValue = value?.trim() || "Sua Marca";
+      if (ref.current.innerText !== safeValue) {
+        ref.current.innerText = safeValue;
       }
     }
   }, [value]);
 
   return (
-    <Tag
-      ref={ref as React.RefObject<HTMLHeadingElement>}
-      contentEditable
-      suppressContentEditableWarning
-      data-placeholder={placeholder}
-      onBlur={(e) => {
-        const newText = (e.target as HTMLElement).innerText;
-        if (newText !== value) {
-          onChange(newText);
-        }
-      }}
-      onKeyDown={(e) => {
-        if (!multiline && e.key === "Enter") {
-          e.preventDefault();
-          (e.target as HTMLElement).blur();
-        }
-      }}
-      className={`editable-hover focus:outline-brand focus:outline-2 focus:outline-dashed focus:bg-brand/5 ${className ?? ""}`}
-    />
+    <div className="relative group/editable inline-block w-full">
+      <Tag
+        ref={ref as React.RefObject<HTMLHeadingElement>}
+        contentEditable
+        suppressContentEditableWarning
+        data-placeholder={placeholder}
+        onBlur={(e) => {
+          const newText = (e.target as HTMLElement).innerText;
+          if (newText !== value) onChange(newText);
+        }}
+        onKeyDown={(e) => {
+          if (!multiline && e.key === "Enter") {
+            e.preventDefault();
+            (e.target as HTMLElement).blur();
+          }
+        }}
+        className={`editable-hover focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:bg-white/5 rounded-md px-1 -ml-1 transition-all ${className ?? ""}`}
+      />
+      <div className="absolute -right-6 top-1/2 -translate-y-1/2 opacity-0 group-hover/editable:opacity-100 transition-opacity pointer-events-none text-white/30">
+        <Edit2 className="size-3.5" />
+      </div>
+    </div>
   );
 }
