@@ -4,11 +4,11 @@ import { t as getServerFnById } from "../__23tanstack-start-server-fn-resolver-C
 import { c as createServerFn, i as TSS_SERVER_FUNCTION } from "./createServerFn-CIHAFgYl.mjs";
 import { n as clsx, t as cva } from "../_libs/class-variance-authority+clsx.mjs";
 import { t as twMerge } from "../_libs/tailwind-merge.mjs";
-import { a as RefreshCw, c as LoaderCircle, d as Ellipsis, f as ChartNoAxesColumnIncreasing, i as Save, l as Heart, m as ArrowRight, n as Sparkles, o as Moon, p as Bookmark, r as Send, s as MessageCircle, t as Sun, u as Globe } from "../_libs/lucide-react.mjs";
+import { a as RefreshCw, c as LoaderCircle, d as Ellipsis, f as CircleAlert, h as ArrowRight, i as Save, l as Heart, m as Bookmark, n as Sparkles, o as Moon, p as ChartNoAxesColumnIncreasing, r as Send, s as MessageCircle, t as Sun, u as Globe } from "../_libs/lucide-react.mjs";
 import { n as toast, t as Toaster } from "../_libs/sonner.mjs";
 import { t as createClient } from "../_libs/supabase__supabase-js.mjs";
 import { i as Trigger, n as List, r as Root2, t as Content } from "../_libs/radix-ui__react-tabs.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/routes-uO2bw8dF.js
+//#region node_modules/.nitro/vite/services/ssr/assets/routes-Di6-d5e7.js
 var import_react = /* @__PURE__ */ __toESM(require_react());
 var import_jsx_runtime = require_jsx_runtime();
 function cn(...inputs) {
@@ -63,13 +63,54 @@ var LOADING_MESSAGES = [
 	"Preparando a próxima pergunta..."
 ];
 var SUGGESTIONS = [
-	"Quero um banner e um post para o lançamento do meu produto: https://",
-	"Preciso de um e-mail marketing de reativação de clientes.",
-	"Monte uma campanha completa (banner + e-mail + post) a partir do meu site."
+	"Quero um banner e um post para o lançamento do meu produto: https://exemplo.com",
+	"Preciso de um e-mail marketing de reativação de clientes inativos.",
+	"Monte uma campanha completa (banner + e-mail + post) a partir do meu site: https://exemplo.com",
+	"Crie um banner de Black Friday com 40% de desconto para minha loja."
 ];
-var formatMarkdown = (text) => {
-	return /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { dangerouslySetInnerHTML: { __html: text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>").replace(/\*(.*?)\*/g, "<em>$1</em>").replace(/\n/g, "<br/>") } });
-};
+function renderMarkdown(text) {
+	const parts = [];
+	let remaining = text;
+	let key = 0;
+	while (remaining.length > 0) {
+		const boldMatch = remaining.match(/\*\*(.+?)\*\*/);
+		const italicMatch = remaining.match(/\*(.+?)\*/);
+		const newlineIdx = remaining.indexOf("\n");
+		let nextMatch = null;
+		if (boldMatch && boldMatch.index !== void 0) nextMatch = {
+			idx: boldMatch.index,
+			len: boldMatch[0].length,
+			type: "bold",
+			text: boldMatch[1]
+		};
+		if (italicMatch && italicMatch.index !== void 0) {
+			if (!nextMatch || italicMatch.index < nextMatch.idx) nextMatch = {
+				idx: italicMatch.index,
+				len: italicMatch[0].length,
+				type: "italic",
+				text: italicMatch[1]
+			};
+		}
+		if (newlineIdx !== -1) {
+			if (!nextMatch || newlineIdx < nextMatch.idx) nextMatch = {
+				idx: newlineIdx,
+				len: 1,
+				type: "newline",
+				text: ""
+			};
+		}
+		if (!nextMatch) {
+			parts.push(/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: remaining }, key++));
+			break;
+		}
+		if (nextMatch.idx > 0) parts.push(/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: remaining.slice(0, nextMatch.idx) }, key++));
+		if (nextMatch.type === "bold") parts.push(/* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: nextMatch.text }, key++));
+		else if (nextMatch.type === "italic") parts.push(/* @__PURE__ */ (0, import_jsx_runtime.jsx)("em", { children: nextMatch.text }, key++));
+		else if (nextMatch.type === "newline") parts.push(/* @__PURE__ */ (0, import_jsx_runtime.jsx)("br", {}, key++));
+		remaining = remaining.slice(nextMatch.idx + nextMatch.len);
+	}
+	return /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: parts });
+}
 function ChatPanel({ messages, onSend, loading, brandContext, scraping }) {
 	const [input, setInput] = (0, import_react.useState)("");
 	const bottomRef = (0, import_react.useRef)(null);
@@ -104,6 +145,7 @@ function ChatPanel({ messages, onSend, loading, brandContext, scraping }) {
 		onSend(t);
 		setInput("");
 	};
+	const isLastAssistantLoading = loading && messages.length > 0 && messages[messages.length - 1].role === "assistant" && messages[messages.length - 1].content === "";
 	return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 		className: "flex h-full flex-col bg-surface dark:bg-[#09090b] transition-colors",
 		children: [
@@ -119,7 +161,7 @@ function ChatPanel({ messages, onSend, loading, brandContext, scraping }) {
 						children: "BrieFlow Creative"
 					}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
 						className: "text-xs font-medium text-slate-500 dark:text-slate-400",
-						children: "Agente de peças de marketing"
+						children: "Agente de peças de marketing premium"
 					})] })]
 				}), messages.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 					className: "flex flex-col items-end gap-1",
@@ -174,7 +216,7 @@ function ChatPanel({ messages, onSend, loading, brandContext, scraping }) {
 							}),
 							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
 								className: "text-sm text-muted-foreground mb-8 max-w-sm",
-								children: "Sou seu diretor de criação. Conte o objetivo, cole o site da marca e eu monto banners, posts e e-mails no painel ao lado."
+								children: "Sou seu diretor de criação. Conte o objetivo, cole o site da marca e eu monto banners, posts e e-mails com qualidade de agência no painel ao lado."
 							}),
 							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
 								className: "flex flex-col gap-3 w-full max-w-md",
@@ -194,7 +236,7 @@ function ChatPanel({ messages, onSend, loading, brandContext, scraping }) {
 						className: m.role === "user" ? "flex justify-end" : "flex justify-start",
 						children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
 							className: m.role === "user" ? "max-w-[85%] rounded-2xl rounded-br-sm bg-slate-900 dark:bg-slate-100 px-5 py-3 text-[14px] leading-relaxed text-white dark:text-slate-900 shadow-md" : "max-w-[85%] rounded-2xl rounded-bl-sm bg-white dark:bg-slate-800 px-5 py-4 text-[14px] leading-relaxed text-slate-800 dark:text-slate-200 border border-slate-200/50 dark:border-slate-700/50 shadow-sm",
-							children: formatMarkdown(m.content)
+							children: renderMarkdown(m.content)
 						})
 					}, m.id)),
 					scraping && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
@@ -207,7 +249,7 @@ function ChatPanel({ messages, onSend, loading, brandContext, scraping }) {
 							})]
 						})
 					}),
-					loading && messages.length > 0 && messages[messages.length - 1].role === "assistant" && messages[messages.length - 1].content === "" && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+					isLastAssistantLoading && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
 						className: "flex justify-start animate-in fade-in",
 						children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 							className: "flex items-center gap-3 rounded-2xl rounded-bl-sm bg-white dark:bg-slate-800 px-5 py-3 border border-slate-200/50 dark:border-slate-700/50 shadow-sm",
@@ -263,7 +305,7 @@ function ChatPanel({ messages, onSend, loading, brandContext, scraping }) {
 					})]
 				}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
 					className: "mt-2 text-center text-[10px] text-muted-foreground",
-					children: "Dica: cole uma URL e o agente acessa o site para extrair identidade da marca."
+					children: "Dica: cole uma URL e o agente acessa o site para extrair a identidade da marca."
 				})]
 			})
 		]
@@ -272,14 +314,19 @@ function ChatPanel({ messages, onSend, loading, brandContext, scraping }) {
 function Editable({ value, onChange, as: Tag = "p", className, multiline = false, placeholder }) {
 	const ref = (0, import_react.useRef)(null);
 	(0, import_react.useEffect)(() => {
-		if (ref.current && ref.current.innerText !== value) ref.current.innerText = value;
+		if (ref.current && document.activeElement !== ref.current) {
+			if (ref.current.innerText !== value) ref.current.innerText = value;
+		}
 	}, [value]);
 	return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Tag, {
 		ref,
 		contentEditable: true,
 		suppressContentEditableWarning: true,
 		"data-placeholder": placeholder,
-		onBlur: (e) => onChange(e.target.innerText),
+		onBlur: (e) => {
+			const newText = e.target.innerText;
+			if (newText !== value) onChange(newText);
+		},
 		onKeyDown: (e) => {
 			if (!multiline && e.key === "Enter") {
 				e.preventDefault();
@@ -289,9 +336,12 @@ function Editable({ value, onChange, as: Tag = "p", className, multiline = false
 		className: `editable-hover focus:outline-brand focus:outline-2 focus:outline-dashed focus:bg-brand/5 ${className ?? ""}`
 	});
 }
+var urlCache = /* @__PURE__ */ new Map();
 function buildPollinationsUrl(prompt, opts = {}) {
 	const { width = 1080, height = 1080, seed } = opts;
-	const fullPrompt = `${prompt.trim()}, premium commercial photography, cinematic lighting, high-end advertising aesthetic, ultra sharp, 8k, professional brand campaign, no text, no watermark, no logo`;
+	const fullPrompt = `${prompt.trim()}, premium commercial photography, cinematic dramatic lighting, high-end advertising aesthetic, editorial quality, ultra sharp focus, depth of field, professional color grading, 8k, award-winning brand campaign, no text, no watermark, no logo, no typography`;
+	const cacheKey = `${fullPrompt}|${width}|${height}|${seed ?? "none"}`;
+	if (urlCache.has(cacheKey)) return urlCache.get(cacheKey);
 	const encoded = encodeURIComponent(fullPrompt);
 	const params = new URLSearchParams({
 		model: "flux",
@@ -302,19 +352,54 @@ function buildPollinationsUrl(prompt, opts = {}) {
 		height: String(height)
 	});
 	if (seed !== void 0) params.set("seed", String(seed));
+	const url = `https://image.pollinations.ai/prompt/${encoded}?${params.toString()}`;
+	urlCache.set(cacheKey, url);
+	return url;
+}
+function buildFallbackUrl(prompt, opts = {}) {
+	const { width = 1080, height = 1080, seed } = opts;
+	const fullPrompt = `${prompt.trim()}, premium commercial photography, cinematic lighting, high-end advertising, ultra sharp, 8k, no text, no watermark`;
+	const encoded = encodeURIComponent(fullPrompt);
+	const params = new URLSearchParams({
+		model: "turbo",
+		enhance: "true",
+		nologo: "true",
+		width: String(width),
+		height: String(height)
+	});
+	if (seed !== void 0) params.set("seed", String(seed));
 	return `https://image.pollinations.ai/prompt/${encoded}?${params.toString()}`;
 }
 function EmailPreview({ state, onChange }) {
 	const [loading, setLoading] = (0, import_react.useState)(true);
+	const [error, setError] = (0, import_react.useState)(false);
+	const [useFallback, setUseFallback] = (0, import_react.useState)(false);
 	const paragraphs = (state.body ?? "").split(/\n\n+/).filter(Boolean);
-	const heroUrl = (0, import_react.useMemo)(() => state.emailHeroImagePrompt ? buildPollinationsUrl(state.emailHeroImagePrompt, {
+	const prompt = state.emailHeroImagePrompt || "";
+	const heroUrl = (0, import_react.useMemo)(() => prompt ? useFallback ? buildFallbackUrl(prompt, {
 		width: 1200,
 		height: 600,
 		seed: state.imageSeed
-	}) : null, [state.emailHeroImagePrompt, state.imageSeed]);
+	}) : buildPollinationsUrl(prompt, {
+		width: 1200,
+		height: 600,
+		seed: state.imageSeed
+	}) : null, [
+		prompt,
+		state.imageSeed,
+		useFallback
+	]);
 	(0, import_react.useEffect)(() => {
-		if (heroUrl) setLoading(true);
+		if (heroUrl) {
+			setLoading(true);
+			setError(false);
+		}
 	}, [heroUrl]);
+	const handleImageError = () => {
+		setLoading(false);
+		if (!useFallback) setUseFallback(true);
+		else setError(true);
+	};
 	return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 		className: "mx-auto max-w-2xl overflow-hidden rounded-xl border border-slate-200/60 bg-white shadow-2xl dark:border-slate-800 dark:bg-[#0c0c0e]",
 		children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
@@ -348,12 +433,12 @@ function EmailPreview({ state, onChange }) {
 				children: [
 					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
 						className: "flex flex-col items-center justify-center py-8",
-						children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+						children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 							className: "text-2xl font-display font-black tracking-tighter text-slate-900 dark:text-white uppercase",
-							children: "Sua Marca."
+							children: [state.brandName || "Sua Marca", "."]
 						})
 					}),
-					heroUrl && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+					heroUrl && !error ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 						className: "relative aspect-[2/1] w-full bg-slate-100 dark:bg-slate-900",
 						children: [loading && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
 							className: "absolute inset-0 flex items-center justify-center",
@@ -362,9 +447,30 @@ function EmailPreview({ state, onChange }) {
 							src: heroUrl,
 							alt: "Hero",
 							onLoad: () => setLoading(false),
+							onError: handleImageError,
 							className: "h-full w-full object-cover"
-						})]
-					}),
+						}, heroUrl)]
+					}) : error ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+						className: "aspect-[2/1] w-full bg-slate-100 dark:bg-slate-900 flex flex-col items-center justify-center gap-2 text-slate-400",
+						children: [
+							/* @__PURE__ */ (0, import_jsx_runtime.jsx)(CircleAlert, { className: "size-6" }),
+							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+								className: "text-xs",
+								children: "Falha ao carregar imagem."
+							}),
+							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)(Button, {
+								size: "sm",
+								variant: "ghost",
+								onClick: () => {
+									setUseFallback(false);
+									setError(false);
+									setLoading(true);
+									onChange({ imageSeed: Math.floor(Math.random() * 1e6) });
+								},
+								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(RefreshCw, { className: "mr-1 size-3" }), " Retry"]
+							})
+						]
+					}) : null,
 					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 						className: "space-y-6 px-8 py-10 md:px-12",
 						children: [
@@ -426,14 +532,33 @@ function EmailPreview({ state, onChange }) {
 }
 function SocialPreview({ state, onChange }) {
 	const [loading, setLoading] = (0, import_react.useState)(true);
-	const url = (0, import_react.useMemo)(() => state.imagePrompt ? buildPollinationsUrl(state.imagePrompt, {
+	const [error, setError] = (0, import_react.useState)(false);
+	const [useFallback, setUseFallback] = (0, import_react.useState)(false);
+	const prompt = state.imagePrompt || "";
+	const url = (0, import_react.useMemo)(() => prompt ? useFallback ? buildFallbackUrl(prompt, {
 		width: 1080,
 		height: 1350,
 		seed: state.imageSeed
-	}) : null, [state.imagePrompt, state.imageSeed]);
+	}) : buildPollinationsUrl(prompt, {
+		width: 1080,
+		height: 1350,
+		seed: state.imageSeed
+	}) : null, [
+		prompt,
+		state.imageSeed,
+		useFallback
+	]);
 	(0, import_react.useEffect)(() => {
-		if (url) setLoading(true);
+		if (url) {
+			setLoading(true);
+			setError(false);
+		}
 	}, [url]);
+	const handleImageError = () => {
+		setLoading(false);
+		if (!useFallback) setUseFallback(true);
+		else setError(true);
+	};
 	return /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
 		className: "mx-auto max-w-[400px]",
 		children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
@@ -448,21 +573,42 @@ function SocialPreview({ state, onChange }) {
 							children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "size-full rounded-full bg-white dark:bg-black border border-transparent" })
 						}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
 							className: "text-[13px] font-semibold text-slate-900 dark:text-white tracking-tight",
-							children: "Sua Marca"
+							children: state.brandName || "Sua Marca"
 						})]
 					}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Ellipsis, { className: "size-5 text-slate-500" })]
 				}),
 				/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
 					className: "relative aspect-[4/5] w-full bg-slate-100 dark:bg-slate-900 border-y border-slate-100 dark:border-slate-900",
-					children: url ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [loading && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+					children: url && !error ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [loading && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
 						className: "absolute inset-0 flex items-center justify-center",
 						children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(LoaderCircle, { className: "size-6 animate-spin text-slate-400" })
 					}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("img", {
 						src: url,
-						alt: state.imagePrompt,
+						alt: state.imagePrompt || "Post",
 						onLoad: () => setLoading(false),
+						onError: handleImageError,
 						className: "h-full w-full object-cover"
-					}, url)] }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+					}, url)] }) : error ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+						className: "flex h-full flex-col items-center justify-center gap-2 text-slate-400",
+						children: [
+							/* @__PURE__ */ (0, import_jsx_runtime.jsx)(CircleAlert, { className: "size-6" }),
+							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+								className: "text-xs",
+								children: "Falha ao gerar imagem."
+							}),
+							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)(Button, {
+								size: "sm",
+								variant: "ghost",
+								onClick: () => {
+									setUseFallback(false);
+									setError(false);
+									setLoading(true);
+									onChange({ imageSeed: Math.floor(Math.random() * 1e6) });
+								},
+								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(RefreshCw, { className: "mr-1 size-3" }), " Retry"]
+							})
+						]
+					}) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
 						className: "flex h-full items-center justify-center text-sm text-muted-foreground",
 						children: "Gerando visual..."
 					})
@@ -489,7 +635,7 @@ function SocialPreview({ state, onChange }) {
 							className: "text-[13px] text-slate-900 dark:text-slate-100",
 							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
 								className: "font-semibold mr-2",
-								children: "Sua Marca"
+								children: state.brandName || "Sua Marca"
 							}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Editable, {
 								as: "span",
 								multiline: true,
@@ -512,28 +658,47 @@ function SocialPreview({ state, onChange }) {
 }
 function BannerPreview({ state, onChange }) {
 	const [loading, setLoading] = (0, import_react.useState)(true);
-	const url = (0, import_react.useMemo)(() => state.imagePrompt ? buildPollinationsUrl(state.imagePrompt, {
+	const [error, setError] = (0, import_react.useState)(false);
+	const [useFallback, setUseFallback] = (0, import_react.useState)(false);
+	const prompt = state.imagePrompt || "";
+	const url = (0, import_react.useMemo)(() => prompt ? useFallback ? buildFallbackUrl(prompt, {
 		width: 1200,
 		height: 400,
 		seed: state.imageSeed
-	}) : null, [state.imagePrompt, state.imageSeed]);
+	}) : buildPollinationsUrl(prompt, {
+		width: 1200,
+		height: 400,
+		seed: state.imageSeed
+	}) : null, [
+		prompt,
+		state.imageSeed,
+		useFallback
+	]);
 	(0, import_react.useEffect)(() => {
-		if (url) setLoading(true);
+		if (url) {
+			setLoading(true);
+			setError(false);
+		}
 	}, [url]);
+	const handleImageError = () => {
+		setLoading(false);
+		if (!useFallback) setUseFallback(true);
+		else setError(true);
+	};
 	return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 		className: "mx-auto flex w-full flex-col space-y-4",
 		children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
 			className: "relative flex aspect-[21/9] md:aspect-[3/1] min-h-[250px] w-full shrink-0 overflow-hidden rounded-2xl bg-[#0a0a0c] shadow-2xl ring-1 ring-border/50",
-			children: url ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
+			children: url && !error ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
 				loading && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
 					className: "absolute inset-0 z-10 flex items-center justify-center bg-[#0a0a0c]/80 backdrop-blur-md",
 					children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(LoaderCircle, { className: "size-8 animate-spin text-white/50" })
 				}),
 				/* @__PURE__ */ (0, import_jsx_runtime.jsx)("img", {
 					src: url,
-					alt: state.imagePrompt,
+					alt: state.imagePrompt || "Banner",
 					onLoad: () => setLoading(false),
-					onError: () => setLoading(false),
+					onError: handleImageError,
 					className: "absolute inset-0 h-full w-full object-cover object-right"
 				}, url),
 				/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "absolute inset-0 bg-gradient-to-r from-[#0a0a0c] via-[#0a0a0c]/90 via-40% to-transparent" }),
@@ -569,7 +734,27 @@ function BannerPreview({ state, onChange }) {
 						})
 					]
 				})
-			] }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+			] }) : error ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+				className: "flex h-full w-full flex-col items-center justify-center gap-3 text-slate-400",
+				children: [
+					/* @__PURE__ */ (0, import_jsx_runtime.jsx)(CircleAlert, { className: "size-8" }),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+						className: "text-sm",
+						children: "Falha ao gerar imagem."
+					}),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)(Button, {
+						size: "sm",
+						variant: "outline",
+						onClick: () => {
+							setUseFallback(false);
+							setError(false);
+							setLoading(true);
+							onChange({ imageSeed: Math.floor(Math.random() * 1e6) });
+						},
+						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(RefreshCw, { className: "mr-2 size-3" }), " Tentar novamente"]
+					})
+				]
+			}) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
 				className: "flex h-full w-full items-center justify-center text-sm text-slate-500",
 				children: "Gerando visual..."
 			})
@@ -587,9 +772,11 @@ function BannerPreview({ state, onChange }) {
 				className: "h-7 text-xs",
 				onClick: () => {
 					setLoading(true);
+					setError(false);
+					setUseFallback(false);
 					onChange({ imageSeed: Math.floor(Math.random() * 1e6) });
 				},
-				children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(RefreshCw, { className: "mr-2 size-3" }), " Retry Image"]
+				children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(RefreshCw, { className: "mr-2 size-3" }), " Nova Imagem"]
 			})]
 		})]
 	});
@@ -1030,211 +1217,393 @@ var scrapeWebsite = createServerFn({ method: "POST" }).validator((data) => {
 	if (!normalized) throw new Error("URL inválida.");
 	return { url: normalized };
 }).handler(createSsrRpc("bdfb90ff62430c1f7b847286a83a77ca7732c6b5e9ba61a16f7e09e20458552b"));
-var DISCOVERY_AGENT_PROMPT = (currentPlan, brandContext) => `Você é o **BrieFlow Creative Director** — um diretor de criação de marketing sênior e conversacional.
+var DISCOVERY_AGENT_PROMPT = (currentPlan, brandContext) => `Você é o BrieFlow Creative Director, um diretor de criação sênior especializado em marketing digital premium.
 
-Sua missão é COLETAR informações com naturalidade para produzir peças premium:
-banners, posts de redes sociais e e-mails marketing.
+Sua missão é conduzir um briefing conversacional para criar banners, posts sociais e e-mails marketing com alta qualidade.
 
 === REGRAS DE CONVERSA ===
-1. Tom: profissional, criativo, acolhedor e direto. Sem jargão vazio. Sem emojis excessivos (máx 1 se fizer sentido).
-2. UMA pergunta por vez. Nunca faça listas de perguntas.
-3. Valide a resposta anterior em 1 frase curta antes da próxima pergunta.
-4. Se o usuário já trouxe muitas informações de uma vez, avance e preencha o plano.
-5. Se houver DADOS DO SITE abaixo, use-os: confirme a marca/produto e não peça o óbvio.
+1. Use tom profissional, criativo, acolhedor e direto.
+2. Faça UMA pergunta por vez.
+3. Valide a resposta anterior em uma frase curta antes de avançar.
+4. Se o usuário trouxer muitas informações, extraia o essencial e atualize o plano.
+5. Não pergunte algo que já esteja disponível nos dados da marca ou do site.
+6. Responda ESTRITAMENTE em JSON válido, sem markdown e sem texto externo.
+7. Nunca deixe "builder" ausente.
+8. Quando já houver dados suficientes, não faça perguntas extras: conclua o briefing.
 
-=== DADOS DO SITE (quando disponíveis) ===
-${brandContext.site ? formatSiteContextForAgent(brandContext.site) : "Nenhum site analisado ainda. Se o usuário enviar uma URL, peça para colar o link completo."}
+=== DADOS DO SITE ===
+${brandContext.site ? formatSiteContextForAgent(brandContext.site) : "Nenhum site analisado ainda."}
 
-=== CONTEXTO DE MARCA ===
+=== CONTEXTO DA MARCA ===
 Persona: ${brandContext.persona}
 Tom desejado: ${brandContext.tone}
 Framework: ${brandContext.framework}
 ${brandContext.brandName ? `Marca: ${brandContext.brandName}` : ""}
 ${brandContext.product ? `Produto: ${brandContext.product}` : ""}
+${brandContext.offer ? `Oferta: ${brandContext.offer}` : ""}
 
-=== MEMÓRIA DO PLANO ===
-${currentPlan ? JSON.stringify(currentPlan) : "Sem dados. Comece pelo Passo 1."}
+=== PLANO ATUAL ===
+${currentPlan ? JSON.stringify(currentPlan, null, 2) : "Sem dados. Comece pelo Passo 1."}
 
-=== ROTEIRO DE QUALIFICAÇÃO (ordem flexível) ===
-Passo 1. Site ou marca/produto (peça a URL se ainda não houver)
-Passo 2. Objetivo da peça (lançamento, lead gen, remarketing, awareness, promoção)
-Passo 3. Público-alvo (quem deve se sentir representado)
-Passo 4. Oferta / CTA principal e canais desejados (banner, e-mail, post — ou todos)
-Passo 5. FECHAMENTO: Resuma o briefing em 3–5 linhas e pergunte se pode gerar as peças agora.
+=== ROTEIRO DE QUALIFICAÇÃO ===
+Passo 1: Site, marca ou produto.
+Passo 2: Objetivo da campanha.
+Passo 3: Público-alvo.
+Passo 4: Oferta, diferencial, CTA e canais desejados.
+Passo 5: Resuma o briefing em 3 a 5 linhas e pergunte se pode gerar as peças.
 
-Quando chegar no Passo 5:
-- missingInfo = "Nenhuma"
-- proposedStrategy deve listar exatamente as peças a gerar (ex: "Banner + E-mail + Post Instagram")
+Quando o briefing estiver completo:
+- missingInfo deve ser exatamente "Nenhuma".
+- proposedStrategy deve descrever exatamente as peças a gerar e o ângulo criativo.
+- channels deve conter apenas: "banner", "email" e/ou "social".
+- Se o usuário pediu banner, e-mail e post, use:
+  ["banner", "email", "social"].
 
-SEMPRE responda ESTRITAMENTE em JSON. Nenhum texto fora do JSON.
-
+=== RETORNO OBRIGATÓRIO ===
 {
-  "chat": "Resposta conversacional (validação + próxima pergunta ou fechamento).",
+  "chat": "Validação breve + próxima pergunta, ou resumo final pedindo aprovação.",
   "builder": {
     "type": "discovery_plan",
     "discoveryPlan": {
-      "detectedContext": "Resumo atualizado do que já sabe (marca, produto, site, objetivo).",
-      "missingInfo": "O que ainda falta coletar. Se completo: Nenhuma",
-      "proposedStrategy": "Peças e ângulo criativo. Se ainda coletando: Aguardando dados...",
-      "brandName": "nome da marca se souber",
-      "product": "produto/serviço se souber",
-      "audience": "público se souber",
-      "offer": "oferta/CTA se souber",
+      "detectedContext": "Resumo estruturado do contexto conhecido.",
+      "missingInfo": "Informação que ainda falta ou Nenhuma.",
+      "proposedStrategy": "Estratégia e peças propostas.",
+      "brandName": "Nome da marca ou null.",
+      "product": "Produto ou serviço ou null.",
+      "audience": "Público-alvo ou null.",
+      "offer": "Oferta ou CTA ou null.",
       "channels": ["banner", "email", "social"],
-      "websiteUrl": "url se houver"
+      "websiteUrl": "URL do site ou null."
     }
   }
 }`;
-var EXECUTION_AGENT_PROMPT = (ctx, plan, targetAsset) => `Você é o **BrieFlow Execution Agent** — Diretor de Criação de Marketing Premium.
+function getAssetContentSchema(targetAsset) {
+	if (targetAsset === "banner") return `"content": {
+          "type": "banner",
+          "title": "Título com no máximo 5 palavras",
+          "subtitle": "Linha de benefício",
+          "cta": "CTA curto",
+          "imagePrompt": "Prompt completo em inglês"
+        }`;
+	if (targetAsset === "email") return `"content": {
+          "type": "email",
+          "preheader": "Pré-header entre 40 e 80 caracteres",
+          "title": "Assunto ou headline",
+          "subtitle": "Linha de apoio opcional",
+          "body": "Parágrafo 1\\n\\nParágrafo 2\\n\\nParágrafo 3",
+          "cta": "Texto do botão",
+          "footerText": "Texto legal simples",
+          "emailHeroImagePrompt": "Prompt completo em inglês"
+        }`;
+	return `"content": {
+          "type": "social",
+          "caption": "Legenda entre 2 e 4 linhas",
+          "hashtags": ["#hashtag1", "#hashtag2", "#hashtag3", "#hashtag4", "#hashtag5"],
+          "imagePrompt": "Prompt completo em inglês"
+        }`;
+}
+var EXECUTION_AGENT_PROMPT = (context, plan, targetAsset) => `Você é o BrieFlow Execution Agent, um diretor de criação de marketing premium.
 
-Gere APENAS a peça solicitada, com qualidade de agência top (copy + direção de arte).
+Gere APENAS a peça solicitada, com copy persuasiva, direção de arte sofisticada e consistência com o briefing.
 
 === BRIEFING APROVADO ===
-${plan ? JSON.stringify(plan) : "Use o histórico da conversa."}
+${plan ? JSON.stringify(plan, null, 2) : "Use o histórico da conversa."}
 
-=== DADOS DO SITE / MARCA ===
-${ctx.site ? formatSiteContextForAgent(ctx.site) : "Sem site. Use o briefing."}
-Tom: ${ctx.tone}
-Persona: ${ctx.persona}
+=== DADOS DA MARCA ===
+${context.site ? formatSiteContextForAgent(context.site) : "Sem site analisado."}
+Marca: ${context.brandName ?? "Não informada"}
+Produto: ${context.product ?? "Não informado"}
+Oferta: ${context.offer ?? "Não informada"}
+Persona: ${context.persona}
+Tom: ${context.tone}
 
 === TAREFA ===
-GERAR APENAS: ${targetAsset.toUpperCase()}
+Gerar APENAS: ${targetAsset.toUpperCase()}
 
-=== PADRÃO PREMIUM (OBRIGATÓRIO) ===
-1. Copy em português do Brasil, elegante, persuasiva, sem clichês ("revolucionário", "melhor do mercado", "não perca").
-2. Frases curtas. Benefício > feature. CTA claro e acionável.
-3. imagePrompt e emailHeroImagePrompt SEMPRE em INGLÊS, fotográficos/cinemáticos, SEM texto na imagem.
-4. Respeite a identidade da marca quando houver site (setor, produto, tom).
+=== PADRÃO DE QUALIDADE ===
+- Escreva em português brasileiro.
+- Evite clichês como "revolucionário", "melhor do mercado", "imperdível" e "não perca".
+- Priorize benefício concreto, clareza, prova e CTA acionável.
+- Use frases curtas e elegantes.
+- imagePrompt e emailHeroImagePrompt devem estar em inglês.
+- Prompts de imagem não podem incluir texto, letras, logotipos ou marca d'água.
+- Responda ESTRITAMENTE em JSON válido.
+- Não use markdown.
+- Não adicione comentários.
+- Não deixe campos obrigatórios vazios.
+- Retorne apenas UMA peça dentro de campaignAssets.
 
 ${targetAsset === "banner" ? `=== BANNER ===
-- title: MÁXIMO 5 palavras, punchy
-- subtitle: 1 linha de benefício (máx 18 palavras)
-- cta: 2–4 palavras
-- imagePrompt fórmula: "[hero subject related to brand] on the far right third, cinematic commercial lighting, [relevant environment], massive empty dark negative space on the left for typography, ultra premium advertising photography, 8k"` : ""}
-${targetAsset === "email" ? `=== E-MAIL MARKETING ===
-- preheader: 40–80 chars, instigante
-- title: assunto/headline forte
-- subtitle: opcional, linha de apoio
-- body: 2–3 parágrafos curtos separados por \\n\\n (história → valor → CTA)
-- cta: botão claro
-- footerText: linha legal simples
-- emailHeroImagePrompt: fotografia comercial premium em inglês, wide cinematic hero, sem texto` : ""}
-${targetAsset === "social" ? `=== POST SOCIAL (Instagram) ===
-- caption: 2–4 linhas engajadoras + CTA sutil
-- hashtags: array com 3–5 hashtags relevantes (com #)
-- imagePrompt: vertical 4:5 commercial photo em inglês, sem texto, estética premium de feed` : ""}
+- title: máximo de 5 palavras.
+- subtitle: uma linha, no máximo 18 palavras.
+- cta: de 2 a 4 palavras.
+- imagePrompt: produto ou elemento principal no terço direito, espaço negativo escuro à esquerda para tipografia, cinematic commercial lighting, ultra premium advertising photography, no text, no watermark.` : ""}
 
-Mantenha raciocínio interno curto se houver tags de thinking.
+${targetAsset === "email" ? `=== E-MAIL ===
+- preheader: entre 40 e 80 caracteres.
+- title: assunto forte, máximo de 50 caracteres.
+- subtitle: opcional, máximo de 12 palavras.
+- body: 2 ou 3 parágrafos curtos separados por \\n\\n.
+- cta: botão claro e acionável.
+- footerText: linha legal simples.
+- emailHeroImagePrompt: wide cinematic commercial hero, 2:1 ratio, premium campaign, no text, no watermark.` : ""}
 
-=== RETORNO (JSON ESTRITO) ===
+${targetAsset === "social" ? `=== POST SOCIAL ===
+- caption: entre 2 e 4 linhas.
+- hashtags: array de 5 a 8 hashtags relevantes, todas iniciando com #.
+- imagePrompt: vertical 4:5 commercial photo, editorial lighting, premium Instagram aesthetic, no text, no watermark.` : ""}
+
+=== RETORNO OBRIGATÓRIO ===
 {
-  "chat": "Peça gerada com sucesso. Pode revisar no painel ao lado.",
+  "chat": "Confirmação breve de que a peça foi gerada.",
   "builder": {
     "type": "campaign",
     "campaignAssets": [
-       ${targetAsset === "banner" ? `{ "id": "banner-1", "type": "banner", "status": "draft", "content": { "type": "banner", "title": "...", "subtitle": "...", "cta": "...", "imagePrompt": "..." } }` : ""}
-       ${targetAsset === "email" ? `{ "id": "email-1", "type": "email", "status": "draft", "content": { "type": "email", "preheader": "...", "emailHeroImagePrompt": "...", "title": "...", "subtitle": "...", "body": "...", "cta": "...", "footerText": "..." } }` : ""}
-       ${targetAsset === "social" ? `{ "id": "social-1", "type": "social", "status": "draft", "content": { "type": "social", "caption": "...", "hashtags": ["#a", "#b", "#c"], "imagePrompt": "..." } }` : ""}
+      {
+        "id": "${targetAsset}-1",
+        "type": "${targetAsset}",
+        "status": "draft",
+        ${getAssetContentSchema(targetAsset)}
+      }
     ]
   },
-  "scores": { "persuasion": 0-100, "clarity": 0-100, "seo": 0-100 }
+  "scores": {
+    "persuasion": 90,
+    "clarity": 90,
+    "seo": 80
+  }
 }`;
-function tryParseJson(text) {
-	let cleanText = text.replace(/<think>[\s\S]*?<\/think>/gi, "");
-	cleanText = cleanText.replace(/```json/gi, "").replace(/```/g, "").trim();
-	try {
-		return JSON.parse(cleanText);
-	} catch {
-		const match = cleanText.match(/\{[\s\S]*\}/);
-		if (!match) return null;
-		try {
-			return JSON.parse(match[0]);
-		} catch {
-			return null;
-		}
-	}
+function createRequestId() {
+	if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
+	return `bf_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 }
 function resolveOllamaApiUrl() {
-	let apiUrl = "http://localhost:11434/api/chat";
-	if (typeof window !== "undefined") apiUrl = `${"http://129.213.132.69:11434/api/chat".replace("/v1/chat/completions", "").replace("/api/chat", "")}/api/chat`;
-	else apiUrl = `${"http://129.213.132.69:11434/api/chat".replace("/v1/chat/completions", "").replace("/api/chat", "")}/api/chat`;
-	return apiUrl;
+	return `${"http://129.213.132.69:11434".replace("/v1/chat/completions", "").replace("/api/chat", "").replace(/\/$/, "")}/api/chat`;
 }
-function pickModels(wantsExecution) {
-	return wantsExecution ? "qwen3.6:27b" : "qwen2.5:7b";
+function pickModel(wantsExecution) {
+	return wantsExecution ? "qwen2.5:7b" : "qwen2.5:7b";
 }
-async function sendToOllama(history, brandContext, currentPlan, onStream, targetAsset) {
-	const apiUrl = resolveOllamaApiUrl();
-	const wantsExecution = !!targetAsset;
-	const systemPrompt = wantsExecution ? EXECUTION_AGENT_PROMPT(brandContext, currentPlan, targetAsset) : DISCOVERY_AGENT_PROMPT(currentPlan, brandContext);
-	const recentHistory = history.slice(-10);
-	const messages = [{
-		role: "system",
-		content: systemPrompt
-	}, ...recentHistory];
-	const modelToUse = pickModels(wantsExecution);
-	const controller = new AbortController();
-	const timeoutId = setTimeout(() => controller.abort(), wantsExecution ? 9e5 : 12e4);
+function extractBalancedJson(text) {
+	const start = text.indexOf("{");
+	if (start === -1) return null;
+	let depth = 0;
+	let inString = false;
+	let escaped = false;
+	for (let index = start; index < text.length; index += 1) {
+		const character = text[index];
+		if (escaped) {
+			escaped = false;
+			continue;
+		}
+		if (character === "\\") {
+			escaped = true;
+			continue;
+		}
+		if (character === "\"") {
+			inString = !inString;
+			continue;
+		}
+		if (inString) continue;
+		if (character === "{") depth += 1;
+		if (character === "}") {
+			depth -= 1;
+			if (depth === 0) return text.slice(start, index + 1);
+		}
+	}
+	return null;
+}
+function tryParseJson(text) {
+	const cleanText = text.replace(/<think>[\s\S]*?<\/think>/gi, "").replace(/```json/gi, "").replace(/```/g, "").trim();
 	try {
-		const res = await fetch(apiUrl, {
+		return JSON.parse(cleanText);
+	} catch {}
+	const extracted = extractBalancedJson(cleanText);
+	if (!extracted) return null;
+	try {
+		return JSON.parse(extracted);
+	} catch {
+		return null;
+	}
+}
+function extractChatField(rawJson) {
+	const match = rawJson.match(/"chat"\s*:\s*"/);
+	if (!match || match.index === void 0) return null;
+	const start = match.index + match[0].length;
+	let result = "";
+	let escaped = false;
+	for (let index = start; index < rawJson.length; index += 1) {
+		const character = rawJson[index];
+		if (escaped) {
+			result += {
+				n: "\n",
+				r: "\r",
+				t: "	",
+				"\"": "\"",
+				"\\": "\\"
+			}[character] ?? character;
+			escaped = false;
+			continue;
+		}
+		if (character === "\\") {
+			escaped = true;
+			continue;
+		}
+		if (character === "\"") return result;
+		result += character;
+	}
+	return result || null;
+}
+function validateAsset(asset, targetAsset) {
+	const content = asset.content;
+	if (!content || typeof content !== "object") return false;
+	if (targetAsset === "banner") return Boolean(content.title && content.subtitle && content.cta && content.imagePrompt);
+	if (targetAsset === "email") return Boolean(content.preheader && content.title && content.body && content.cta && content.emailHeroImagePrompt);
+	return Boolean(content.caption && Array.isArray(content.hashtags) && content.hashtags.length >= 3 && content.imagePrompt);
+}
+function createFallbackBuilder(currentPlan) {
+	return currentPlan ? {
+		type: "discovery_plan",
+		discoveryPlan: currentPlan
+	} : { type: "none" };
+}
+function normalizeBuilder(response, currentPlan, targetAsset) {
+	const builder = response.builder;
+	if (!builder) return createFallbackBuilder(currentPlan);
+	if (builder.type === "campaign" && Array.isArray(builder.campaignAssets) && targetAsset) return {
+		type: "campaign",
+		campaignAssets: builder.campaignAssets.filter((asset) => asset.type === targetAsset).filter((asset) => validateAsset(asset, targetAsset)).map((asset) => ({
+			...asset,
+			type: targetAsset,
+			status: asset.status ?? "draft",
+			content: {
+				...asset.content,
+				type: targetAsset
+			}
+		}))
+	};
+	return builder;
+}
+async function sendToOllama(history, brandContext, currentPlan, options = {}) {
+	const wantsExecution = Boolean(options.targetAsset);
+	const targetAsset = options.targetAsset;
+	const model = pickModel(wantsExecution);
+	const startedAt = Date.now();
+	const metaBase = {
+		requestId: options.requestId ?? createRequestId(),
+		model,
+		intent: options.intent ?? (wantsExecution ? "campaign" : "discovery"),
+		stage: wantsExecution ? "generating" : "discovery",
+		usedFallback: false,
+		generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+		provider: "ollama"
+	};
+	const systemPrompt = wantsExecution && targetAsset ? EXECUTION_AGENT_PROMPT(brandContext, currentPlan, targetAsset) : DISCOVERY_AGENT_PROMPT(currentPlan, brandContext);
+	const controller = new AbortController();
+	const timeoutId = setTimeout(() => controller.abort(), wantsExecution ? 24e4 : 18e4);
+	try {
+		const response = await fetch(resolveOllamaApiUrl(), {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({
-				model: modelToUse,
-				messages,
+				model,
+				messages: [{
+					role: "system",
+					content: systemPrompt
+				}, ...history.slice(wantsExecution ? -3 : -6)],
 				stream: true,
 				format: "json",
+				keep_alive: "30m",
 				options: {
-					temperature: wantsExecution ? .35 : .55,
-					top_p: .9,
-					num_predict: wantsExecution ? 4096 : 1200
+					temperature: wantsExecution ? .2 : .4,
+					top_p: .85,
+					num_predict: wantsExecution ? 900 : 600,
+					num_ctx: 4096
 				}
 			}),
 			signal: controller.signal
 		});
-		if (!res.ok) {
-			const errText = await res.text().catch(() => "");
-			throw new Error(`Ollama HTTP ${res.status}${errText ? `: ${errText.slice(0, 200)}` : ""}`);
+		if (!response.ok) {
+			const errorText = await response.text().catch(() => "");
+			throw new Error(`Ollama HTTP ${response.status}${errorText ? `: ${errorText.slice(0, 300)}` : ""}`);
 		}
-		if (!res.body) throw new Error("Streaming não suportado pelo servidor.");
-		const reader = res.body.getReader();
+		if (!response.body) throw new Error("Streaming não suportado pelo servidor Ollama.");
+		const reader = response.body.getReader();
 		const decoder = new TextDecoder("utf-8");
 		let rawJson = "";
+		let pendingChunk = "";
 		while (true) {
 			const { done, value } = await reader.read();
 			if (done) break;
-			const lines = decoder.decode(value, { stream: true }).split("\n").filter(Boolean);
-			for (const line of lines) try {
-				const parsed = JSON.parse(line);
-				if (parsed.message?.content) {
-					rawJson += parsed.message.content;
-					if (onStream && !wantsExecution) {
-						const chatMatch = rawJson.match(/"chat"\s*:\s*"([\s\S]*?)(?:"\s*,|"\s*\}|$)/);
-						if (chatMatch?.[1]) onStream(chatMatch[1].replace(/\\n/g, "\n").replace(/\\"/g, "\"").replace(/\\\\/g, "\\"));
+			pendingChunk += decoder.decode(value, { stream: true });
+			const lines = pendingChunk.split("\n");
+			pendingChunk = lines.pop() ?? "";
+			for (const line of lines) {
+				const trimmedLine = line.trim();
+				if (!trimmedLine) continue;
+				try {
+					const content = JSON.parse(trimmedLine).message?.content;
+					if (!content) continue;
+					rawJson += content;
+					if (!wantsExecution) {
+						const partialChat = extractChatField(rawJson);
+						if (partialChat) options.onStream?.(partialChat);
 					}
-				}
-			} catch {}
+				} catch {}
+			}
 		}
-		clearTimeout(timeoutId);
+		pendingChunk += decoder.decode();
+		if (pendingChunk.trim()) try {
+			const finalChunk = JSON.parse(pendingChunk.trim());
+			if (finalChunk.message?.content) rawJson += finalChunk.message.content;
+		} catch {}
 		const parsed = tryParseJson(rawJson);
-		if (!parsed) return {
-			chat: "Tive uma oscilação ao processar a resposta. Pode reenviar ou reformular?",
-			builder: currentPlan ? {
-				type: "discovery_plan",
-				discoveryPlan: currentPlan
-			} : { type: "none" }
+		if (!parsed) {
+			console.error("Resposta bruta do Ollama:", rawJson);
+			return {
+				chat: wantsExecution ? "A IA respondeu, mas o formato da peça ficou inválido. Tente gerar novamente." : "Tive uma oscilação ao processar a resposta. Pode reenviar ou reformular?",
+				builder: createFallbackBuilder(currentPlan),
+				meta: {
+					...metaBase,
+					stage: "needs_revision",
+					usedFallback: true,
+					latencyMs: Date.now() - startedAt
+				}
+			};
+		}
+		const builder = normalizeBuilder(parsed, currentPlan, targetAsset);
+		if (wantsExecution && builder.type === "campaign" && (!builder.campaignAssets || builder.campaignAssets.length === 0)) {
+			console.error("Peça inválida retornada pelo Ollama:", parsed);
+			return {
+				chat: "A IA concluiu a resposta, mas não preencheu todos os campos obrigatórios da peça. Tente novamente.",
+				builder: {
+					type: "campaign",
+					campaignAssets: []
+				},
+				scores: parsed.scores,
+				meta: {
+					...metaBase,
+					stage: "needs_revision",
+					usedFallback: true,
+					latencyMs: Date.now() - startedAt
+				}
+			};
+		}
+		return {
+			chat: parsed.chat || (wantsExecution ? "Peça gerada com qualidade premium. Confira no painel ao lado." : "Briefing atualizado. Posso seguir?"),
+			builder,
+			scores: parsed.scores,
+			meta: {
+				...metaBase,
+				stage: wantsExecution ? "completed" : "ready_to_generate",
+				latencyMs: Date.now() - startedAt
+			}
 		};
-		if (!parsed.builder) parsed.builder = currentPlan ? {
-			type: "discovery_plan",
-			discoveryPlan: currentPlan
-		} : { type: "none" };
-		if (!parsed.chat) parsed.chat = wantsExecution ? "Peça gerada. Confira o painel ao lado." : "Pode me contar um pouco mais sobre a campanha?";
-		return parsed;
-	} catch (err) {
+	} catch (error) {
+		const err = error;
+		if (err.name === "AbortError") throw new Error(wantsExecution ? "A geração excedeu 4 minutos. Tente novamente ou simplifique o briefing." : "O servidor de IA não respondeu a tempo.");
+		throw new Error(`Falha de rede com a IA: ${err.message ?? String(error)}`);
+	} finally {
 		clearTimeout(timeoutId);
-		const error = err;
-		if (error.name === "AbortError") throw new Error(wantsExecution ? "A IA demorou demais para criar esta peça. Tente novamente." : "O servidor de IA não respondeu a tempo.");
-		throw new Error(`Falha de rede com a IA: ${error.message ?? String(err)}`);
 	}
 }
 var Toaster$1 = ({ ...props }) => {
@@ -1253,17 +1622,16 @@ function uid() {
 	return Math.random().toString(36).slice(2, 10);
 }
 function resolveChannels(plan) {
-	const raw = plan?.channels?.map((c) => c.toLowerCase()) ?? [];
+	const raw = plan?.channels?.map((channel) => channel.toLowerCase()) ?? [];
 	const channels = [];
-	if (raw.some((c) => c.includes("banner"))) channels.push("banner");
-	if (raw.some((c) => c.includes("email") || c.includes("e-mail") || c.includes("mail"))) channels.push("email");
-	if (raw.some((c) => c.includes("social") || c.includes("post") || c.includes("instagram"))) channels.push("social");
-	if (channels.length === 0) return [
+	if (raw.some((channel) => channel.includes("banner"))) channels.push("banner");
+	if (raw.some((channel) => channel.includes("email") || channel.includes("e-mail") || channel.includes("mail"))) channels.push("email");
+	if (raw.some((channel) => channel.includes("social") || channel.includes("post") || channel.includes("instagram"))) channels.push("social");
+	return channels.length > 0 ? channels : [
 		"banner",
 		"email",
 		"social"
 	];
-	return channels;
 }
 function Home() {
 	const [messages, setMessages] = (0, import_react.useState)([]);
@@ -1281,13 +1649,13 @@ function Home() {
 	const brandContextRef = (0, import_react.useRef)(brandContext);
 	brandContextRef.current = brandContext;
 	const mergeSiteIntoContext = (site) => {
-		setBrandContext((prev) => {
+		setBrandContext((previous) => {
 			const next = {
-				...prev,
-				brandName: site.brandName || prev.brandName,
-				product: prev.product,
+				...previous,
+				brandName: site.brandName || previous.brandName,
+				product: previous.product,
 				site,
-				persona: prev.persona === "Público-alvo da marca" ? `Pessoas interessadas em ${site.brandName || site.title || "esta marca"}` : prev.persona
+				persona: previous.persona === "Público-alvo da marca" ? `Pessoas interessadas em ${site.brandName || site.title || "esta marca"}` : previous.persona
 			};
 			brandContextRef.current = next;
 			return next;
@@ -1296,24 +1664,23 @@ function Home() {
 	const maybeScrapeUrls = async (text) => {
 		const urls = extractUrlsFromText(text);
 		if (urls.length === 0) return null;
-		const target = urls[0];
-		if (brandContextRef.current.site?.url === target) return brandContextRef.current.site;
+		const targetUrl = urls[0];
+		if (brandContextRef.current.site?.url === targetUrl) return brandContextRef.current.site;
 		setScraping(true);
 		try {
-			const site = await scrapeWebsite({ data: { url: target } });
+			const site = await scrapeWebsite({ data: { url: targetUrl } });
 			mergeSiteIntoContext(site);
-			toast.success(`Site analisado: ${site.brandName || site.title}`);
+			toast.success(`Site analisado: ${site.brandName || site.title || "marca identificada"}`);
 			return site;
-		} catch (err) {
-			toast.error(`Não consegui acessar o site: ${err instanceof Error ? err.message : String(err)}`);
+		} catch (error) {
+			toast.error(`Não consegui acessar o site: ${error instanceof Error ? error.message : String(error)}`);
 			return null;
 		} finally {
 			setScraping(false);
 		}
 	};
 	const generateCampaignSequentially = async (baseHistory) => {
-		setLoading(true);
-		const plan = discoveryPlanRef.current ?? builder.discoveryPlan;
+		const plan = discoveryPlanRef.current ?? (builder.type === "discovery_plan" ? builder.discoveryPlan : void 0);
 		const channels = resolveChannels(plan);
 		const stepMeta = {
 			banner: {
@@ -1333,96 +1700,123 @@ function Home() {
 			type,
 			...stepMeta[type]
 		}));
-		setBuilder((prev) => ({
-			...prev,
-			type: "campaign",
-			campaignAssets: prev.type === "campaign" ? prev.campaignAssets ?? [] : []
-		}));
 		let currentHistory = [...baseHistory];
 		let accumulatedAssets = [];
-		for (const step of steps) {
-			const assistantId = uid();
-			setGeneratingLabel(`Gerando ${step.label} premium...`);
-			if (step.type !== steps[0].type) setMessages((prev) => [
-				...prev,
-				{
-					id: uid(),
+		let failures = 0;
+		setLoading(true);
+		setBuilder((previous) => ({
+			...previous,
+			type: "campaign",
+			campaignAssets: previous.type === "campaign" ? previous.campaignAssets ?? [] : []
+		}));
+		try {
+			for (const [index, step] of steps.entries()) {
+				const assistantId = uid();
+				setGeneratingLabel(`Gerando ${step.label} premium...`);
+				setMessages((previous) => [
+					...previous,
+					...index > 0 ? [{
+						id: uid(),
+						role: "user",
+						content: step.prompt
+					}] : [],
+					{
+						id: assistantId,
+						role: "assistant",
+						content: index === 0 ? `Briefing aprovado. Gerando ${step.label} premium no painel ao lado...\n\n(Pode levar alguns segundos)` : `Gerando ${step.label} com qualidade de agência...\n\n(Pode levar alguns segundos)`
+					}
+				]);
+				currentHistory = [...currentHistory, {
 					role: "user",
 					content: step.prompt
-				},
-				{
-					id: assistantId,
-					role: "assistant",
-					content: `Gerando ${step.label} com qualidade de agência...\n\n(Pode levar alguns minutos)`
-				}
-			]);
-			else setMessages((prev) => [...prev, {
-				id: assistantId,
-				role: "assistant",
-				content: `Briefing aprovado. Gerando ${step.label} premium no painel ao lado...\n\n(Pode levar alguns minutos)`
-			}]);
-			currentHistory.push({
-				role: "user",
-				content: step.prompt
-			});
-			try {
-				const res = await sendToOllama(currentHistory, brandContextRef.current, plan, void 0, step.type);
-				if (res.builder?.campaignAssets && res.builder.campaignAssets.length > 0) {
-					const newAsset = res.builder.campaignAssets[0];
-					newAsset.content.imageSeed = Math.floor(Math.random() * 1e6);
-					newAsset.content.type = step.type;
-					newAsset.type = step.type;
-					accumulatedAssets = [...accumulatedAssets, newAsset];
-					setBuilder((prev) => ({
-						...prev,
+				}];
+				try {
+					const response = await sendToOllama(currentHistory, brandContextRef.current, plan, {
+						intent: "campaign",
+						targetAsset: step.type
+					});
+					const generatedAsset = response.builder.type === "campaign" ? response.builder.campaignAssets?.[0] : void 0;
+					if (!generatedAsset?.content) {
+						failures += 1;
+						setMessages((previous) => previous.map((message) => message.id === assistantId ? {
+							...message,
+							content: "A IA respondeu, mas não retornou uma peça válida. Vou continuar para a próxima etapa."
+						} : message));
+						continue;
+					}
+					const normalizedAsset = {
+						...generatedAsset,
+						id: generatedAsset.id || uid(),
+						type: step.type,
+						status: "draft",
+						content: {
+							...generatedAsset.content,
+							type: step.type,
+							imageSeed: generatedAsset.content.imageSeed ?? Math.floor(Math.random() * 1e6),
+							brandName: generatedAsset.content.brandName || brandContextRef.current.brandName || plan?.brandName || brandContextRef.current.site?.brandName
+						}
+					};
+					accumulatedAssets = [...accumulatedAssets, normalizedAsset];
+					setBuilder((previous) => ({
+						...previous,
 						type: "campaign",
 						campaignAssets: accumulatedAssets
 					}));
+					if (response.scores) setScores(response.scores);
+					setMessages((previous) => previous.map((message) => message.id === assistantId ? {
+						...message,
+						content: response.chat || `${step.label} gerado com sucesso no painel ao lado.`
+					} : message));
+					currentHistory = [...currentHistory, {
+						role: "assistant",
+						content: response.chat || `${step.label} gerado com sucesso no painel ao lado.`
+					}];
+				} catch (error) {
+					failures += 1;
+					const errorMessage = error instanceof Error ? error.message : String(error);
+					toast.error(`Falha ao gerar ${step.label}: ${errorMessage}`);
+					setMessages((previous) => previous.map((message) => message.id === assistantId ? {
+						...message,
+						content: `Não foi possível gerar ${step.label}: ${errorMessage}`
+					} : message));
 				}
-				if (res.scores) setScores(res.scores);
-				setMessages((prev) => prev.map((m) => m.id === assistantId ? {
-					...m,
-					content: res.chat
-				} : m));
-				currentHistory.push({
-					role: "assistant",
-					content: res.chat
-				});
-			} catch (err) {
-				toast.error(`Falha ao gerar o ${step.label}: ${err instanceof Error ? err.message : err}`);
-				break;
 			}
+			const generatedCount = accumulatedAssets.length;
+			const expectedCount = steps.length;
+			setMessages((previous) => [...previous, {
+				id: uid(),
+				role: "assistant",
+				content: generatedCount === expectedCount ? "Campanha finalizada. Navegue pelas abas no painel ao lado, edite os textos e regenere imagens se quiser." : generatedCount > 0 ? `Gerei ${generatedCount} de ${expectedCount} peças. ${failures} etapa(s) não foram concluídas; tente novamente se desejar.` : "Não consegui concluir as peças da campanha. Verifique a conexão, o modelo configurado e os logs do Ollama."
+			}]);
+		} finally {
+			setGeneratingLabel(void 0);
+			setLoading(false);
 		}
-		setMessages((prev) => [...prev, {
-			id: uid(),
-			role: "assistant",
-			content: "Estrutura finalizada. Navegue pelas abas no painel ao lado, edite os textos e regenere imagens se quiser."
-		}]);
-		setGeneratingLabel(void 0);
-		setLoading(false);
 	};
 	const handleSend = async (text, isHiddenAction = false) => {
-		const userMsg = {
+		const userMessage = {
 			id: uid(),
 			role: "user",
 			content: text
 		};
-		const nextMessages = isHiddenAction ? messages : [...messages, userMsg];
-		if (!isHiddenAction) setMessages(nextMessages);
-		if (!isHiddenAction) await maybeScrapeUrls(text);
+		const nextMessages = isHiddenAction ? messages : [...messages, userMessage];
+		if (!isHiddenAction) {
+			setMessages(nextMessages);
+			await maybeScrapeUrls(text);
+		}
 		if (text.includes("Aprovado. Gere os materiais do ecossistema agora.")) {
-			await generateCampaignSequentially(nextMessages.map((m) => ({
-				role: m.role,
-				content: m.content
+			await generateCampaignSequentially(nextMessages.map((message) => ({
+				role: message.role,
+				content: message.content
 			})));
 			return;
 		}
 		const approvalRegex = /\b(aprovado|pode gerar|gera as pe[cç]as|gerar as pe[cç]as|pode criar|vamos gerar|pode montar)\b/i;
-		const planReady = discoveryPlanRef.current?.missingInfo?.toLowerCase().includes("nenhum") || builder.discoveryPlan?.missingInfo?.toLowerCase().includes("nenhum");
+		const planReady = discoveryPlanRef.current?.missingInfo?.toLowerCase().includes("nenhuma") || builder.type === "discovery_plan" && builder.discoveryPlan?.missingInfo?.toLowerCase().includes("nenhuma");
 		if (!isHiddenAction && planReady && approvalRegex.test(text)) {
-			await generateCampaignSequentially(nextMessages.map((m) => ({
-				role: m.role,
-				content: m.content
+			await generateCampaignSequentially(nextMessages.map((message) => ({
+				role: message.role,
+				content: message.content
 			})));
 			return;
 		}
@@ -1432,53 +1826,76 @@ function Home() {
 			role: "assistant",
 			content: ""
 		}]);
-		setLoading(true);
-		const history = nextMessages.map((m) => ({
-			role: m.role,
-			content: m.content
+		const history = nextMessages.map((message) => ({
+			role: message.role,
+			content: message.content
 		}));
 		if (brandContextRef.current.site && history.length > 0) {
-			const last = history[history.length - 1];
-			if (last.role === "user") last.content = `${last.content}\n\n[SITE_ANALISADO]\nURL: ${brandContextRef.current.site.url}\nMarca: ${brandContextRef.current.site.brandName}\nTítulo: ${brandContextRef.current.site.title}\nDescrição: ${brandContextRef.current.site.description}`;
+			const lastMessage = history[history.length - 1];
+			if (lastMessage.role === "user") lastMessage.content = `${lastMessage.content}
+
+[SITE_ANALISADO]
+URL: ${brandContextRef.current.site.url}
+Marca: ${brandContextRef.current.site.brandName}
+Título: ${brandContextRef.current.site.title}
+Descrição: ${brandContextRef.current.site.description}`;
 		}
+		setLoading(true);
 		try {
-			const res = await sendToOllama(history, brandContextRef.current, discoveryPlanRef.current ?? builder.discoveryPlan, (partialChat) => {
-				if (!isHiddenAction) setMessages((prev) => prev.map((m) => m.id === assistantId ? {
-					...m,
-					content: partialChat
-				} : m));
-			});
-			if (!isHiddenAction) setMessages((prev) => prev.map((m) => m.id === assistantId ? {
-				...m,
-				content: res.chat
-			} : m));
-			if (res.builder && res.builder.type !== "none") {
-				if (res.builder.type === "discovery_plan" && res.builder.discoveryPlan) {
-					discoveryPlanRef.current = res.builder.discoveryPlan;
-					setBrandContext((prev) => ({
-						...prev,
-						brandName: res.builder.discoveryPlan?.brandName || prev.brandName,
-						product: res.builder.discoveryPlan?.product || prev.product,
-						offer: res.builder.discoveryPlan?.offer || prev.offer,
-						persona: res.builder.discoveryPlan?.audience || prev.persona
-					}));
+			const response = await sendToOllama(history, brandContextRef.current, discoveryPlanRef.current ?? (builder.type === "discovery_plan" ? builder.discoveryPlan : void 0), {
+				intent: "discovery",
+				onStream: (partialChat) => {
+					if (!isHiddenAction) setMessages((previous) => previous.map((message) => message.id === assistantId ? {
+						...message,
+						content: partialChat
+					} : message));
 				}
-				if (res.builder.type === "campaign" && res.builder.campaignAssets?.length) res.builder.campaignAssets = res.builder.campaignAssets.map((a) => ({
-					...a,
-					content: {
-						...a.content,
-						imageSeed: a.content.imageSeed ?? Math.floor(Math.random() * 1e6)
-					}
-				}));
+			});
+			if (!isHiddenAction) setMessages((previous) => previous.map((message) => message.id === assistantId ? {
+				...message,
+				content: response.chat
+			} : message));
+			if (response.builder.type === "discovery_plan" && response.builder.discoveryPlan) {
+				const discoveryPlan = response.builder.discoveryPlan;
+				discoveryPlanRef.current = discoveryPlan;
+				setBrandContext((previous) => {
+					const next = {
+						...previous,
+						brandName: discoveryPlan.brandName || previous.brandName,
+						product: discoveryPlan.product || previous.product,
+						offer: discoveryPlan.offer || previous.offer,
+						persona: discoveryPlan.audience || previous.persona
+					};
+					brandContextRef.current = next;
+					return next;
+				});
 				setBuilder({
-					...res.builder,
+					type: "discovery_plan",
+					discoveryPlan,
 					imageSeed: Math.floor(Math.random() * 1e6)
 				});
 			}
-			if (res.scores) setScores(res.scores);
-		} catch (err) {
-			toast.error(`Falha ao conectar: ${err instanceof Error ? err.message : err}`);
-			setMessages((prev) => prev.filter((m) => m.id !== assistantId));
+			if (response.builder.type === "campaign" && response.builder.campaignAssets?.length) {
+				const campaignAssets = response.builder.campaignAssets.map((asset) => ({
+					...asset,
+					id: asset.id || uid(),
+					status: asset.status || "draft",
+					content: {
+						...asset.content,
+						imageSeed: asset.content.imageSeed ?? Math.floor(Math.random() * 1e6)
+					}
+				}));
+				setBuilder({
+					type: "campaign",
+					campaignAssets,
+					imageSeed: Math.floor(Math.random() * 1e6)
+				});
+			}
+			if (response.scores) setScores(response.scores);
+		} catch (error) {
+			const errorMessage = error instanceof Error ? error.message : String(error);
+			toast.error(`Falha ao conectar: ${errorMessage}`);
+			if (!isHiddenAction) setMessages((previous) => previous.filter((message) => message.id !== assistantId));
 		} finally {
 			setLoading(false);
 		}
@@ -1489,18 +1906,18 @@ function Home() {
 			className: "flex h-1/2 shrink-0 flex-col border-b lg:h-full lg:w-[420px] lg:border-b-0 lg:border-r",
 			children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(ChatPanel, {
 				messages,
-				onSend: (t) => handleSend(t, false),
+				onSend: (text) => handleSend(text, false),
 				loading,
 				scraping,
 				brandContext,
 				setBrandContext
 			})
 		}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("section", {
-			className: "flex min-h-0 min-w-0 flex-1 flex-col bg-background relative",
+			className: "relative flex min-h-0 min-w-0 flex-1 flex-col bg-background",
 			children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(PageBuilder, {
 				state: builder,
-				onChange: (patch) => setBuilder((prev) => ({
-					...prev,
+				onChange: (patch) => setBuilder((previous) => ({
+					...previous,
 					...patch
 				})),
 				loading,

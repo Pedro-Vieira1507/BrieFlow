@@ -1,7 +1,9 @@
-// routes/index.tsx
 import { createFileRoute } from "@tanstack/react-router";
 import { useRef, useState } from "react";
-import { ChatPanel, type ChatMessage } from "@/components/briefflow/ChatPanel";
+import {
+  ChatPanel,
+  type ChatMessage,
+} from "@/components/briefflow/ChatPanel";
 import { PageBuilder } from "@/components/briefflow/PageBuilder";
 import { sendToOllama, type ChatTurn } from "@/lib/ollama";
 import {
@@ -22,36 +24,66 @@ export const Route = createFileRoute("/")({
   component: Home,
 });
 
+type CampaignChannel = "banner" | "email" | "social";
+
 function uid() {
   return Math.random().toString(36).slice(2, 10);
 }
 
-function resolveChannels(plan?: DiscoveryPlan): Array<"banner" | "email" | "social"> {
-  const raw = plan?.channels?.map((c) => c.toLowerCase()) ?? [];
-  const channels: Array<"banner" | "email" | "social"> = [];
+function resolveChannels(plan?: DiscoveryPlan): CampaignChannel[] {
+  const raw = plan?.channels?.map((channel) => channel.toLowerCase()) ?? [];
+  const channels: CampaignChannel[] = [];
 
-  if (raw.some((c) => c.includes("banner"))) channels.push("banner");
-  if (raw.some((c) => c.includes("email") || c.includes("e-mail") || c.includes("mail")))
+  if (raw.some((channel) => channel.includes("banner"))) {
+    channels.push("banner");
+  }
+
+  if (
+    raw.some(
+      (channel) =>
+        channel.includes("email") ||
+        channel.includes("e-mail") ||
+        channel.includes("mail"),
+    )
+  ) {
     channels.push("email");
-  if (raw.some((c) => c.includes("social") || c.includes("post") || c.includes("instagram")))
+  }
+
+  if (
+    raw.some(
+      (channel) =>
+        channel.includes("social") ||
+        channel.includes("post") ||
+        channel.includes("instagram"),
+    )
+  ) {
     channels.push("social");
+  }
 
-  // Default: full premium ecosystem
-  if (channels.length === 0) return ["banner", "email", "social"];
-
-  return channels;
+  return channels.length > 0
+    ? channels
+    : ["banner", "email", "social"];
 }
 
 function Home() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [builder, setBuilder] = useState<BuilderState>({ type: "none" });
+  const [builder, setBuilder] = useState<BuilderState>({
+    type: "none",
+  });
   const [scores, setScores] = useState<
-    { persuasion: number; clarity: number; seo: number } | undefined
+    | {
+        persuasion: number;
+        clarity: number;
+        seo: number;
+      }
+    | undefined
   >();
 
   const [loading, setLoading] = useState(false);
   const [scraping, setScraping] = useState(false);
-  const [generatingLabel, setGeneratingLabel] = useState<string | undefined>();
+  const [generatingLabel, setGeneratingLabel] = useState<
+    string | undefined
+  >();
 
   const [brandContext, setBrandContext] = useState<BrandContext>({
     persona: "Público-alvo da marca",
@@ -59,62 +91,95 @@ function Home() {
     framework: "AIDA (Atenção, Interesse, Desejo, Ação)",
   });
 
-  // Keep latest plan/context for sequential generation without stale closures
   const discoveryPlanRef = useRef<DiscoveryPlan | undefined>(undefined);
   const brandContextRef = useRef(brandContext);
+
   brandContextRef.current = brandContext;
 
   const mergeSiteIntoContext = (site: SiteBrandData) => {
-    setBrandContext((prev) => {
+    setBrandContext((previous) => {
       const next: BrandContext = {
-        ...prev,
-        brandName: site.brandName || prev.brandName,
-        product: prev.product,
+        ...previous,
+        brandName: site.brandName || previous.brandName,
+        product: previous.product,
         site,
-        persona: prev.persona === "Público-alvo da marca"
-          ? `Pessoas interessadas em ${site.brandName || site.title || "esta marca"}`
-          : prev.persona,
+        persona:
+          previous.persona === "Público-alvo da marca"
+            ? `Pessoas interessadas em ${
+                site.brandName || site.title || "esta marca"
+              }`
+            : previous.persona,
       };
+
       brandContextRef.current = next;
+
       return next;
     });
   };
 
-  const maybeScrapeUrls = async (text: string): Promise<SiteBrandData | null> => {
+  const maybeScrapeUrls = async (
+    text: string,
+  ): Promise<SiteBrandData | null> => {
     const urls = extractUrlsFromText(text);
-    if (urls.length === 0) return null;
 
-    // Skip if we already analyzed the same URL
-    const target = urls[0];
-    if (brandContextRef.current.site?.url === target) {
+    if (urls.length === 0) {
+      return null;
+    }
+
+    const targetUrl = urls[0];
+
+    if (brandContextRef.current.site?.url === targetUrl) {
       return brandContextRef.current.site;
     }
 
     setScraping(true);
+
     try {
-      const site = await scrapeWebsite({ data: { url: target } });
+      const site = await scrapeWebsite({
+        data: {
+          url: targetUrl,
+        },
+      });
+
       mergeSiteIntoContext(site);
-      toast.success(`Site analisado: ${site.brandName || site.title}`);
-      return site;
-    } catch (err) {
-      toast.error(
-        `Não consegui acessar o site: ${err instanceof Error ? err.message : String(err)}`,
+
+      toast.success(
+        `Site analisado: ${
+          site.brandName || site.title || "marca identificada"
+        }`,
       );
+
+      return site;
+    } catch (error) {
+      toast.error(
+        `Não consegui acessar o site: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+
       return null;
     } finally {
       setScraping(false);
     }
   };
 
-  const generateCampaignSequentially = async (baseHistory: ChatTurn[]) => {
-    setLoading(true);
+  const generateCampaignSequentially = async (
+    baseHistory: ChatTurn[],
+  ) => {
+    const plan =
+      discoveryPlanRef.current ??
+      (builder.type === "discovery_plan"
+        ? builder.discoveryPlan
+        : undefined);
 
-    const plan = discoveryPlanRef.current ?? builder.discoveryPlan;
     const channels = resolveChannels(plan);
 
     const stepMeta: Record<
-      string,
-      { label: string; prompt: string }
+      CampaignChannel,
+      {
+        label: string;
+        prompt: string;
+      }
     > = {
       banner: {
         label: "Banner",
@@ -133,227 +198,399 @@ function Home() {
       },
     };
 
-    const steps = channels.map((type) => ({ type, ...stepMeta[type] }));
-
-    setBuilder((prev) => ({
-      ...prev,
-      type: "campaign",
-      campaignAssets: prev.type === "campaign" ? prev.campaignAssets ?? [] : [],
+    const steps = channels.map((type) => ({
+      type,
+      ...stepMeta[type],
     }));
 
     let currentHistory = [...baseHistory];
     let accumulatedAssets: CampaignAsset[] = [];
+    let failures = 0;
 
-    for (const step of steps) {
-      const assistantId = uid();
-      setGeneratingLabel(`Gerando ${step.label} premium...`);
+    setLoading(true);
 
-      if (step.type !== steps[0].type) {
-        setMessages((prev) => [
-          ...prev,
-          { id: uid(), role: "user", content: step.prompt },
+    setBuilder((previous) => ({
+      ...previous,
+      type: "campaign",
+      campaignAssets:
+        previous.type === "campaign"
+          ? previous.campaignAssets ?? []
+          : [],
+    }));
+
+    try {
+      for (const [index, step] of steps.entries()) {
+        const assistantId = uid();
+
+        setGeneratingLabel(`Gerando ${step.label} premium...`);
+
+        setMessages((previous) => [
+          ...previous,
+          ...(index > 0
+            ? [
+                {
+                  id: uid(),
+                  role: "user" as const,
+                  content: step.prompt,
+                },
+              ]
+            : []),
           {
             id: assistantId,
-            role: "assistant",
-            content: `Gerando ${step.label} com qualidade de agência...\n\n(Pode levar alguns minutos)`,
+            role: "assistant" as const,
+            content:
+              index === 0
+                ? `Briefing aprovado. Gerando ${step.label} premium no painel ao lado...\n\n(Pode levar alguns segundos)`
+                : `Gerando ${step.label} com qualidade de agência...\n\n(Pode levar alguns segundos)`,
           },
         ]);
-      } else {
-        setMessages((prev) => [
-          ...prev,
+
+        currentHistory = [
+          ...currentHistory,
           {
-            id: assistantId,
-            role: "assistant",
-            content: `Briefing aprovado. Gerando ${step.label} premium no painel ao lado...\n\n(Pode levar alguns minutos)`,
+            role: "user",
+            content: step.prompt,
           },
-        ]);
-      }
+        ];
 
-      currentHistory.push({ role: "user", content: step.prompt });
+        try {
+          const response = await sendToOllama(
+            currentHistory,
+            brandContextRef.current,
+            plan,
+            {
+              intent: "campaign",
+              targetAsset: step.type,
+            },
+          );
 
-      try {
-        const res = await sendToOllama(
-          currentHistory,
-          brandContextRef.current,
-          plan,
-          undefined,
-          step.type,
-        );
+          const generatedAsset =
+            response.builder.type === "campaign"
+              ? response.builder.campaignAssets?.[0]
+              : undefined;
 
-        if (res.builder?.campaignAssets && res.builder.campaignAssets.length > 0) {
-          const newAsset = res.builder.campaignAssets[0];
+          if (!generatedAsset?.content) {
+            failures += 1;
 
-          // Proteção contra alucinação da IA omitindo a key "content" e o "id"
-          if (!newAsset.content) {
-            newAsset.content = { ...newAsset } as unknown as BuilderState;
+            setMessages((previous) =>
+              previous.map((message) =>
+                message.id === assistantId
+                  ? {
+                      ...message,
+                      content:
+                        "A IA respondeu, mas não retornou uma peça válida. Vou continuar para a próxima etapa.",
+                    }
+                  : message,
+              ),
+            );
+
+            continue;
           }
-          newAsset.id = newAsset.id || uid();
 
-          newAsset.content.imageSeed = Math.floor(Math.random() * 1_000_000);
-          newAsset.content.type = step.type;
-          newAsset.type = step.type;
+          const normalizedAsset: CampaignAsset = {
+            ...generatedAsset,
+            id: generatedAsset.id || uid(),
+            type: step.type,
+            status: "draft",
+            content: {
+              ...generatedAsset.content,
+              type: step.type,
+              imageSeed:
+                generatedAsset.content.imageSeed ??
+                Math.floor(Math.random() * 1_000_000),
+              brandName:
+                generatedAsset.content.brandName ||
+                brandContextRef.current.brandName ||
+                plan?.brandName ||
+                brandContextRef.current.site?.brandName,
+            },
+          };
 
-          // Prefer brand from site/plan when model omits it
-          newAsset.content.brandName =
-            newAsset.content.brandName ||
-            brandContextRef.current.brandName ||
-            plan?.brandName ||
-            brandContextRef.current.site?.brandName;
+          accumulatedAssets = [
+            ...accumulatedAssets,
+            normalizedAsset,
+          ];
 
-          accumulatedAssets = [...accumulatedAssets, newAsset];
-          setBuilder((prev) => ({
-            ...prev,
+          setBuilder((previous) => ({
+            ...previous,
             type: "campaign",
             campaignAssets: accumulatedAssets,
           }));
+
+          if (response.scores) {
+            setScores(response.scores);
+          }
+
+          setMessages((previous) =>
+            previous.map((message) =>
+              message.id === assistantId
+                ? {
+                    ...message,
+                    content:
+                      response.chat ||
+                      `${step.label} gerado com sucesso no painel ao lado.`,
+                  }
+                : message,
+            ),
+          );
+
+          currentHistory = [
+            ...currentHistory,
+            {
+              role: "assistant",
+              content:
+                response.chat ||
+                `${step.label} gerado com sucesso no painel ao lado.`,
+            },
+          ];
+        } catch (error) {
+          failures += 1;
+
+          const errorMessage =
+            error instanceof Error ? error.message : String(error);
+
+          toast.error(
+            `Falha ao gerar ${step.label}: ${errorMessage}`,
+          );
+
+          setMessages((previous) =>
+            previous.map((message) =>
+              message.id === assistantId
+                ? {
+                    ...message,
+                    content: `Não foi possível gerar ${step.label}: ${errorMessage}`,
+                  }
+                : message,
+            ),
+          );
         }
-
-        if (res.scores) setScores(res.scores);
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantId ? { ...m, content: res.chat } : m,
-          ),
-        );
-        currentHistory.push({ role: "assistant", content: res.chat });
-      } catch (err) {
-        toast.error(
-          `Falha ao gerar o ${step.label}: ${err instanceof Error ? err.message : err}`,
-        );
-        // Continue a iteração para a próxima peça em vez de quebrar (break) toda a geração
-        continue;
       }
-    }
 
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: uid(),
-        role: "assistant",
-        content:
-          "Estrutura finalizada. Navegue pelas abas no painel ao lado, edite os textos e regenere imagens se quiser.",
-      },
-    ]);
-    setGeneratingLabel(undefined);
-    setLoading(false);
+      const generatedCount = accumulatedAssets.length;
+      const expectedCount = steps.length;
+
+      setMessages((previous) => [
+        ...previous,
+        {
+          id: uid(),
+          role: "assistant",
+          content:
+            generatedCount === expectedCount
+              ? "Campanha finalizada. Navegue pelas abas no painel ao lado, edite os textos e regenere imagens se quiser."
+              : generatedCount > 0
+                ? `Gerei ${generatedCount} de ${expectedCount} peças. ${failures} etapa(s) não foram concluídas; tente novamente se desejar.`
+                : "Não consegui concluir as peças da campanha. Verifique a conexão, o modelo configurado e os logs do Ollama.",
+        },
+      ]);
+    } finally {
+      setGeneratingLabel(undefined);
+      setLoading(false);
+    }
   };
 
-  const handleSend = async (text: string, isHiddenAction = false) => {
-    const userMsg: ChatMessage = { id: uid(), role: "user", content: text };
-    const nextMessages = isHiddenAction ? messages : [...messages, userMsg];
+  const handleSend = async (
+    text: string,
+    isHiddenAction = false,
+  ) => {
+    const userMessage: ChatMessage = {
+      id: uid(),
+      role: "user",
+      content: text,
+    };
 
-    if (!isHiddenAction) setMessages(nextMessages);
+    const nextMessages = isHiddenAction
+      ? messages
+      : [...messages, userMessage];
 
-    // Always try to scrape URLs from user input
     if (!isHiddenAction) {
+      setMessages(nextMessages);
       await maybeScrapeUrls(text);
     }
 
-    if (text.includes("Aprovado. Gere os materiais do ecossistema agora.")) {
+    if (
+      text.includes(
+        "Aprovado. Gere os materiais do ecossistema agora.",
+      )
+    ) {
       await generateCampaignSequentially(
-        nextMessages.map((m) => ({ role: m.role, content: m.content })),
+        nextMessages.map((message) => ({
+          role: message.role,
+          content: message.content,
+        })),
       );
+
       return;
     }
 
-    // Also trigger generation if user clearly approves in chat
     const approvalRegex =
       /\b(aprovado|pode gerar|gera as pe[cç]as|gerar as pe[cç]as|pode criar|vamos gerar|pode montar)\b/i;
-    const planReady =
-      discoveryPlanRef.current?.missingInfo?.toLowerCase().includes("nenhum") ||
-      builder.discoveryPlan?.missingInfo?.toLowerCase().includes("nenhum");
 
-    if (!isHiddenAction && planReady && approvalRegex.test(text)) {
+    const planReady =
+      discoveryPlanRef.current?.missingInfo
+        ?.toLowerCase()
+        .includes("nenhuma") ||
+      (builder.type === "discovery_plan" &&
+        builder.discoveryPlan?.missingInfo
+          ?.toLowerCase()
+          .includes("nenhuma"));
+
+    if (
+      !isHiddenAction &&
+      planReady &&
+      approvalRegex.test(text)
+    ) {
       await generateCampaignSequentially(
-        nextMessages.map((m) => ({ role: m.role, content: m.content })),
+        nextMessages.map((message) => ({
+          role: message.role,
+          content: message.content,
+        })),
       );
+
       return;
     }
 
     const assistantId = uid();
+
     if (!isHiddenAction) {
-      setMessages([...nextMessages, { id: assistantId, role: "assistant", content: "" }]);
+      setMessages([
+        ...nextMessages,
+        {
+          id: assistantId,
+          role: "assistant",
+          content: "",
+        },
+      ]);
+    }
+
+    const history: ChatTurn[] = nextMessages.map((message) => ({
+      role: message.role,
+      content: message.content,
+    }));
+
+    if (brandContextRef.current.site && history.length > 0) {
+      const lastMessage = history[history.length - 1];
+
+      if (lastMessage.role === "user") {
+        lastMessage.content = `${lastMessage.content}
+
+[SITE_ANALISADO]
+URL: ${brandContextRef.current.site.url}
+Marca: ${brandContextRef.current.site.brandName}
+Título: ${brandContextRef.current.site.title}
+Descrição: ${brandContextRef.current.site.description}`;
+      }
     }
 
     setLoading(true);
 
-    const history: ChatTurn[] = nextMessages.map((m) => ({
-      role: m.role,
-      content: m.content,
-    }));
-
-    // Inject site summary into the last user turn so the model always sees it
-    if (brandContextRef.current.site && history.length > 0) {
-      const last = history[history.length - 1];
-      if (last.role === "user") {
-        last.content = `${last.content}\n\n[SITE_ANALISADO]\nURL: ${brandContextRef.current.site.url}\nMarca: ${brandContextRef.current.site.brandName}\nTítulo: ${brandContextRef.current.site.title}\nDescrição: ${brandContextRef.current.site.description}`;
-      }
-    }
-
     try {
-      const res = await sendToOllama(
+      const response = await sendToOllama(
         history,
         brandContextRef.current,
-        discoveryPlanRef.current ?? builder.discoveryPlan,
-        (partialChat) => {
-          if (!isHiddenAction) {
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === assistantId ? { ...m, content: partialChat } : m,
-              ),
-            );
-          }
+        discoveryPlanRef.current ??
+          (builder.type === "discovery_plan"
+            ? builder.discoveryPlan
+            : undefined),
+        {
+          intent: "discovery",
+          onStream: (partialChat) => {
+            if (!isHiddenAction) {
+              setMessages((previous) =>
+                previous.map((message) =>
+                  message.id === assistantId
+                    ? {
+                        ...message,
+                        content: partialChat,
+                      }
+                    : message,
+                ),
+              );
+            }
+          },
         },
       );
 
       if (!isHiddenAction) {
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantId ? { ...m, content: res.chat } : m,
+        setMessages((previous) =>
+          previous.map((message) =>
+            message.id === assistantId
+              ? {
+                  ...message,
+                  content: response.chat,
+                }
+              : message,
           ),
         );
       }
 
-      if (res.builder && res.builder.type !== "none") {
-        if (res.builder.type === "discovery_plan" && res.builder.discoveryPlan) {
-          discoveryPlanRef.current = res.builder.discoveryPlan;
+      if (
+        response.builder.type === "discovery_plan" &&
+        response.builder.discoveryPlan
+      ) {
+        const discoveryPlan = response.builder.discoveryPlan;
 
-          // Enrich brand context from plan
-          setBrandContext((prev) => ({
-            ...prev,
-            brandName: res.builder.discoveryPlan?.brandName || prev.brandName,
-            product: res.builder.discoveryPlan?.product || prev.product,
-            offer: res.builder.discoveryPlan?.offer || prev.offer,
-            persona:
-              res.builder.discoveryPlan?.audience || prev.persona,
-          }));
-        }
+        discoveryPlanRef.current = discoveryPlan;
 
-        // If execution returned a full campaign in one shot
-        if (
-          res.builder.type === "campaign" &&
-          res.builder.campaignAssets?.length
-        ) {
-          res.builder.campaignAssets = res.builder.campaignAssets.map((a) => ({
-            ...a,
-            content: {
-              ...a.content,
-              imageSeed: a.content.imageSeed ?? Math.floor(Math.random() * 1_000_000),
-            },
-          }));
-        }
+        setBrandContext((previous) => {
+          const next: BrandContext = {
+            ...previous,
+            brandName: discoveryPlan.brandName || previous.brandName,
+            product: discoveryPlan.product || previous.product,
+            offer: discoveryPlan.offer || previous.offer,
+            persona: discoveryPlan.audience || previous.persona,
+          };
+
+          brandContextRef.current = next;
+
+          return next;
+        });
 
         setBuilder({
-          ...res.builder,
+          type: "discovery_plan",
+          discoveryPlan,
           imageSeed: Math.floor(Math.random() * 1_000_000),
         });
       }
 
-      if (res.scores) setScores(res.scores);
-    } catch (err) {
-      toast.error(
-        `Falha ao conectar: ${err instanceof Error ? err.message : err}`,
-      );
-      setMessages((prev) => prev.filter((m) => m.id !== assistantId));
+      if (
+        response.builder.type === "campaign" &&
+        response.builder.campaignAssets?.length
+      ) {
+        const campaignAssets = response.builder.campaignAssets.map(
+          (asset) => ({
+            ...asset,
+            id: asset.id || uid(),
+            status: asset.status || "draft",
+            content: {
+              ...asset.content,
+              imageSeed:
+                asset.content.imageSeed ??
+                Math.floor(Math.random() * 1_000_000),
+            },
+          }),
+        );
+
+        setBuilder({
+          type: "campaign",
+          campaignAssets,
+          imageSeed: Math.floor(Math.random() * 1_000_000),
+        });
+      }
+
+      if (response.scores) {
+        setScores(response.scores);
+      }
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+
+      toast.error(`Falha ao conectar: ${errorMessage}`);
+
+      if (!isHiddenAction) {
+        setMessages((previous) =>
+          previous.filter((message) => message.id !== assistantId),
+        );
+      }
     } finally {
       setLoading(false);
     }
@@ -365,17 +602,23 @@ function Home() {
         <section className="flex h-1/2 shrink-0 flex-col border-b lg:h-full lg:w-[420px] lg:border-b-0 lg:border-r">
           <ChatPanel
             messages={messages}
-            onSend={(t) => handleSend(t, false)}
+            onSend={(text) => handleSend(text, false)}
             loading={loading}
             scraping={scraping}
             brandContext={brandContext}
             setBrandContext={setBrandContext}
           />
         </section>
-        <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-background relative">
+
+        <section className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-background">
           <PageBuilder
             state={builder}
-            onChange={(patch) => setBuilder((prev) => ({ ...prev, ...patch }))}
+            onChange={(patch) =>
+              setBuilder((previous) => ({
+                ...previous,
+                ...patch,
+              }))
+            }
             loading={loading}
             onRefine={(prompt) => handleSend(prompt, true)}
             scores={scores}
@@ -383,6 +626,7 @@ function Home() {
           />
         </section>
       </main>
+
       <Toaster richColors position="top-right" />
     </>
   );

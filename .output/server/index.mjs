@@ -15,26 +15,26 @@ globalThis.__nitro_vite_envs__ = services;
 //#endregion
 //#region #nitro/virtual/public-assets-data
 var public_assets_data_default = {
-	"/assets/index-B91gtGIR.js": {
+	"/assets/routes-f_rRJa1f.js": {
 		"type": "text/javascript; charset=utf-8",
-		"etag": "\"54114-VMkMhgeUh6Myp7/1TGY0c3j1C6w\"",
-		"mtime": "2026-07-20T11:21:27.003Z",
-		"size": 344340,
-		"path": "../public/assets/index-B91gtGIR.js"
+		"etag": "\"52ef7-VXghgiVQ3HMjqDTINc0PdV1cJIk\"",
+		"mtime": "2026-07-20T18:19:59.313Z",
+		"size": 339703,
+		"path": "../public/assets/routes-f_rRJa1f.js"
 	},
-	"/assets/routes-BoUNtQ-S.js": {
-		"type": "text/javascript; charset=utf-8",
-		"etag": "\"51407-LidDLmMhYdA8MJ4/7NnZ++wbxgg\"",
-		"mtime": "2026-07-20T11:21:27.003Z",
-		"size": 332807,
-		"path": "../public/assets/routes-BoUNtQ-S.js"
-	},
-	"/assets/styles-D-6lAgDe.css": {
+	"/assets/styles-CaldLoH9.css": {
 		"type": "text/css; charset=utf-8",
-		"etag": "\"14352-SWda6L9YxJINeYriQ7L83CTfI54\"",
-		"mtime": "2026-07-20T11:21:27.003Z",
-		"size": 82770,
-		"path": "../public/assets/styles-D-6lAgDe.css"
+		"etag": "\"14593-LgFe+01+PMbERlDw58AZf4AK4CY\"",
+		"mtime": "2026-07-20T18:19:59.314Z",
+		"size": 83347,
+		"path": "../public/assets/styles-CaldLoH9.css"
+	},
+	"/assets/index-D7OofYkq.js": {
+		"type": "text/javascript; charset=utf-8",
+		"etag": "\"54159-idCwTXH3W7a81HUSCnP0PHMMZ2Q\"",
+		"mtime": "2026-07-20T18:19:59.312Z",
+		"size": 344409,
+		"path": "../public/assets/index-D7OofYkq.js"
 	}
 };
 //#endregion
