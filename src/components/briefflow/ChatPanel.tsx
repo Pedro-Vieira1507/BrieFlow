@@ -178,7 +178,7 @@ export function ChatPanel({
         <div className="flex items-center gap-3">
           <div className="grid size-10 place-items-center rounded-xl bg-white/5 border border-white/10 shadow-lg shadow-blue-600/20 text-white">
             <img
-              src="/assets/logo.png"
+              src="/assets/icone-brieflow.png"
               alt="BrieFlow Logo"
               className="size-8"
             />
