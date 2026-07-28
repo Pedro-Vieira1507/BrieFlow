@@ -135,7 +135,7 @@ export function PageBuilder({
         <div className="flex items-center gap-3">
           <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-white/5 border border-white/10 text-white">
             <img
-              src="/assets/logo.png"
+              src="/assets/icone-brieflow.png"
               alt="BrieFlow Logo"
               className="size-8"
             />
