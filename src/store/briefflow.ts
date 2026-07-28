@@ -1,0 +1,126 @@
+import { create } from "zustand";
+import type { ChatMessage } from "@/components/briefflow/chat/types";
+import type {
+  BrandContext,
+  BuilderState,
+  CampaignAsset,
+  SiteBrandData,
+} from "@/types/builder";
+
+interface Scores {
+  persuasion: number;
+  clarity: number;
+  seo: number;
+}
+
+interface BriefflowState {
+  messages: ChatMessage[];
+  builder: BuilderState;
+  brandContext: BrandContext;
+  scores?: Scores;
+  loading: boolean;
+  scraping: boolean;
+  generatingLabel?: string;
+  user: any | null; // <-- Usuário adicionado aqui
+
+  // actions
+  setMessages: (updater: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => void;
+  appendMessage: (msg: ChatMessage) => void;
+  updateMessage: (id: string, patch: Partial<ChatMessage>) => void;
+
+  setBuilder: (updater: BuilderState | ((prev: BuilderState) => BuilderState)) => void;
+  patchBuilder: (patch: Partial<BuilderState>) => void;
+  patchCampaignAssets: (assets: CampaignAsset[]) => void;
+
+  setBrandContext: (updater: BrandContext | ((prev: BrandContext) => BrandContext)) => void;
+  mergeSiteIntoContext: (site: SiteBrandData) => void;
+
+  setScores: (scores?: Scores) => void;
+  setLoading: (v: boolean) => void;
+  setScraping: (v: boolean) => void;
+  setGeneratingLabel: (v?: string) => void;
+  setUser: (user: any | null) => void; // <-- Função adicionada aqui
+
+  reset: () => void;
+}
+
+const initialBrand: BrandContext = {
+  persona: "Público-alvo",
+  tone: "Premium",
+  framework: "AIDA",
+};
+
+export const useBriefflowStore = create<BriefflowState>((set) => ({
+  messages: [],
+  builder: { type: "none" },
+  brandContext: initialBrand,
+  scores: undefined,
+  loading: false,
+  scraping: false,
+  generatingLabel: undefined,
+  user: null, // <-- Estado inicial do usuário aqui
+
+  setMessages: (updater) =>
+    set((s) => ({
+      messages: typeof updater === "function" ? updater(s.messages) : updater,
+    })),
+
+  appendMessage: (msg) => set((s) => ({ messages: [...s.messages, msg] })),
+
+  updateMessage: (id, patch) =>
+    set((s) => ({
+      messages: s.messages.map((m) => (m.id === id ? { ...m, ...patch } : m)),
+    })),
+
+  setBuilder: (updater) =>
+    set((s) => ({
+      builder: typeof updater === "function" ? updater(s.builder) : updater,
+    })),
+
+  patchBuilder: (patch) =>
+    set((s) => ({ builder: { ...s.builder, ...patch } as BuilderState })),
+
+  patchCampaignAssets: (campaignAssets) =>
+    set((s) => ({
+      builder: { ...s.builder, type: "campaign", campaignAssets } as BuilderState,
+    })),
+
+  setBrandContext: (updater) =>
+    set((s) => ({
+      brandContext:
+        typeof updater === "function" ? updater(s.brandContext) : updater,
+    })),
+
+  mergeSiteIntoContext: (site) =>
+    set((s) => ({
+      brandContext: {
+        ...s.brandContext,
+        brandName: site.brandName || s.brandContext.brandName,
+        site,
+        persona:
+          s.brandContext.persona === "Público-alvo"
+            ? `Público da marca ${site.brandName}`
+            : s.brandContext.persona,
+      },
+    })),
+
+  setScores: (scores) => set({ scores }),
+  setLoading: (loading) => set({ loading }),
+  setScraping: (scraping) => set({ scraping }),
+  setGeneratingLabel: (generatingLabel) => set({ generatingLabel }),
+  
+  setUser: (user) => set({ user }), // <-- Atualizador do usuário aqui
+
+  reset: () =>
+    set({
+      messages: [],
+      builder: { type: "none" },
+      brandContext: initialBrand,
+      scores: undefined,
+      loading: false,
+      scraping: false,
+      generatingLabel: undefined,
+    }),
+}));
+
+export const uid = () => Math.random().toString(36).slice(2, 10);

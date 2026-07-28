@@ -1,10 +1,7 @@
-/* Fontes premium via Google Fonts — DEVE VIR PRIMEIRO */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Geist:wght@400;500;600;700;800;900&display=swap');
-
 @import "tailwindcss" source(none);
 @source "../src";
 @import "tw-animate-css";
-@custom-variant dark (&:is(.dark *));
+@custom-variant dark (&:is(.dark, .dark *));
 
 @theme inline {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
@@ -15,75 +12,97 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+
+  --color-surface-0: var(--surface-0);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+
+  --color-fg-primary: var(--fg-primary);
+  --color-fg-secondary: var(--fg-secondary);
+  --color-fg-tertiary: var(--fg-tertiary);
+  --color-fg-muted: var(--fg-muted);
+
+  --color-border-subtle: var(--border-subtle);
+  --color-border-strong: var(--border-strong);
+
   --color-brand: var(--brand);
+  --color-brand-fg: var(--brand-fg);
+  --color-brand-muted: var(--brand-muted);
+  --color-accent-danger: var(--accent-danger);
+  --color-accent-success: var(--accent-success);
 
-  /* Sombras Premium */
-  --shadow-elegant: 0 10px 40px -12px rgba(0,0,0,0.1);
-  --shadow-soft: 0 2px 12px -4px rgba(0,0,0,0.05);
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+  --radius-2xl: 24px;
 }
 
-:root {
-  --background: #ffffff;
-  --foreground: #020817;
-  --border: #e2e8f0;
-  --input: #e2e8f0;
-  --ring: #020817;
+:root, .dark {
+  --background: #050505;
+  --foreground: #fafafa;
+  
+  --surface-0: #050505;
+  --surface-1: #0a0a0b;
+  --surface-2: #101012;
+  --surface-3: #17171a;
+
+  --fg-primary: #fafafa;
+  --fg-secondary: rgba(250, 250, 250, 0.72);
+  --fg-tertiary: rgba(250, 250, 250, 0.50);
+  --fg-muted: rgba(250, 250, 250, 0.32);
+
+  --border: rgba(255, 255, 255, 0.06);
+  --border-subtle: rgba(255, 255, 255, 0.05);
+  --border-strong: rgba(255, 255, 255, 0.10);
+  --input: rgba(255, 255, 255, 0.08);
+  --ring: rgba(129, 140, 248, 0.55);
+
   --brand: #6366f1;
-}
+  --brand-fg: #ffffff;
+  --brand-muted: rgba(99, 102, 241, 0.14);
+  --brand-glow: rgba(99, 102, 241, 0.35);
 
-.dark {
-  --background: #09090b;
-  --foreground: #f8fafc;
-  --border: #1e293b;
-  --input: #1e293b;
-  --ring: #cbd5e1;
-  --brand: #818cf8;
+  --accent-danger: #f43f5e;
+  --accent-success: #22c55e;
+
+  --gradient-brand: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+  --gradient-radial-brand: radial-gradient(circle at 30% 20%, rgba(99, 102, 241, 0.15), transparent 60%);
+
+  --shadow-elevated: 0 20px 50px -20px rgba(0, 0, 0, 0.7), 0 4px 12px -4px rgba(0, 0, 0, 0.5);
+  --shadow-glass: 0 4px 24px -8px rgba(0, 0, 0, 0.5), inset 0 1px 0 0 rgba(255, 255, 255, 0.05);
+  --shadow-brand: 0 10px 40px -12px rgba(99, 102, 241, 0.5);
+  --shadow-soft: 0 2px 8px -2px rgba(0, 0, 0, 0.4);
 }
 
 @layer base {
-  * {
-    border-color: var(--color-border);
-  }
-  body {
-    background-color: var(--color-background);
-    color: var(--color-foreground);
+  * { border-color: var(--border); }
+  html, body {
+    background-color: var(--surface-0);
+    color: var(--fg-primary);
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
-  h1, h2, h3, h4 {
-    font-family: var(--font-display);
-    letter-spacing: -0.025em;
-  }
+  h1, h2, h3, h4, h5 { font-family: var(--font-display); letter-spacing: -0.02em; color: var(--fg-primary); }
+  ::selection { background-color: var(--brand-muted); color: var(--fg-primary); }
+
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.06); border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.12); background-clip: padding-box; }
 }
 
-@keyframes typing-bounce {
-  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
-  30% { transform: translateY(-4px); opacity: 1; }
-}
+@keyframes shimmer { 0% { background-position: -400px 0; } 100% { background-position: 400px 0; } }
+@keyframes fade-in-up { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes scale-in { from { opacity: 0; transform: scale(0.96); } to { opacity: 1; transform: scale(1); } }
+@keyframes typing-bounce { 0%, 60%, 100% { transform: translateY(0); opacity: 0.4; } 30% { transform: translateY(-4px); opacity: 1; } }
 
-.typing-dot {
-  animation: typing-bounce 1.2s infinite ease-in-out;
-}
-
-@utility editable-hover {
-  cursor: text;
-  transition: outline-color 0.15s ease, background-color 0.15s ease;
-  outline: 2px dashed transparent;
-  outline-offset: 4px;
-  border-radius: 4px;
-  &:hover {
-    outline-color: rgba(15, 23, 42, 0.2);
-    background-color: rgba(15, 23, 42, 0.05);
-  }
-  /* Placeholder visual quando vazio */
-  &:empty:before {
-    content: attr(data-placeholder);
-    color: rgba(148, 163, 184, 0.5);
-    font-style: italic;
-  }
-}
-.dark .editable-hover:hover {
-    outline-color: rgba(248, 250, 252, 0.2);
-    background-color: rgba(248, 250, 252, 0.05);
-}
+@utility glass { background: color-mix(in oklab, var(--surface-2) 60%, transparent); backdrop-filter: blur(20px) saturate(160%); border: 1px solid var(--border-subtle); }
+@utility glass-strong { background: color-mix(in oklab, var(--surface-2) 80%, transparent); backdrop-filter: blur(28px) saturate(180%); border: 1px solid var(--border-strong); box-shadow: var(--shadow-glass); }
+@utility skeleton { background: linear-gradient(90deg, var(--surface-2) 0%, var(--surface-3) 50%, var(--surface-2) 100%); background-size: 800px 100%; animation: shimmer 1.6s infinite linear; }
+@utility fade-in-up { animation: fade-in-up 0.5s cubic-bezier(0.22, 1, 0.36, 1) both; }
+@utility scale-in { animation: scale-in 0.35s cubic-bezier(0.22, 1, 0.36, 1) both; }
+@utility gradient-brand-text { background: var(--gradient-brand); -webkit-background-clip: text; background-clip: text; color: transparent; }
+@utility editable-hover { cursor: text; transition: outline-color 0.15s ease, background-color 0.15s ease; outline: 2px dashed transparent; outline-offset: 4px; border-radius: 6px; &:hover { outline-color: rgba(250, 250, 250, 0.16); background-color: rgba(250, 250, 250, 0.03); } &:empty:before { content: attr(data-placeholder); color: var(--fg-muted); font-style: italic; } }

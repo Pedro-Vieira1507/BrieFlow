@@ -93,20 +93,16 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     ],
     links: [
       { rel: "stylesheet", href: appCss },
-      { rel: "icon", href: "/assets/icone-brieflow.png", type: "image/png" },
-      { rel: "apple-touch-icon", href: "/assets/icone-brieflow.png" },
+      { rel: "icon", href: "/assets/icone-brieflow.png?v=3", type: "image/png", sizes: "any" },
+      { rel: "apple-touch-icon", href: "/assets/icone-brieflow.png?v=3" },
       { rel: "preconnect", href: "https://fonts.googleapis.com" },
-      {
-        rel: "preconnect",
-        href: "https://fonts.gstatic.com",
-        crossOrigin: "anonymous",
-      },
+      { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
       {
         rel: "stylesheet",
-        href: "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap",
+        href: "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Geist:wght@400;500;600;700;800;900&display=swap",
       },
     ],
-  }),
+  }), // <-- O erro estava aqui! Faltava esse fechamento
   shellComponent: RootShell,
   component: RootComponent,
   notFoundComponent: NotFoundComponent,

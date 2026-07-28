@@ -17,10 +17,15 @@ export async function saveAssetToLibrary(name: string, state: BuilderState) {
     );
   }
 
+  // NOVO: Pega o usuário logado
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Você precisa fazer login para salvar campanhas na biblioteca.");
+
   const { data, error } = await supabase
     .from("assets")
     .insert([
       {
+        user_id: user.id, // NOVO: Relaciona ao usuário logado
         name,
         type: state.type,
         content: state,
@@ -34,7 +39,6 @@ export async function saveAssetToLibrary(name: string, state: BuilderState) {
     console.error("Erro ao salvar asset:", error);
     throw error;
   }
-
   return data;
 }
 
