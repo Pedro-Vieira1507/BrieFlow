@@ -41,7 +41,7 @@ ${brandContext.site ? formatSiteContextForAgent(brandContext.site) : "Nenhum sit
 function getAssetContentSchema(targetAsset: AiAssetType): string {
   const designFields = `
     "themeColor": "#HEX da cor primária escolhida por você",
-    "secondaryColor": "#HEX da cor secundária escolhida por você",
+    "secondaryColor": "#HEX da cor secundária escolhida por você"
   `;
 
   if (targetAsset === "banner") {
@@ -245,7 +245,11 @@ export async function sendToOllama(history: ChatTurn[], brandContext: BrandConte
 
   try {
     const response = await fetch(resolveOllamaApiUrl(), {
-      method: "POST", headers: { "Content-Type": "application/json" },
+      method: "POST", 
+      headers: { 
+        "Content-Type": "application/json",
+        "ngrok-skip-browser-warning": "true" 
+      },
       body: JSON.stringify({
         model,
         messages: [{ role: "system", content: systemPrompt }, ...history.slice(wantsExecution ? -3 : -6)],
