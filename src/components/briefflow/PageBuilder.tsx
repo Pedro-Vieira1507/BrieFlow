@@ -134,7 +134,7 @@ export function PageBuilder({
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-white/5 bg-[#09090B]/80 px-8 py-5 backdrop-blur-xl z-10 sticky top-0">
         <div className="flex items-center gap-3">
           <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-white/5 border border-white/10 text-white">
-            <img src="public/assets/logo.png" alt="BrieFlow Logo" className="size-7" />
+            <img src="/assets/logo.png" alt="BrieFlow Logo" className="size-7" />
           </div>
           <div>
             <h2 className="font-display text-base font-bold tracking-tight text-white">
