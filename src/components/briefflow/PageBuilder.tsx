@@ -5,7 +5,7 @@ import { SocialPreview } from "./SocialPreview";
 import { BannerPreview } from "./BannerPreview";
 import { Editable } from "./Editable";
 import { Button } from "@/components/ui/button";
-import { Sparkles, Save, Loader2, Download, SearchCheck, MessageSquare, Zap } from "lucide-react";
+import { Sparkles, Save, Loader2, Download, SearchCheck, MessageSquare } from "lucide-react";
 import { toast } from "sonner";
 import { isSupabaseConfigured, saveAssetToLibrary } from "@/lib/supabase";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -26,47 +26,107 @@ const safeRenderText = (content: unknown): string => {
   return String(content);
 };
 
-function AssetPreview({ type, content, onChange }: { type: "email" | "social" | "banner"; content: BuilderState; onChange: (patch: Partial<BuilderState>) => void; }) {
+function AssetPreview({
+  type,
+  content,
+  onChange,
+}: {
+  type: "email" | "social" | "banner";
+  content: BuilderState;
+  onChange: (patch: Partial<BuilderState>) => void;
+}) {
   if (type === "email") return <EmailPreview state={content} onChange={onChange} />;
   if (type === "banner") return <BannerPreview state={content} onChange={onChange} />;
   return <SocialPreview state={content} onChange={onChange} />;
 }
 
-function CampaignTabs({ assets, onAssetChange }: { assets: CampaignAsset[]; onAssetChange: (assetId: string, patch: Partial<BuilderState>) => void; }) {
+function CampaignTabs({
+  assets,
+  onAssetChange,
+}: {
+  assets: CampaignAsset[];
+  onAssetChange: (assetId: string, patch: Partial<BuilderState>) => void;
+}) {
   const defaultTab = assets[0]?.type || "banner";
   const [activeTab, setActiveTab] = useState(defaultTab);
-  useEffect(() => { if (assets.length) setActiveTab(assets[assets.length - 1].type); }, [assets.length]);
+
+  useEffect(() => {
+    if (assets.length) setActiveTab(assets[assets.length - 1].type);
+  }, [assets.length]);
 
   return (
     <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
       <TabsList className="grid w-full max-w-md mx-auto grid-cols-3 h-14 bg-[#18181B] p-1.5 rounded-2xl mb-8 border border-white/5 shadow-inner">
-        <TabsTrigger value="banner" disabled={!assets.some(a=>a.type==='banner')} className="rounded-xl font-bold tracking-wide uppercase text-[10px] data-[state=active]:bg-[#27272A] data-[state=active]:text-white text-white/50">Banner</TabsTrigger>
-        <TabsTrigger value="email" disabled={!assets.some(a=>a.type==='email')} className="rounded-xl font-bold tracking-wide uppercase text-[10px] data-[state=active]:bg-[#27272A] data-[state=active]:text-white text-white/50">E-mail</TabsTrigger>
-        <TabsTrigger value="social" disabled={!assets.some(a=>a.type==='social')} className="rounded-xl font-bold tracking-wide uppercase text-[10px] data-[state=active]:bg-[#27272A] data-[state=active]:text-white text-white/50">Social</TabsTrigger>
+        <TabsTrigger
+          value="banner"
+          disabled={!assets.some((a) => a.type === "banner")}
+          className="rounded-xl font-bold tracking-wide uppercase text-[10px] data-[state=active]:bg-[#27272A] data-[state=active]:text-white text-white/50"
+        >
+          Banner
+        </TabsTrigger>
+        <TabsTrigger
+          value="email"
+          disabled={!assets.some((a) => a.type === "email")}
+          className="rounded-xl font-bold tracking-wide uppercase text-[10px] data-[state=active]:bg-[#27272A] data-[state=active]:text-white text-white/50"
+        >
+          E-mail
+        </TabsTrigger>
+        <TabsTrigger
+          value="social"
+          disabled={!assets.some((a) => a.type === "social")}
+          className="rounded-xl font-bold tracking-wide uppercase text-[10px] data-[state=active]:bg-[#27272A] data-[state=active]:text-white text-white/50"
+        >
+          Social
+        </TabsTrigger>
       </TabsList>
       {assets.map((asset) => (
-        <TabsContent key={asset.id} value={asset.type} className="animate-in fade-in slide-in-from-bottom-4 duration-500 mt-0 w-full">
-          <AssetPreview type={asset.type} content={asset.content} onChange={(patch) => onAssetChange(asset.id, patch)} />
+        <TabsContent
+          key={asset.id}
+          value={asset.type}
+          className="animate-in fade-in slide-in-from-bottom-4 duration-500 mt-0 w-full"
+        >
+          <AssetPreview
+            type={asset.type}
+            content={asset.content}
+            onChange={(patch) => onAssetChange(asset.id, patch)}
+          />
         </TabsContent>
       ))}
     </Tabs>
   );
 }
 
-export function PageBuilder({ state, onChange, loading, onRefine, scores, generatingLabel }: Props) {
+export function PageBuilder({
+  state,
+  onChange,
+  loading,
+  onRefine,
+  scores,
+  generatingLabel,
+}: Props) {
   const hasContent = state.type !== "none";
-  const isSaveable = hasContent && state.type !== "discovery_plan" && (state.type === "campaign" ? Boolean(state.campaignAssets?.length) : true);
+  const isSaveable =
+    hasContent &&
+    state.type !== "discovery_plan" &&
+    (state.type === "campaign" ? Boolean(state.campaignAssets?.length) : true);
   const [isSaving, setIsSaving] = useState(false);
-  
-  // Força Dark Mode global (Glassmorphism AI Look)
-  useEffect(() => { document.documentElement.classList.add("dark"); }, []);
+
+  // For a Dark Mode global (Glassmorphism AI Look)
+  useEffect(() => {
+    document.documentElement.classList.add("dark");
+  }, []);
 
   const handleSaveToLibrary = async () => {
     if (!isSupabaseConfigured) return toast.error("Biblioteca não configurada.");
     setIsSaving(true);
-    try { await saveAssetToLibrary("Campanha AI", state); toast.success("Salvo na biblioteca!"); } 
-    catch { toast.error("Erro ao salvar."); } 
-    finally { setIsSaving(false); }
+    try {
+      await saveAssetToLibrary("Campanha AI", state);
+      toast.success("Salvo na biblioteca!");
+    } catch {
+      toast.error("Erro ao salvar.");
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -74,31 +134,59 @@ export function PageBuilder({ state, onChange, loading, onRefine, scores, genera
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-white/5 bg-[#09090B]/80 px-8 py-5 backdrop-blur-xl z-10 sticky top-0">
         <div className="flex items-center gap-3">
           <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-white/5 border border-white/10 text-white">
-            <Zap className="size-4 text-blue-400" />
+            <img src="public/assets/logo.png" alt="BrieFlow Logo" className="size-7" />
           </div>
           <div>
-            <h2 className="font-display text-base font-bold tracking-tight text-white">Painel de Peças</h2>
-            <p className="text-[11px] font-medium text-white/40 uppercase tracking-widest">Live Preview</p>
+            <h2 className="font-display text-base font-bold tracking-tight text-white">
+              Painel de Peças
+            </h2>
+            <p className="text-[11px] font-medium text-white/40 uppercase tracking-widest">
+              Live Preview
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-3">
           {scores && isSaveable && (
             <TooltipProvider>
               <div className="hidden md:flex items-center gap-4 mx-2 text-[11px] font-bold uppercase tracking-wider text-white/50 border-x border-white/10 px-4 h-8">
-                <Tooltip><TooltipTrigger className="flex items-center gap-1.5"><MessageSquare className="size-3.5 text-rose-500" /> {scores.persuasion}</TooltipTrigger><TooltipContent>Índice de Persuasão da Copy</TooltipContent></Tooltip>
-                <Tooltip><TooltipTrigger className="flex items-center gap-1.5"><SearchCheck className="size-3.5 text-blue-500" /> {scores.clarity}</TooltipTrigger><TooltipContent>Clareza e Legibilidade</TooltipContent></Tooltip>
+                <Tooltip>
+                  <TooltipTrigger className="flex items-center gap-1.5">
+                    <MessageSquare className="size-3.5 text-rose-500" /> {scores.persuasion}
+                  </TooltipTrigger>
+                  <TooltipContent>Índice de Persuasão da Copy</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger className="flex items-center gap-1.5">
+                    <SearchCheck className="size-3.5 text-blue-500" /> {scores.clarity}
+                  </TooltipTrigger>
+                  <TooltipContent>Clareza e Legibilidade</TooltipContent>
+                </Tooltip>
               </div>
             </TooltipProvider>
           )}
-          <Button variant="outline" size="sm" onClick={() => toast.success("Download iniciado! (Mock)")} disabled={!isSaveable} className="border-white/10 bg-transparent text-white hover:bg-white/5">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => toast.success("Download iniciado! (Mock)")}
+            disabled={!isSaveable}
+            className="border-white/10 bg-transparent text-white hover:bg-white/5"
+          >
             <Download className="mr-2 size-3.5" /> Exportar
           </Button>
-          <Button size="sm" disabled={!isSaveable || loading || isSaving} onClick={handleSaveToLibrary} className="bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-500/20">
-            {isSaving ? <Loader2 className="mr-2 size-3.5 animate-spin" /> : <Save className="mr-2 size-3.5" />} Salvar
+          <Button
+            size="sm"
+            disabled={!isSaveable || loading || isSaving}
+            onClick={handleSaveToLibrary}
+            className="bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-500/20"
+          >
+            {isSaving ? (
+              <Loader2 className="mr-2 size-3.5 animate-spin" />
+            ) : (
+              <Save className="mr-2 size-3.5" />
+            )} Salvar
           </Button>
         </div>
       </header>
-
       <div className={`flex-1 overflow-y-auto p-6 lg:p-12 relative ${loading && state.type === "discovery_plan" ? "opacity-50 pointer-events-none" : ""}`}>
         <div className="mx-auto max-w-5xl">
           <div className="space-y-12">
@@ -144,6 +232,7 @@ export function PageBuilder({ state, onChange, loading, onRefine, scores, genera
                 </div>
               </div>
             )}
+
             {state.type === "none" && (
               <div className="flex h-[60vh] flex-col items-center justify-center text-center opacity-40">
                 <Sparkles className="size-12 mb-4 text-white" />
