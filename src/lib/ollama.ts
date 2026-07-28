@@ -247,8 +247,7 @@ export async function sendToOllama(history: ChatTurn[], brandContext: BrandConte
     const response = await fetch(resolveOllamaApiUrl(), {
       method: "POST", 
       headers: { 
-        "Content-Type": "application/json",
-        "ngrok-skip-browser-warning": "true" 
+        "Content-Type": "application/json", 
       },
       body: JSON.stringify({
         model,
