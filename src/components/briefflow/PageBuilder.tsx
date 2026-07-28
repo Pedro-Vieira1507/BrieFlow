@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useBriefflowStore } from "@/store/briefflow";
 import { isSupabaseConfigured, saveAssetToLibrary } from "@/lib/supabase";
+import { buildPollinationsUrl } from "@/lib/pollinations";
 import { BuilderHeader } from "./builder/BuilderHeader";
 import { GeneratingBanner } from "./builder/GeneratingBanner";
 import { CampaignTabs } from "./builder/CampaignTabs";
@@ -39,14 +40,86 @@ export function PageBuilder({ onRefine }: Props) {
       toast.error("Biblioteca não configurada");
       return;
     }
+    
+    // Cria um toast de carregamento na tela e guarda o ID dele
+    const toastId = toast.loading("Salvando campanha na biblioteca...");
     setIsSaving(true);
+    
     try {
       await saveAssetToLibrary("Campanha AI", builder);
-      toast.success("Salvo na biblioteca");
+      // Atualiza o MESMO toast para sucesso
+      toast.success("Salvo na biblioteca com sucesso!", { id: toastId });
     } catch {
-      toast.error("Erro ao salvar");
+      // Atualiza o MESMO toast para erro
+      toast.error("Erro ao salvar a campanha", { id: toastId });
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleExport = async () => {
+    if (builder.type !== "campaign" || !builder.campaignAssets) return;
+    
+    // Toast com estado progressivo para não empilhar na tela
+    const toastId = toast.loading("Preparando arquivos para download...");
+    
+    try {
+      let textContent = "=== CAMPANHA BRIEFLOW ===\n\n";
+
+      for (const asset of builder.campaignAssets) {
+        const c = asset.content as any;
+        textContent += `--- PEÇA: ${asset.type.toUpperCase()} ---\n`;
+        if (c.title) textContent += `Título: ${c.title}\n`;
+        if (c.subtitle) textContent += `Subtítulo: ${c.subtitle}\n`;
+        if (c.body) textContent += `Corpo:\n${c.body}\n`;
+        if (c.caption) textContent += `Legenda:\n${c.caption}\n`;
+        if (c.hashtags?.length) textContent += `Hashtags: ${c.hashtags.join(" ")}\n`;
+        if (c.cta) textContent += `CTA: ${c.cta}\n`;
+        textContent += `\n`;
+
+        // Descobre qual imagem salvar (A que o usuário fez upload ou a da IA)
+        let imgUrl = c.productImageUrl;
+        if (!imgUrl && c.imagePrompt) {
+            const w = asset.type === 'social' ? 1080 : 1200;
+            const h = asset.type === 'social' ? 1350 : 600;
+            imgUrl = buildPollinationsUrl(c.imagePrompt, { width: w, height: h, seed: c.imageSeed });
+        }
+
+        // Força o download da imagem via blob
+        if (imgUrl) {
+          try {
+            const response = await fetch(imgUrl);
+            const blob = await response.blob();
+            const blobUrl = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = blobUrl;
+            a.download = `brieflow-${asset.type}.png`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(blobUrl);
+          } catch (imgErr) {
+            // Fallback se o navegador bloquear o CORS nativo
+            window.open(imgUrl, '_blank');
+          }
+        }
+      }
+
+      // Baixa o arquivo de texto com a Copy de todas as peças
+      const blobText = new Blob([textContent], { type: "text/plain;charset=utf-8" });
+      const textUrl = URL.createObjectURL(blobText);
+      const aText = document.createElement("a");
+      aText.href = textUrl;
+      aText.download = "copy_campanha.txt";
+      document.body.appendChild(aText);
+      aText.click();
+      document.body.removeChild(aText);
+
+      // Finaliza o carregamento indicando sucesso
+      toast.success("Download concluído com sucesso!", { id: toastId });
+    } catch (e) {
+      toast.error("Erro ao exportar arquivos.", { id: toastId });
+      console.error(e);
     }
   };
 
@@ -68,7 +141,7 @@ export function PageBuilder({ onRefine }: Props) {
         isSaving={isSaving}
         loading={loading}
         scores={scores}
-        onExport={() => toast.success("Download iniciado (mock)")}
+        onExport={handleExport}
         onSave={handleSave}
       />
 

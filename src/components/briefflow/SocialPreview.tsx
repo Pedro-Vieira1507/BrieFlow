@@ -1,3 +1,4 @@
+// src/components/briefflow/SocialPreview.tsx
 import { useEffect, useMemo, useState } from "react";
 import { Editable } from "./Editable";
 import type { BuilderState } from "@/types/builder";
@@ -10,10 +11,9 @@ interface Props {
 }
 
 export function SocialPreview({ state, onChange }: Props) {
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
+  const [imageStatus, setImageStatus] = useState<"loading" | "loaded" | "error">("loading");
   const [useFallback, setUseFallback] = useState(false);
-  
+
   const prompt = state.imagePrompt || "";
   const isProductImage = !!state.productImageUrl;
   const themeColor = state.themeColor || "#2563EB";
@@ -24,11 +24,36 @@ export function SocialPreview({ state, onChange }: Props) {
     }, [state.productImageUrl, prompt, state.imageSeed, useFallback]
   );
 
-  useEffect(() => { if (url) { setLoading(true); setError(false); } }, [url]);
+  useEffect(() => { 
+    if (url) { 
+      setImageStatus("loading");
+      const timer = setTimeout(() => {
+        setImageStatus((prev) => {
+          if (prev === "loading") {
+            if (!useFallback && !isProductImage) {
+              setUseFallback(true);
+              return "loading";
+            }
+            return "error";
+          }
+          return prev;
+        });
+      }, 12000);
+      return () => clearTimeout(timer);
+    } 
+  }, [url, useFallback, isProductImage]);
+
+  const handleImageError = () => {
+    if (!useFallback && !isProductImage) setUseFallback(true);
+    else setImageStatus("error");
+  };
+
+  const handleImageLoad = () => setImageStatus("loaded");
 
   return (
     <div className="mx-auto max-w-[420px]">
       <div className="overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-black">
+        
         <div className="flex items-center justify-between px-5 py-4">
           <div className="flex items-center gap-3.5">
             <div className="size-9 rounded-full flex items-center justify-center p-[2px]" style={{ background: `linear-gradient(to right, ${themeColor}, #f472b6)` }}>
@@ -43,15 +68,23 @@ export function SocialPreview({ state, onChange }: Props) {
         </div>
 
         <div className="relative aspect-[4/5] w-full bg-[#050508] border-y border-slate-100 dark:border-slate-900 overflow-hidden">
-          {url && !error ? (
+          {url ? (
             <>
-              {loading && <div className="absolute inset-0 flex items-center justify-center z-10 bg-[#050508]/40"><Loader2 className="size-8 animate-spin text-white/50" /></div>}
-              <div className="absolute inset-0 opacity-20 blur-3xl z-0" style={{ backgroundColor: themeColor }} />
-              <img src={url} alt="Post" onLoad={() => setLoading(false)} onError={() => { setLoading(false); setError(true); }}
-                className={`h-full w-full z-10 relative ${isProductImage ? "object-contain p-10 bg-white mix-blend-multiply" : "object-cover"}`} />
+              {imageStatus === "loading" && <div className="absolute inset-0 flex items-center justify-center z-20 bg-[#050508]/40"><Loader2 className="size-8 animate-spin text-white/50" /></div>}
+              
+              {imageStatus === "error" ? (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900 z-10 border-y border-dashed border-slate-500/30">
+                  <AlertCircle className="size-8 text-slate-500 mb-2" />
+                  <span className="text-xs font-bold uppercase tracking-widest text-slate-500 text-center">Recurso Visual<br/>Indisponível</span>
+                </div>
+              ) : (
+                <>
+                  <div className="absolute inset-0 opacity-20 blur-3xl z-0" style={{ backgroundColor: themeColor }} />
+                  <img src={url} alt="Post" onLoad={handleImageLoad} onError={handleImageError}
+                    className={`h-full w-full z-10 relative ${isProductImage ? "object-contain p-10 bg-white mix-blend-multiply" : "object-cover"} ${imageStatus === 'loading' ? 'opacity-0' : 'opacity-100 transition-opacity duration-700'}`} />
+                </>
+              )}
             </>
-          ) : error ? (
-            <div className="flex h-full flex-col items-center justify-center gap-2 text-slate-400"><AlertCircle className="size-8" /></div>
           ) : null}
         </div>
 
@@ -71,6 +104,7 @@ export function SocialPreview({ state, onChange }: Props) {
             <Editable as="span" multiline value={state.caption ?? "Legenda..."} onChange={(v) => onChange({ caption: v })} className="leading-[1.6] whitespace-pre-wrap break-words font-light" />
           </div>
         </div>
+
       </div>
     </div>
   );

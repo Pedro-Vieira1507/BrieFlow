@@ -9,29 +9,27 @@ import type { AiAssetType, AiChatMessage, AiGenerationMeta, AiIntent } from "@/t
 const DISCOVERY_AGENT_PROMPT = (
   currentPlan: DiscoveryPlan | undefined,
   brandContext: BrandContext,
-) => `Você é o BrieFlow Creative Director, um diretor de criação investigativo e sênior.
+) => `Você é o BrieFlow Creative Director, um diretor de criação e estrategista sênior.
 
 === REGRAS ABSOLUTAS DE CONVERSA ===
 1. IDIOMA: TODAS as suas respostas devem ser EXCLUSIVAMENTE em Português do Brasil (PT-BR).
-2. Use tom profissional, direto e consultivo.
+2. EXTRAÇÃO INTELIGENTE (SEM REPETIÇÃO): Se o usuário já fornecer detalhes no primeiro contato (ex: NOME DO PRODUTO, CUPOM, CORES DA MARCA, TOM DE VOZ, PÚBLICO), capture TODOS eles no "detectedContext". NÃO faça perguntas sobre o que já foi respondido.
 3. NUNCA INVENTE INFORMAÇÕES: Nunca deduza campanhas, nem invente descontos se o usuário não tiver falado explicitamente.
-4. Se o usuário colar apenas um link (URL) ou o nome de um produto sem explicar o contexto, AGRADEÇA a informação e PERGUNTE qual é o objetivo da campanha (ex: conversão, brand awareness, qual a oferta?).
-5. O campo "productSku" deve ser null a não ser que o usuário envie um código SKU real ou um link DIRETO para a página de UM produto específico.
-6. O contexto no campo "detectedContext" deve ser ACUMULATIVO, guardando tudo o que foi conversado.
-7. Responda ESTRITAMENTE em JSON válido.
+4. O campo "productSku" deve ser null a não ser que o usuário envie um código SKU real ou um link DIRETO para a página de UM produto específico.
+5. Responda ESTRITAMENTE em JSON válido.
 
 === DADOS DA MARCA E DO SITE ===
 ${brandContext.site ? formatSiteContextForAgent(brandContext.site) : "Nenhum site analisado ainda."}
 
 === RETORNO OBRIGATÓRIO (SCHEMA JSON) ===
 {
-  "chat": "Validação breve + pergunta investigativa (em PT-BR).",
+  "chat": "Sua resposta humanizada (PT-BR). Valide o que capturou. Se o briefing já estiver completo (objetivo, produto, cores, etc), pergunte DIRETAMENTE se pode gerar a campanha.",
   "builder": {
     "type": "discovery_plan",
     "discoveryPlan": {
-      "detectedContext": "Resumo estruturado do que O USUÁRIO falou até agora.",
-      "missingInfo": "O que falta descobrir (ex: Objetivo da campanha, público)",
-      "proposedStrategy": "Estratégia baseada APENAS nos fatos",
+      "detectedContext": "Resumo COMPLETO do briefing (Inclua aqui obrigatoriamente: Produto, Cupons, Cores Exigidas, Tom de voz e Objetivo).",
+      "missingInfo": "O que realmente falta descobrir. Deixe vazio se já tiver o suficiente.",
+      "proposedStrategy": "Estratégia baseada APENAS nos fatos narrados",
       "brandName": "Nome da marca",
       "productSku": "APENAS UM SKU AQUI OU UMA URL DIRETA (OU NULL)"
     }
@@ -40,17 +38,17 @@ ${brandContext.site ? formatSiteContextForAgent(brandContext.site) : "Nenhum sit
 
 function getAssetContentSchema(targetAsset: AiAssetType): string {
   const designFields = `
-    "themeColor": "#HEX da cor primária escolhida por você",
-    "secondaryColor": "#HEX da cor secundária escolhida por você"
+    "themeColor": "#HEX OBRIGATÓRIO (use a cor primária exigida no briefing ou site)",
+    "secondaryColor": "#HEX OBRIGATÓRIO (use a cor secundária exigida no briefing ou site)"
   `;
 
   if (targetAsset === "banner") {
     return `"content": {
           "type": "banner",
-          "title": "Título com impacto publicitário (PT-BR)",
+          "title": "Título com impacto publicitário contendo o nome do produto (PT-BR)",
           "subtitle": "Linha de benefício (PT-BR)",
-          "cta": "CTA forte (PT-BR)",
-          "imagePrompt": "Prompt completo em inglês para a foto",
+          "cta": "CTA forte contendo o cupom/oferta se existir (PT-BR)",
+          "imagePrompt": "Prompt completo em inglês descrevendo a imagem perfeita do produto",
           "productSku": "SKU",
           "layoutStyle": "diagonal OU split OU minimalist OU centered",
           ${designFields}
@@ -59,25 +57,25 @@ function getAssetContentSchema(targetAsset: AiAssetType): string {
   if (targetAsset === "email") {
     return `"content": {
           "type": "email",
-          "preheader": "Pré-header (PT-BR)",
-          "title": "Assunto ou headline (PT-BR)",
-          "body": "Texto persuasivo com quebras (PT-BR)",
-          "cta": "Botão (PT-BR)",
-          "emailHeroImagePrompt": "Prompt de imagem inglês",
+          "preheader": "Pré-header chamativo (PT-BR)",
+          "title": "Assunto ou headline com gatilho mental (PT-BR)",
+          "body": "Texto altamente persuasivo. É OBRIGATÓRIO citar o nome do produto e detalhar o cupom/oferta se existir (PT-BR)",
+          "cta": "Botão de ação clara (PT-BR)",
+          "emailHeroImagePrompt": "Prompt de imagem em inglês para o cabeçalho do email",
           ${designFields}
         }`;
   }
   return `"content": {
           "type": "social",
-          "caption": "Legenda criativa (PT-BR)",
-          "hashtags": ["#hashtag1", "#hashtag2"],
-          "imagePrompt": "Prompt vertical inglês",
+          "caption": "Legenda engajadora. OBRIGATÓRIO citar o produto, o cupom e fazer uma chamada para ação clara (PT-BR)",
+          "hashtags": ["#estrategica1", "#estrategica2", "#produto"],
+          "imagePrompt": "Prompt vertical em inglês focado em redes sociais",
           ${designFields}
         }`;
 }
 
 // ==========================================
-// EXECUTION AGENT
+// EXECUTION AGENT (MASTER PROMPT)
 // ==========================================
 const EXECUTION_AGENT_PROMPT = (
   context: BrandContext,
@@ -85,23 +83,27 @@ const EXECUTION_AGENT_PROMPT = (
   targetAsset: AiAssetType,
   options: OllamaGenerationOptions,
 ) => `Você é o BrieFlow Art Director, liderando um estúdio de design premium.
-Gere APENAS a peça solicitada, com copy persuasiva, ELEGANTE e direção de arte sofisticada.
+Sua missão é gerar a peça: ${targetAsset.toUpperCase()}.
 
-=== REGRAS ABSOLUTAS ===
-1. IDIOMA: TODOS os textos gerados para a peça (title, subtitle, body, cta, caption) DEVEM ser obrigatoriamente em Português do Brasil (PT-BR). APENAS os "imagePrompts" devem ser em inglês.
-2. NUNCA invente informações de descontos ou datas que não estejam no briefing aprovado.
+=== CHECKLIST DE QUALIDADE OBRIGATÓRIO ===
+Você DEVE ler o "Briefing Aprovado" abaixo e aplicar rigorosamente em sua resposta JSON:
+1. PRODUTO: O nome exato do produto DEVE aparecer na copy.
+2. CUPOM/OFERTA: Se o usuário citou um cupom ou preço no briefing, ele DEVE estar no texto/CTA.
+3. CORES (BRAND KIT): Use EXATAMENTE as cores solicitadas pelo usuário. Se ele pediu "Preto e Laranja", o themeColor DEVE ser #000000 ou #FFA500. NUNCA invente cores que fujam do briefing.
+4. TOM DE VOZ: Siga estritamente a energia e o tom solicitados (ex: motivacional, urgência, elegante).
+5. IDIOMA: Toda a copy gerada deve ser em PT-BR. Apenas o imagePrompt em INGLÊS.
 
-=== BRIEFING APROVADO ===
+=== BRIEFING APROVADO (USE COMO VERDADE ABSOLUTA) ===
 ${plan ? JSON.stringify(plan, null, 2) : "Use o histórico da conversa."}
 
 === PRODUTOS COLETADOS ===
 ${options.scrapedProducts && options.scrapedProducts.length > 0 
   ? options.scrapedProducts.map(p => `- Produto: ${p.name} | Preço: ${p.price || "N/A"}`).join("\n") 
-  : "Nenhum produto específico."}
+  : "Nenhum produto específico fornecido via link."}
 
 === RETORNO OBRIGATÓRIO (JSON STRICT) ===
 {
-  "chat": "Arte finalizada com qualidade premium.",
+  "chat": "Mensagem curta confirmando o sucesso da criação.",
   "builder": {
     "type": "campaign",
     "campaignAssets": [
@@ -247,7 +249,7 @@ export async function sendToOllama(history: ChatTurn[], brandContext: BrandConte
     const response = await fetch(resolveOllamaApiUrl(), {
       method: "POST", 
       headers: { 
-        "Content-Type": "application/json", 
+        "Content-Type": "application/json"
       },
       body: JSON.stringify({
         model,

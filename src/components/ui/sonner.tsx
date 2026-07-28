@@ -6,6 +6,8 @@ const Toaster = ({ ...props }: ToasterProps) => {
   return (
     <Sonner
       className="toaster group"
+      closeButton={true} // <-- Permite o usuário fechar o toast na mão se quiser
+      duration={4000} // <-- Faz o toast sumir sozinho em 4 segundos
       toastOptions={{
         classNames: {
           toast:

@@ -21,7 +21,8 @@ interface BriefflowState {
   loading: boolean;
   scraping: boolean;
   generatingLabel?: string;
-  user: any | null; // <-- Usuário adicionado aqui
+  user: any | null;
+  uploadedImage: string | null; // <-- Novo estado para anexo
 
   // actions
   setMessages: (updater: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => void;
@@ -39,7 +40,8 @@ interface BriefflowState {
   setLoading: (v: boolean) => void;
   setScraping: (v: boolean) => void;
   setGeneratingLabel: (v?: string) => void;
-  setUser: (user: any | null) => void; // <-- Função adicionada aqui
+  setUser: (user: any | null) => void;
+  setUploadedImage: (img: string | null) => void; // <-- Nova ação
 
   reset: () => void;
 }
@@ -58,7 +60,8 @@ export const useBriefflowStore = create<BriefflowState>((set) => ({
   loading: false,
   scraping: false,
   generatingLabel: undefined,
-  user: null, // <-- Estado inicial do usuário aqui
+  user: null,
+  uploadedImage: null,
 
   setMessages: (updater) =>
     set((s) => ({
@@ -108,8 +111,8 @@ export const useBriefflowStore = create<BriefflowState>((set) => ({
   setLoading: (loading) => set({ loading }),
   setScraping: (scraping) => set({ scraping }),
   setGeneratingLabel: (generatingLabel) => set({ generatingLabel }),
-  
-  setUser: (user) => set({ user }), // <-- Atualizador do usuário aqui
+  setUser: (user) => set({ user }),
+  setUploadedImage: (img) => set({ uploadedImage: img }),
 
   reset: () =>
     set({
@@ -120,6 +123,7 @@ export const useBriefflowStore = create<BriefflowState>((set) => ({
       loading: false,
       scraping: false,
       generatingLabel: undefined,
+      uploadedImage: null,
     }),
 }));
 
