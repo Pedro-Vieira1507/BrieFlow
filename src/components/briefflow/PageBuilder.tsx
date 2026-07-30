@@ -1,4 +1,5 @@
-import { useState } from "react";
+// src/components/briefflow/PageBuilder.tsx
+import { useState, useRef } from "react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useBriefflowStore } from "@/store/briefflow";
@@ -20,12 +21,16 @@ export function PageBuilder({ onRefine }: Props) {
     builder,
     loading,
     generatingLabel,
-    scores,
     patchBuilder,
     setBuilder,
   } = useBriefflowStore();
 
   const [isSaving, setIsSaving] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+
+  // Guards mecânicos anti-duplo clique
+  const isSavingRef = useRef(false);
+  const isExportingRef = useRef(false);
 
   const hasContent = builder.type !== "none";
   const isSaveable =
@@ -37,31 +42,42 @@ export function PageBuilder({ onRefine }: Props) {
 
   const handleSave = async () => {
     if (!isSupabaseConfigured) {
-      toast.error("Biblioteca não configurada");
+      toast.error("Biblioteca não configurada", { duration: 4000 });
       return;
     }
+    if (isSavingRef.current) return;
     
-    // Cria um toast de carregamento na tela e guarda o ID dele
-    const toastId = toast.loading("Salvando campanha na biblioteca...");
+    isSavingRef.current = true;
     setIsSaving(true);
+    
+    // Força o React a desenhar o botão em estado de "Salvar..."
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    
+    toast.info("Salvando campanha na biblioteca...", { duration: 3000 });
     
     try {
       await saveAssetToLibrary("Campanha AI", builder);
-      // Atualiza o MESMO toast para sucesso
-      toast.success("Salvo na biblioteca com sucesso!", { id: toastId });
+      toast.success("Salvo na biblioteca com sucesso!", { duration: 4000 });
     } catch {
-      // Atualiza o MESMO toast para erro
-      toast.error("Erro ao salvar a campanha", { id: toastId });
+      toast.error("Erro ao salvar a campanha", { duration: 4000 });
     } finally {
+      isSavingRef.current = false;
       setIsSaving(false);
     }
   };
 
   const handleExport = async () => {
-    if (builder.type !== "campaign" || !builder.campaignAssets) return;
+    if (builder.type !== "campaign" || !builder.campaignAssets || isExportingRef.current) return;
     
-    // Toast com estado progressivo para não empilhar na tela
-    const toastId = toast.loading("Preparando arquivos para download...");
+    isExportingRef.current = true;
+    setIsExporting(true);
+    
+    // GATILHO UX: Pausa real de 150ms. Isso tira a pressão da Thread principal,
+    // garantindo que o navegador desenhe o Spinner na tela ANTES de congelar processando os blobs.
+    await new Promise((resolve) => setTimeout(resolve, 150)); 
+    
+    // Dispara um toast independente (sem tracking ID) para garantir o sumiço
+    toast.info("Preparando arquivos para download...", { duration: 3000 });
     
     try {
       let textContent = "=== CAMPANHA BRIEFLOW ===\n\n";
@@ -77,7 +93,6 @@ export function PageBuilder({ onRefine }: Props) {
         if (c.cta) textContent += `CTA: ${c.cta}\n`;
         textContent += `\n`;
 
-        // Descobre qual imagem salvar (A que o usuário fez upload ou a da IA)
         let imgUrl = c.productImageUrl;
         if (!imgUrl && c.imagePrompt) {
             const w = asset.type === 'social' ? 1080 : 1200;
@@ -85,7 +100,6 @@ export function PageBuilder({ onRefine }: Props) {
             imgUrl = buildPollinationsUrl(c.imagePrompt, { width: w, height: h, seed: c.imageSeed });
         }
 
-        // Força o download da imagem via blob
         if (imgUrl) {
           try {
             const response = await fetch(imgUrl);
@@ -99,13 +113,11 @@ export function PageBuilder({ onRefine }: Props) {
             document.body.removeChild(a);
             URL.revokeObjectURL(blobUrl);
           } catch (imgErr) {
-            // Fallback se o navegador bloquear o CORS nativo
             window.open(imgUrl, '_blank');
           }
         }
       }
 
-      // Baixa o arquivo de texto com a Copy de todas as peças
       const blobText = new Blob([textContent], { type: "text/plain;charset=utf-8" });
       const textUrl = URL.createObjectURL(blobText);
       const aText = document.createElement("a");
@@ -115,11 +127,14 @@ export function PageBuilder({ onRefine }: Props) {
       aText.click();
       document.body.removeChild(aText);
 
-      // Finaliza o carregamento indicando sucesso
-      toast.success("Download concluído com sucesso!", { id: toastId });
+      // Toast de conclusão disparado nativamente, respeitando a duração
+      toast.success("Download concluído com sucesso!", { duration: 4000 });
     } catch (e) {
-      toast.error("Erro ao exportar arquivos.", { id: toastId });
+      toast.error("Erro ao exportar arquivos.", { duration: 4000 });
       console.error(e);
+    } finally {
+      isExportingRef.current = false;
+      setIsExporting(false);
     }
   };
 
@@ -139,8 +154,8 @@ export function PageBuilder({ onRefine }: Props) {
       <BuilderHeader
         isSaveable={isSaveable}
         isSaving={isSaving}
+        isExporting={isExporting}
         loading={loading}
-        scores={scores}
         onExport={handleExport}
         onSave={handleSave}
       />
@@ -153,14 +168,14 @@ export function PageBuilder({ onRefine }: Props) {
             : "",
         )}
       >
-        {/* Halo de fundo */}
         <div
           aria-hidden
           className="pointer-events-none absolute inset-0 opacity-60"
           style={{ background: "var(--gradient-radial-brand)" }}
         />
 
-        <div className="relative mx-auto max-w-5xl space-y-10">
+        {/* Spacer ampliado (pb-40) para o Botão do Chat NUNCA pisar na interface móvel */}
+        <div className="relative mx-auto max-w-5xl space-y-10 pb-40">
           {loading && generatingLabel && builder.type === "campaign" && (
             <GeneratingBanner label={generatingLabel} />
           )}

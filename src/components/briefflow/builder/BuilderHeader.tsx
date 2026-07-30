@@ -1,12 +1,7 @@
+// src/components/briefflow/builder/BuilderHeader.tsx
 import { useEffect, useState } from "react";
-import { Loader2, Save, Download, MessageSquare, SearchCheck, UserCircle, LogOut } from "lucide-react";
+import { Loader2, Save, Download, UserCircle, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { AuthModal } from "../AuthModal";
 import { supabase } from "@/lib/supabase";
@@ -15,8 +10,8 @@ import { useBriefflowStore } from "@/store/briefflow";
 interface Props {
   isSaveable: boolean;
   isSaving: boolean;
+  isExporting: boolean;
   loading?: boolean;
-  scores?: { persuasion: number; clarity: number; seo: number };
   onExport: () => void;
   onSave: () => void;
 }
@@ -24,15 +19,14 @@ interface Props {
 export function BuilderHeader({
   isSaveable,
   isSaving,
+  isExporting,
   loading,
-  scores,
   onExport,
   onSave,
 }: Props) {
   const [authOpen, setAuthOpen] = useState(false);
   const { user, setUser } = useBriefflowStore();
 
-  // Escuta as mudanças de login/logout em tempo real
   useEffect(() => {
     if (!supabase) return;
     supabase.auth.getUser().then(({ data: { user } }) => setUser(user));
@@ -40,7 +34,6 @@ export function BuilderHeader({
     const { data: authListener } = supabase.auth.onAuthStateChange((_, session) => {
       setUser(session?.user ?? null);
     });
-
     return () => {
       authListener.subscription.unsubscribe();
     };
@@ -59,7 +52,7 @@ export function BuilderHeader({
           <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-surface-3 border border-border-strong">
             <img
               src="/assets/icone-brieflow.png"
-              alt=""
+              alt="Logo BrieFlow"
               className="size-7"
               onError={(e) => {
                 (e.currentTarget as HTMLImageElement).style.display = "none";
@@ -77,56 +70,36 @@ export function BuilderHeader({
         </div>
 
         <div className="flex items-center gap-2">
-          {scores && isSaveable && (
-            <TooltipProvider>
-              <div
-                className={cn(
-                  "mx-1 hidden h-8 items-center gap-4 border-x border-border-strong px-3",
-                  "text-[11px] font-semibold uppercase tracking-wider text-fg-tertiary md:flex",
-                )}
-              >
-                <Tooltip>
-                  <TooltipTrigger className="flex items-center gap-1.5">
-                    <MessageSquare className="size-3.5 text-rose-500" />
-                    {scores.persuasion}
-                  </TooltipTrigger>
-                  <TooltipContent>Índice de persuasão da copy</TooltipContent>
-                </Tooltip>
-                <Tooltip>
-                  <TooltipTrigger className="flex items-center gap-1.5">
-                    <SearchCheck className="size-3.5 text-brand" />
-                    {scores.clarity}
-                  </TooltipTrigger>
-                  <TooltipContent>Clareza e legibilidade</TooltipContent>
-                </Tooltip>
-              </div>
-            </TooltipProvider>
-          )}
-
+          {/* BOTÃO EXPORTAR */}
           <Button
             variant="outline"
             size="sm"
             onClick={onExport}
-            disabled={!isSaveable}
-            className="border-border-strong bg-transparent text-fg-secondary hover:bg-surface-2 hover:text-fg-primary"
+            disabled={!isSaveable || loading || isExporting}
+            className="border-border-strong bg-transparent text-fg-secondary hover:bg-surface-2 hover:text-fg-primary disabled:opacity-50 transition-all"
           >
-            <Download className="mr-2 size-3.5" />
+            {isExporting ? (
+              <Loader2 className="mr-2 size-3.5 animate-spin" />
+            ) : (
+              <Download className="mr-2 size-3.5" />
+            )}
             Exportar
           </Button>
 
+          {/* BOTÃO SALVAR */}
           <Button
             size="sm"
             disabled={!isSaveable || loading || isSaving}
             onClick={() => {
               if (!user) {
-                setAuthOpen(true); // Abre o modal se não estiver logado
+                setAuthOpen(true);
               } else {
-                onSave(); // Salva direto se já estiver logado
+                onSave();
               }
             }}
             className={cn(
               "bg-brand text-brand-fg hover:brightness-110 transition-all",
-              "shadow-[var(--shadow-brand)] disabled:shadow-none",
+              "shadow-[var(--shadow-brand)] disabled:shadow-none disabled:opacity-50",
             )}
           >
             {isSaving ? (
@@ -137,7 +110,7 @@ export function BuilderHeader({
             Salvar
           </Button>
 
-          {/* NOVO: Menu do Usuário */}
+          {/* MENUS DO USUÁRIO */}
           {user ? (
             <Button 
               variant="ghost" 
@@ -162,7 +135,6 @@ export function BuilderHeader({
         </div>
       </header>
 
-      {/* Renderiza o modal invisível que será aberto pelo estado authOpen */}
       <AuthModal open={authOpen} onOpenChange={setAuthOpen} />
     </>
   );

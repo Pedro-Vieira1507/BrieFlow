@@ -11,24 +11,24 @@ const DISCOVERY_AGENT_PROMPT = (
   brandContext: BrandContext,
 ) => `Você é o BrieFlow Creative Director, um diretor de criação e estrategista sênior.
 
-=== REGRAS ABSOLUTAS DE CONVERSA ===
+=== REGRAS ABSOLUTAS ===
 1. IDIOMA: TODAS as suas respostas devem ser EXCLUSIVAMENTE em Português do Brasil (PT-BR).
-2. EXTRAÇÃO INTELIGENTE (SEM REPETIÇÃO): Se o usuário já fornecer detalhes no primeiro contato (ex: NOME DO PRODUTO, CUPOM, CORES DA MARCA, TOM DE VOZ, PÚBLICO), capture TODOS eles no "detectedContext". NÃO faça perguntas sobre o que já foi respondido.
-3. NUNCA INVENTE INFORMAÇÕES: Nunca deduza campanhas, nem invente descontos se o usuário não tiver falado explicitamente.
-4. O campo "productSku" deve ser null a não ser que o usuário envie um código SKU real ou um link DIRETO para a página de UM produto específico.
-5. Responda ESTRITAMENTE em JSON válido.
+2. O campo "productSku" deve ser null a não ser que o usuário envie um link DIRETO para a página de UM produto.
+3. RETENÇÃO LITERAL (CRÍTICO): Se o usuário fornecer textos EXATOS para as peças (como "Título:", "Legenda:", "Hashtags obrigatórias" ou "Frases exatas"), você ESTÁ PROIBIDO de resumir. Transcreva essas regras PALAVRA POR PALAVRA para dentro do campo "detectedContext".
+4. Responda ESTRITAMENTE em JSON válido.
 
 === DADOS DA MARCA E DO SITE ===
 ${brandContext.site ? formatSiteContextForAgent(brandContext.site) : "Nenhum site analisado ainda."}
 
 === RETORNO OBRIGATÓRIO (SCHEMA JSON) ===
 {
-  "chat": "Sua resposta humanizada (PT-BR). Valide o que capturou. Se o briefing já estiver completo (objetivo, produto, cores, etc), pergunte DIRETAMENTE se pode gerar a campanha.",
+  "chat": "Sua resposta humanizada confirmando o que capturou e perguntando se pode gerar.",
   "builder": {
     "type": "discovery_plan",
     "discoveryPlan": {
-      "detectedContext": "Resumo COMPLETO do briefing (Inclua aqui obrigatoriamente: Produto, Cupons, Cores Exigidas, Tom de voz e Objetivo).",
-      "missingInfo": "O que realmente falta descobrir. Deixe vazio se já tiver o suficiente.",
+      "detectedContext": "TRANSCREVA AQUI TODAS AS EXIGÊNCIAS LITERAIS DE COPY DO CLIENTE. Se não houver, faça um resumo do briefing.",
+      "offer": "O CÓDIGO EXATO DO CUPOM mencionado (ex: RUN15). Use null se não houver.",
+      "missingInfo": "O que realmente falta descobrir.",
       "proposedStrategy": "Estratégia baseada APENAS nos fatos narrados",
       "brandName": "Nome da marca",
       "productSku": "APENAS UM SKU AQUI OU UMA URL DIRETA (OU NULL)"
@@ -38,17 +38,17 @@ ${brandContext.site ? formatSiteContextForAgent(brandContext.site) : "Nenhum sit
 
 function getAssetContentSchema(targetAsset: AiAssetType): string {
   const designFields = `
-    "themeColor": "#HEX OBRIGATÓRIO (use a cor primária exigida no briefing ou site)",
-    "secondaryColor": "#HEX OBRIGATÓRIO (use a cor secundária exigida no briefing ou site)"
+    "themeColor": "#HEX OBRIGATÓRIO (use a cor primária escura ou vibrante)",
+    "secondaryColor": "#HEX OBRIGATÓRIO (use a cor secundária exigida)"
   `;
 
   if (targetAsset === "banner") {
     return `"content": {
           "type": "banner",
-          "title": "Título com impacto publicitário contendo o nome do produto (PT-BR)",
-          "subtitle": "Linha de benefício (PT-BR)",
-          "cta": "CTA forte contendo o cupom/oferta se existir (PT-BR)",
-          "imagePrompt": "Prompt completo em inglês descrevendo a imagem perfeita do produto",
+          "title": "Título com impacto publicitário (PT-BR)",
+          "subtitle": "Linha de benefício com o nome do produto (PT-BR)",
+          "cta": "CTA forte contendo o cupom (PT-BR)",
+          "imagePrompt": "Prompt em inglês para a foto",
           "productSku": "SKU",
           "layoutStyle": "diagonal OU split OU minimalist OU centered",
           ${designFields}
@@ -58,17 +58,17 @@ function getAssetContentSchema(targetAsset: AiAssetType): string {
     return `"content": {
           "type": "email",
           "preheader": "Pré-header chamativo (PT-BR)",
-          "title": "Assunto ou headline com gatilho mental (PT-BR)",
-          "body": "Texto altamente persuasivo. É OBRIGATÓRIO citar o nome do produto e detalhar o cupom/oferta se existir (PT-BR)",
+          "title": "Assunto do email (PT-BR)",
+          "body": "Texto altamente persuasivo citando o produto e o cupom (PT-BR)",
           "cta": "Botão de ação clara (PT-BR)",
-          "emailHeroImagePrompt": "Prompt de imagem em inglês para o cabeçalho do email",
+          "emailHeroImagePrompt": "Prompt de imagem em inglês",
           ${designFields}
         }`;
   }
   return `"content": {
           "type": "social",
-          "caption": "Legenda engajadora. OBRIGATÓRIO citar o produto, o cupom e fazer uma chamada para ação clara (PT-BR)",
-          "hashtags": ["#estrategica1", "#estrategica2", "#produto"],
+          "caption": "Legenda engajadora citando produto e cupom (PT-BR)",
+          "hashtags": ["#hashtag1", "#hashtag2"],
           "imagePrompt": "Prompt vertical em inglês focado em redes sociais",
           ${designFields}
         }`;
@@ -83,27 +83,27 @@ const EXECUTION_AGENT_PROMPT = (
   targetAsset: AiAssetType,
   options: OllamaGenerationOptions,
 ) => `Você é o BrieFlow Art Director, liderando um estúdio de design premium.
-Sua missão é gerar a peça: ${targetAsset.toUpperCase()}.
+Sua missão é gerar EXCLUSIVAMENTE a peça: ${targetAsset.toUpperCase()}.
 
-=== CHECKLIST DE QUALIDADE OBRIGATÓRIO ===
-Você DEVE ler o "Briefing Aprovado" abaixo e aplicar rigorosamente em sua resposta JSON:
-1. PRODUTO: O nome exato do produto DEVE aparecer na copy.
-2. CUPOM/OFERTA: Se o usuário citou um cupom ou preço no briefing, ele DEVE estar no texto/CTA.
-3. CORES (BRAND KIT): Use EXATAMENTE as cores solicitadas pelo usuário. Se ele pediu "Preto e Laranja", o themeColor DEVE ser #000000 ou #FFA500. NUNCA invente cores que fujam do briefing.
-4. TOM DE VOZ: Siga estritamente a energia e o tom solicitados (ex: motivacional, urgência, elegante).
-5. IDIOMA: Toda a copy gerada deve ser em PT-BR. Apenas o imagePrompt em INGLÊS.
+=== DIRETRIZES GLOBAIS OBRIGATÓRIAS ===
+1. FIDELIDADE ABSOLUTA: Leia o "Briefing Aprovado" abaixo. Encontre as instruções específicas para o ${targetAsset.toUpperCase()} e USE O TEXTO EXATAMENTE COMO SOLICITADO. Você está PROIBIDO de reescrever frases, perguntas finais ou hashtags se o briefing já as forneceu.
+2. ISOLAMENTO: Ignore completamente as instruções referentes a outras peças. Nunca misture a copy.
+3. TEXTO LIMPO: ZERO formatação Markdown. NUNCA use chaves, colchetes [ ], asteriscos ** ou links no JSON retornado.
+4. PRODUTO E CUPOM: Use estritamente o cupom/oferta: [${plan?.offer || 'Nenhum'}].
+5. CORES: "themeColor" DEVE ser a cor MAIS ESCURA da paleta informada para garantir contraste premium. NUNCA use tons claros no fundo.
+6. SCHEMA COMPLETO: NUNCA remova chaves do JSON.
 
-=== BRIEFING APROVADO (USE COMO VERDADE ABSOLUTA) ===
+=== BRIEFING APROVADO ===
 ${plan ? JSON.stringify(plan, null, 2) : "Use o histórico da conversa."}
 
 === PRODUTOS COLETADOS ===
 ${options.scrapedProducts && options.scrapedProducts.length > 0 
-  ? options.scrapedProducts.map(p => `- Produto: ${p.name} | Preço: ${p.price || "N/A"}`).join("\n") 
-  : "Nenhum produto específico fornecido via link."}
+  ? options.scrapedProducts.map(p => `- Produto: ${p.name}`).join("\n") 
+  : "Nenhum."}
 
 === RETORNO OBRIGATÓRIO (JSON STRICT) ===
 {
-  "chat": "Mensagem curta confirmando o sucesso da criação.",
+  "chat": "Peça finalizada com sucesso.",
   "builder": {
     "type": "campaign",
     "campaignAssets": [
@@ -120,11 +120,13 @@ ${options.scrapedProducts && options.scrapedProducts.length > 0
 }`;
 
 export interface ChatTurn extends AiChatMessage { id?: string; }
+
 export interface OllamaGenerationOptions {
   intent?: AiIntent; requestId?: string; targetAsset?: AiAssetType;
   productImageUrl?: string | null; onStream?: (partialChat: string) => void;
   scrapedProducts?: ScrapedProductData[];
 }
+
 export interface OllamaResultMeta extends AiGenerationMeta { provider: "ollama"; }
 export interface OllamaResponse {
   chat: string; builder: BuilderState; scores?: { persuasion: number; clarity: number; seo: number; };
@@ -196,11 +198,12 @@ function extractChatField(rawJson: string): string | null {
 }
 
 function validateAsset(asset: CampaignAsset, targetAsset: AiAssetType): boolean {
-  const content = asset.content;
+  const content = asset.content as any;
   if (!content || typeof content !== "object") return false;
-  if (targetAsset === "banner") return Boolean(content.title && content.cta);
-  if (targetAsset === "email") return Boolean(content.title && content.body);
-  return Boolean(content.caption && content.imagePrompt);
+  if (targetAsset === "banner") return Boolean(content.title);
+  if (targetAsset === "email") return Boolean(content.body || content.title);
+  if (targetAsset === "social") return Boolean(content.caption);
+  return false;
 }
 
 function createFallbackBuilder(currentPlan: DiscoveryPlan | undefined): BuilderState {
@@ -210,15 +213,19 @@ function createFallbackBuilder(currentPlan: DiscoveryPlan | undefined): BuilderS
 function normalizeBuilder(response: OllamaResponse, currentPlan: DiscoveryPlan | undefined, targetAsset?: AiAssetType, productImageUrl?: string | null): BuilderState {
   const builder = response.builder;
   if (!builder) return createFallbackBuilder(currentPlan);
+
   if (builder.type === "campaign" && Array.isArray(builder.campaignAssets) && targetAsset) {
     const campaignAssets = builder.campaignAssets
-      .filter((asset) => asset.type === targetAsset)
+      .filter((asset) => 
+        String(asset.type).toLowerCase().includes(targetAsset) || 
+        String((asset.content as any)?.type).toLowerCase().includes(targetAsset)
+      )
       .filter((asset) => validateAsset(asset, targetAsset))
       .map((asset) => ({
         ...asset, type: targetAsset, status: asset.status ?? "draft",
         content: {
           ...asset.content, type: targetAsset,
-          productImageUrl: productImageUrl ?? asset.content.productImageUrl ?? null,
+          productImageUrl: productImageUrl ?? (asset.content as any).productImageUrl ?? null,
         },
       }));
     return { type: "campaign", campaignAssets };
@@ -231,6 +238,7 @@ export async function sendToOllama(history: ChatTurn[], brandContext: BrandConte
   const targetAsset = options.targetAsset;
   const model = pickModel(wantsExecution);
   const startedAt = Date.now();
+
   const metaBase: OllamaResultMeta = {
     requestId: options.requestId ?? createRequestId(), model,
     intent: options.intent ?? (wantsExecution ? "campaign" : "discovery"),
@@ -242,18 +250,33 @@ export async function sendToOllama(history: ChatTurn[], brandContext: BrandConte
     ? EXECUTION_AGENT_PROMPT(brandContext, currentPlan, targetAsset, options)
     : DISCOVERY_AGENT_PROMPT(currentPlan, brandContext);
 
+  // Mantemos o Agente Executor TOTALMENTE ISOLADO, sem o peso e a distração do histórico longo.
+  // Ele dependerá 100% da transcrição literal gravada no "Briefing Aprovado" (plan).
+  const messagesPayload = wantsExecution && targetAsset
+    ? [
+        { role: "system", content: systemPrompt },
+        { 
+          role: "user", 
+          content: `Crie APENAS o JSON da peça ${targetAsset.toUpperCase()}. Siga as instruções literais do Briefing Aprovado à risca. Não use markdown.` 
+        }
+      ] as { role: "system" | "user", content: string }[]
+    : [
+        { role: "system", content: systemPrompt }, 
+        ...history.slice(-6)
+      ] as { role: "system" | "user", content: string }[];
+
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), wantsExecution ? 240_000 : 180_000);
 
   try {
     const response = await fetch(resolveOllamaApiUrl(), {
       method: "POST", 
-      headers: { 
-        "Content-Type": "application/json"
+      headers: {
+         "Content-Type": "application/json"
       },
       body: JSON.stringify({
         model,
-        messages: [{ role: "system", content: systemPrompt }, ...history.slice(wantsExecution ? -3 : -6)],
+        messages: messagesPayload,
         stream: true, format: "json", keep_alive: "30m",
         options: { temperature: wantsExecution ? 0.2 : 0.4, top_p: 0.85, num_predict: wantsExecution ? 900 : 600, num_ctx: 4096 },
       }),
@@ -270,9 +293,11 @@ export async function sendToOllama(history: ChatTurn[], brandContext: BrandConte
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
+
       pendingChunk += decoder.decode(value, { stream: true });
       const lines = pendingChunk.split("\n");
       pendingChunk = lines.pop() ?? "";
+
       for (const line of lines) {
         const trimmedLine = line.trim();
         if (!trimmedLine) continue;
@@ -297,6 +322,7 @@ export async function sendToOllama(history: ChatTurn[], brandContext: BrandConte
     }
 
     const parsed = tryParseJson(rawJson);
+
     if (!parsed) {
       return {
         chat: wantsExecution ? "Erro de formatação na peça." : "Falha na resposta da IA.",
@@ -306,6 +332,7 @@ export async function sendToOllama(history: ChatTurn[], brandContext: BrandConte
     }
 
     const builder = normalizeBuilder(parsed, currentPlan, targetAsset, options.productImageUrl);
+
     return {
       chat: parsed.chat || (wantsExecution ? "Peça gerada." : "Briefing atualizado."),
       builder, scores: parsed.scores,

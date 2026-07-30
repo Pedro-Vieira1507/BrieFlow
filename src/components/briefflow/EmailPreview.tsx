@@ -3,7 +3,9 @@ import { useEffect, useMemo, useState } from "react";
 import { Editable } from "./Editable";
 import type { BuilderState } from "@/types/builder";
 import { buildPollinationsUrl, buildFallbackUrl } from "@/lib/pollinations";
-import { Loader2, AlertCircle, ChevronRight, ShieldCheck } from "lucide-react";
+import { Loader2, AlertCircle, ChevronRight, ShieldCheck, CheckCircle2, TicketPercent, Hexagon } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { useBriefflowStore } from "@/store/briefflow";
 
 interface Props {
   state: BuilderState;
@@ -13,11 +15,28 @@ interface Props {
 export function EmailPreview({ state, onChange }: Props) {
   const [imageStatus, setImageStatus] = useState<"loading" | "loaded" | "error">("loading");
   const [useFallback, setUseFallback] = useState(false);
+  const { builder } = useBriefflowStore();
 
-  const paragraphs = (state.body ?? "").split(/\n\n+/).filter(Boolean);
+  // Filtro inteligente: remove Markdown (**), links embutidos, URLs cruas e colchetes órfãos
+  const paragraphs = (state.body ?? "")
+    .split('\n')
+    .filter(p => p.trim() !== "")
+    .map(p => p
+      .replace(/\*\*/g, '')
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+      .replace(/\[|\]/g, '') // <-- Destrói resquícios como [Comprar agora]
+      .replace(/<|>/g, '')
+      .trim()
+    );
+
   const prompt = state.emailHeroImagePrompt || "";
   const isProductImage = !!state.productImageUrl;
   const themeColor = state.themeColor || "#2563EB";
+  
+  // Puxa a oferta salva na memória do Agente de Discovery (ou usa um fallback limpo)
+  const couponCode = builder.discoveryPlan?.offer && builder.discoveryPlan.offer !== "null" 
+    ? builder.discoveryPlan.offer.toUpperCase() 
+    : "OFERTA15";
 
   const heroUrl = useMemo(
     () => {
@@ -57,6 +76,7 @@ export function EmailPreview({ state, onChange }: Props) {
 
   return (
     <div className="mx-auto max-w-2xl overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-[#09090b]">
+      {/* Barra de Navegador do E-mail */}
       <div className="flex items-center gap-3 bg-slate-100 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-5 py-3.5">
         <div className="flex gap-2">
           <div className="size-3 rounded-full bg-red-400" />
@@ -71,10 +91,15 @@ export function EmailPreview({ state, onChange }: Props) {
       <div className="p-4 md:p-8 bg-slate-50 dark:bg-[#030304]">
         <div className="bg-white dark:bg-[#0c0c0e] rounded-2xl shadow-xl border border-slate-100 dark:border-white/5 overflow-hidden">
           
-          <div className="flex items-center justify-center px-8 py-6" style={{ backgroundColor: themeColor }}>
-            <span className="text-base font-black tracking-[0.2em] text-white uppercase">{state.brandName || "SUA MARCA"}</span>
+          {/* HEADER DA MARCA PADRÃO E-COMMERCE */}
+          <div className="flex items-center justify-center px-8 py-5 bg-white dark:bg-[#0c0c0e] border-b border-slate-100 dark:border-slate-800">
+            <div className="flex items-center gap-2">
+              <Hexagon className="size-6" style={{ color: themeColor }} />
+              <span className="text-lg font-black tracking-[0.1em] text-slate-900 dark:text-white uppercase">{state.brandName || "SUA MARCA"}</span>
+            </div>
           </div>
 
+          {/* IMAGEM HERO */}
           {heroUrl ? (
             <div className="relative aspect-[2.2/1] w-full bg-slate-100 dark:bg-slate-900 overflow-hidden">
               {imageStatus === "loading" && <div className="absolute inset-0 flex items-center justify-center z-10"><Loader2 className="size-8 animate-spin text-slate-400" /></div>}
@@ -90,18 +115,41 @@ export function EmailPreview({ state, onChange }: Props) {
             </div>
           ) : null}
 
-          <div className="px-8 py-10 md:px-12">
-            <Editable as="h1" value={state.title ?? "Título Principal do E-mail"} onChange={(v) => onChange({ title: v })} className="text-balance font-display text-2xl font-black leading-tight tracking-tight text-slate-900 dark:text-white mb-6 text-center" />
+          <div className="px-6 py-10 md:px-12">
+            <Editable as="h1" value={state.title ?? "Título do E-mail"} onChange={(v) => onChange({ title: v })} className="text-balance font-display text-2xl font-black leading-tight tracking-tight text-slate-900 dark:text-white mb-8 text-center" />
             
-            <div className="space-y-6">
-              {paragraphs.map((p, i) => (
-                <Editable key={i} as="p" multiline value={p} onChange={(v) => { const next = [...paragraphs]; next[i] = v; onChange({ body: next.join("\n\n") }); }} className="text-[15px] md:text-[16px] leading-[1.8] font-light text-slate-600 dark:text-slate-300 text-center" />
-              ))}
+            <div className="space-y-4">
+              {paragraphs.map((p, i) => {
+                const isBullet = /^[-•*]\s/.test(p.trim());
+                if (isBullet) {
+                  return (
+                    <div key={i} className="flex items-start gap-3 bg-slate-50 dark:bg-slate-800/30 p-4 rounded-xl border border-slate-100 dark:border-slate-800">
+                      <CheckCircle2 className="size-5 text-emerald-500 shrink-0 mt-0.5" />
+                      <Editable as="p" multiline value={p.replace(/^[-•*]\s/, '')} 
+                        onChange={(v) => { const next = [...paragraphs]; next[i] = `- ${v}`; onChange({ body: next.join("\n") }); }} 
+                        className="text-[15px] leading-relaxed font-medium text-slate-700 dark:text-slate-300" />
+                    </div>
+                  );
+                }
+                return (
+                  <Editable key={i} as="p" multiline value={p} 
+                    onChange={(v) => { const next = [...paragraphs]; next[i] = v; onChange({ body: next.join("\n") }); }} 
+                    className="text-[16px] leading-[1.8] font-light text-slate-600 dark:text-slate-400 text-center" />
+                );
+              })}
             </div>
 
-            <div className="mt-10 flex flex-col items-center gap-4">
+            {/* BLOCO DE CUPOM DINÂMICO */}
+            <div className="mt-10 mb-6 border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-6 flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-900/50 relative">
+              <div className="absolute -top-3 bg-white dark:bg-[#0c0c0e] px-3 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                <TicketPercent className="size-3.5" /> Desconto Exclusivo
+              </div>
+              <Editable as="span" value={couponCode} onChange={() => {}} className="text-xl font-black tracking-widest text-slate-900 dark:text-white mt-2" />
+            </div>
+
+            <div className="flex flex-col items-center gap-4">
               <button className="group flex w-full max-w-sm items-center justify-center gap-3 rounded-xl px-8 py-4 text-[14px] font-bold uppercase tracking-widest text-white shadow-xl transition-all hover:scale-105" style={{ backgroundColor: themeColor }}>
-                <Editable as="span" value={state.cta ?? "Finalizar Compra"} onChange={(v) => onChange({ cta: v })} />
+                <Editable as="span" value={state.cta ?? "Comprar Agora"} onChange={(v) => onChange({ cta: v })} />
                 <ChevronRight className="size-4" strokeWidth={3} />
               </button>
               <div className="flex items-center gap-2 text-slate-400 mt-2">

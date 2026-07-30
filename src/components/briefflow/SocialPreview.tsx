@@ -54,6 +54,7 @@ export function SocialPreview({ state, onChange }: Props) {
     <div className="mx-auto max-w-[420px]">
       <div className="overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-black">
         
+        {/* HEADER POST */}
         <div className="flex items-center justify-between px-5 py-4">
           <div className="flex items-center gap-3.5">
             <div className="size-9 rounded-full flex items-center justify-center p-[2px]" style={{ background: `linear-gradient(to right, ${themeColor}, #f472b6)` }}>
@@ -67,7 +68,13 @@ export function SocialPreview({ state, onChange }: Props) {
           <MoreHorizontal className="size-5 text-slate-500" />
         </div>
 
+        {/* IMAGEM AREA */}
         <div className="relative aspect-[4/5] w-full bg-[#050508] border-y border-slate-100 dark:border-slate-900 overflow-hidden">
+          {/* BADGE DE OFERTA FLUTUANTE */}
+          <div className="absolute top-4 right-4 z-30 rotate-12 bg-rose-600 text-white text-[11px] font-black uppercase tracking-widest px-4 py-2 rounded-full shadow-xl border-2 border-white dark:border-slate-900">
+            <Editable as="span" value="OFERTA ESPECIAL" onChange={() => {}} />
+          </div>
+
           {url ? (
             <>
               {imageStatus === "loading" && <div className="absolute inset-0 flex items-center justify-center z-20 bg-[#050508]/40"><Loader2 className="size-8 animate-spin text-white/50" /></div>}
@@ -88,6 +95,7 @@ export function SocialPreview({ state, onChange }: Props) {
           ) : null}
         </div>
 
+        {/* AÇÕES E LEGENDA */}
         <div className="flex items-center justify-between px-5 py-4">
           <div className="flex items-center gap-4.5">
             <Heart className="size-7 text-slate-900 dark:text-white" />
@@ -101,7 +109,7 @@ export function SocialPreview({ state, onChange }: Props) {
           <p className="text-[13px] font-bold mb-2 text-slate-900 dark:text-white">1.245 curtidas</p>
           <div className="text-[14px] text-slate-800 dark:text-slate-200">
             <span className="font-bold mr-2">{state.brandName || "Sua Marca"}</span>
-            <Editable as="span" multiline value={state.caption ?? "Legenda..."} onChange={(v) => onChange({ caption: v })} className="leading-[1.6] whitespace-pre-wrap break-words font-light" />
+            <Editable as="p" multiline value={state.caption ?? "Legenda..."} onChange={(v) => onChange({ caption: v })} className="inline leading-[1.6] whitespace-pre-wrap break-words font-light" />
           </div>
         </div>
 

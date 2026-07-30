@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,6 +17,14 @@ export function AuthModal({ open, onOpenChange }: Props) {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [isLogin, setIsLogin] = useState(true);
+
+  // O useEffect deve sempre ficar DENTRO do componente
+  useEffect(() => {
+    if (!open) {
+      setEmail("");
+      setPassword("");
+    }
+  }, [open]);
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
