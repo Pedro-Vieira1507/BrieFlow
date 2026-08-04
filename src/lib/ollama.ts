@@ -14,7 +14,7 @@ const DISCOVERY_AGENT_PROMPT = (
 === REGRAS ABSOLUTAS ===
 1. IDIOMA: TODAS as suas respostas devem ser EXCLUSIVAMENTE em Português do Brasil (PT-BR).
 2. O campo "productSku" deve ser null a não ser que o usuário envie um link DIRETO para a página de UM produto.
-3. RETENÇÃO LITERAL (CRÍTICO): Se o usuário fornecer textos EXATOS para as peças (como "Título:", "Legenda:", "Hashtags obrigatórias" ou "Frases exatas"), você ESTÁ PROIBIDO de resumir. Transcreva essas regras PALAVRA POR PALAVRA para dentro do campo "detectedContext".
+3. RETENÇÃO LITERAL: Se o usuário fornecer textos EXATOS para as peças (como "Título:", "Legenda:", "Hashtags"), você ESTÁ PROIBIDO de resumir. Transcreva essas regras PALAVRA POR PALAVRA para o "detectedContext".
 4. Responda ESTRITAMENTE em JSON válido.
 
 === DADOS DA MARCA E DO SITE ===
@@ -26,10 +26,10 @@ ${brandContext.site ? formatSiteContextForAgent(brandContext.site) : "Nenhum sit
   "builder": {
     "type": "discovery_plan",
     "discoveryPlan": {
-      "detectedContext": "TRANSCREVA AQUI TODAS AS EXIGÊNCIAS LITERAIS DE COPY DO CLIENTE. Se não houver, faça um resumo do briefing.",
-      "offer": "O CÓDIGO EXATO DO CUPOM mencionado (ex: RUN15). Use null se não houver.",
+      "detectedContext": "TRANSCREVA AQUI TODAS AS EXIGÊNCIAS LITERAIS DE COPY DO CLIENTE. Se não houver, faça um resumo.",
+      "offer": "O CÓDIGO EXATO DO CUPOM (ex: RUN15).",
       "missingInfo": "O que realmente falta descobrir.",
-      "proposedStrategy": "Estratégia baseada APENAS nos fatos narrados",
+      "proposedStrategy": "Estratégia baseada APENAS nos fatos",
       "brandName": "Nome da marca",
       "productSku": "APENAS UM SKU AQUI OU UMA URL DIRETA (OU NULL)"
     }
@@ -38,17 +38,18 @@ ${brandContext.site ? formatSiteContextForAgent(brandContext.site) : "Nenhum sit
 
 function getAssetContentSchema(targetAsset: AiAssetType): string {
   const designFields = `
-    "themeColor": "#HEX OBRIGATÓRIO (use a cor primária escura ou vibrante)",
-    "secondaryColor": "#HEX OBRIGATÓRIO (use a cor secundária exigida)"
+    "themeColor": "#HEX OBRIGATÓRIO (Use a cor primária MAIS VIBRANTE ou escura da marca, nunca tons pastéis ou branco)",
+    "secondaryColor": "#HEX OBRIGATÓRIO (Use a cor secundária de contraste)"
   `;
+  const imgPromptGuidance = "Prompt descritivo em inglês para a foto. DEVE ser focado no nicho real do produto/tema (ex: programação, esportes, etc) e nunca literal/ambíguo. Se for programação, mostre pessoas digitando, código, escritório.";
 
   if (targetAsset === "banner") {
     return `"content": {
           "type": "banner",
-          "title": "Título com impacto publicitário (PT-BR)",
-          "subtitle": "Linha de benefício com o nome do produto (PT-BR)",
-          "cta": "CTA forte contendo o cupom (PT-BR)",
-          "imagePrompt": "Prompt em inglês para a foto",
+          "title": "Título com impacto publicitário",
+          "subtitle": "Subtítulo da peça",
+          "cta": "CTA forte contendo a ação",
+          "imagePrompt": "${imgPromptGuidance}",
           "productSku": "SKU",
           "layoutStyle": "diagonal OU split OU minimalist OU centered",
           ${designFields}
@@ -57,19 +58,19 @@ function getAssetContentSchema(targetAsset: AiAssetType): string {
   if (targetAsset === "email") {
     return `"content": {
           "type": "email",
-          "preheader": "Pré-header chamativo (PT-BR)",
-          "title": "Assunto do email (PT-BR)",
-          "body": "Texto altamente persuasivo citando o produto e o cupom (PT-BR)",
-          "cta": "Botão de ação clara (PT-BR)",
-          "emailHeroImagePrompt": "Prompt de imagem em inglês",
+          "preheader": "Pré-header chamativo",
+          "title": "Assunto do email",
+          "body": "Texto persuasivo com os benefícios reais passados no briefing",
+          "cta": "Botão de ação clara",
+          "emailHeroImagePrompt": "${imgPromptGuidance}",
           ${designFields}
         }`;
   }
   return `"content": {
           "type": "social",
-          "caption": "Legenda engajadora citando produto e cupom (PT-BR)",
+          "caption": "Legenda com a narrativa, pergunta final e hashtags",
           "hashtags": ["#hashtag1", "#hashtag2"],
-          "imagePrompt": "Prompt vertical em inglês focado em redes sociais",
+          "imagePrompt": "${imgPromptGuidance}",
           ${designFields}
         }`;
 }
@@ -82,24 +83,24 @@ const EXECUTION_AGENT_PROMPT = (
   plan: DiscoveryPlan | undefined,
   targetAsset: AiAssetType,
   options: OllamaGenerationOptions,
-) => `Você é o BrieFlow Art Director, liderando um estúdio de design premium.
-Sua missão é gerar EXCLUSIVAMENTE a peça: ${targetAsset.toUpperCase()}.
+) => {
+  // LÓGICA ANTI-PLACEHOLDER [NENHUM]
+  const offer = plan?.offer && plan.offer !== 'null' && plan.offer.trim() !== '' && plan.offer.toLowerCase() !== 'nenhum' 
+    ? plan.offer 
+    : null;
+    
+  const offerGuidance = offer 
+    ? `3. OFERTA/CUPOM: A campanha possui a seguinte oferta: [${offer}]. É OBRIGATÓRIO aplicar isso na copy.`
+    : `3. OFERTA/CUPOM: NÃO HÁ oferta ou cupom nesta campanha. É ESTRITAMENTE PROIBIDO citar descontos, cupons ou a palavra [NENHUM]. O CTA deve ser apenas a ação (ex: "Inscreva-se", "Comprar Agora").`;
 
-=== DIRETRIZES GLOBAIS OBRIGATÓRIAS ===
-1. FIDELIDADE ABSOLUTA: Leia o "Briefing Aprovado" abaixo. Encontre as instruções específicas para o ${targetAsset.toUpperCase()} e USE O TEXTO EXATAMENTE COMO SOLICITADO. Você está PROIBIDO de reescrever frases, perguntas finais ou hashtags se o briefing já as forneceu.
-2. ISOLAMENTO: Ignore completamente as instruções referentes a outras peças. Nunca misture a copy.
-3. TEXTO LIMPO: ZERO formatação Markdown. NUNCA use chaves, colchetes [ ], asteriscos ** ou links no JSON retornado.
-4. PRODUTO E CUPOM: Use estritamente o cupom/oferta: [${plan?.offer || 'Nenhum'}].
-5. CORES: "themeColor" DEVE ser a cor MAIS ESCURA da paleta informada para garantir contraste premium. NUNCA use tons claros no fundo.
-6. SCHEMA COMPLETO: NUNCA remova chaves do JSON.
+  return `Você é o BrieFlow Art Director, gerando a peça: ${targetAsset.toUpperCase()}.
 
-=== BRIEFING APROVADO ===
-${plan ? JSON.stringify(plan, null, 2) : "Use o histórico da conversa."}
-
-=== PRODUTOS COLETADOS ===
-${options.scrapedProducts && options.scrapedProducts.length > 0 
-  ? options.scrapedProducts.map(p => `- Produto: ${p.name}`).join("\n") 
-  : "Nenhum."}
+=== DIRETRIZES ===
+1. FIDELIDADE ABSOLUTA: Use OS TEXTOS LITERAIS que o cliente pediu. Não invente ou resuma se o cliente enviou a frase exata.
+2. TEXTO LIMPO: ZERO formatação Markdown. NÃO use colchetes [ ], asteriscos ** ou tags HTML no JSON.
+${offerGuidance}
+4. ZERO ALUCINAÇÃO (CRÍTICO): NUNCA invente preços, datas, locais, distâncias ou dados operacionais/factuais que não constem no briefing. Atenha-se às informações fornecidas. Se faltar dados, use argumentos motivacionais genéricos.
+5. SCHEMA COMPLETO: Preencha todas as chaves exigidas no JSON.
 
 === RETORNO OBRIGATÓRIO (JSON STRICT) ===
 {
@@ -118,15 +119,14 @@ ${options.scrapedProducts && options.scrapedProducts.length > 0
   },
   "scores": { "persuasion": 95, "clarity": 95, "seo": 90 }
 }`;
+};
 
 export interface ChatTurn extends AiChatMessage { id?: string; }
-
 export interface OllamaGenerationOptions {
   intent?: AiIntent; requestId?: string; targetAsset?: AiAssetType;
   productImageUrl?: string | null; onStream?: (partialChat: string) => void;
   scrapedProducts?: ScrapedProductData[];
 }
-
 export interface OllamaResultMeta extends AiGenerationMeta { provider: "ollama"; }
 export interface OllamaResponse {
   chat: string; builder: BuilderState; scores?: { persuasion: number; clarity: number; seo: number; };
@@ -233,6 +233,32 @@ function normalizeBuilder(response: OllamaResponse, currentPlan: DiscoveryPlan |
   return builder;
 }
 
+function extractSpecificBriefing(text: string, targetAsset: string): string {
+  const normalized = text.toUpperCase();
+  const hasMarkers = /BANNER:|E-MAIL:|EMAIL:|POST SOCIAL:|SOCIAL:/i.test(text);
+  if (!hasMarkers) return text; 
+
+  let keyword = "";
+  if (targetAsset === "banner") keyword = "BANNER:";
+  else if (targetAsset === "email") keyword = normalized.includes("E-MAIL:") ? "E-MAIL:" : "EMAIL:";
+  else if (targetAsset === "social") keyword = normalized.includes("POST SOCIAL:") ? "POST SOCIAL:" : "SOCIAL:";
+
+  if (!keyword || !normalized.includes(keyword)) return text;
+
+  const startIndex = normalized.indexOf(keyword) + keyword.length;
+  
+  const otherKeywords = ["BANNER:", "E-MAIL:", "EMAIL:", "POST SOCIAL:", "SOCIAL:"].filter(k => k !== keyword);
+  let endIndex = text.length;
+  
+  for (const kw of otherKeywords) {
+    const idx = normalized.indexOf(kw, startIndex);
+    if (idx !== -1 && idx < endIndex) {
+      endIndex = idx;
+    }
+  }
+  return text.substring(startIndex, endIndex).trim();
+}
+
 export async function sendToOllama(history: ChatTurn[], brandContext: BrandContext, currentPlan?: DiscoveryPlan, options: OllamaGenerationOptions = {}): Promise<OllamaResult> {
   const wantsExecution = Boolean(options.targetAsset);
   const targetAsset = options.targetAsset;
@@ -250,14 +276,20 @@ export async function sendToOllama(history: ChatTurn[], brandContext: BrandConte
     ? EXECUTION_AGENT_PROMPT(brandContext, currentPlan, targetAsset, options)
     : DISCOVERY_AGENT_PROMPT(currentPlan, brandContext);
 
-  // Mantemos o Agente Executor TOTALMENTE ISOLADO, sem o peso e a distração do histórico longo.
-  // Ele dependerá 100% da transcrição literal gravada no "Briefing Aprovado" (plan).
+  const recentUserBriefing = history
+    .filter(m => m.role === "user")
+    .slice(-3)
+    .map(m => m.content)
+    .join("\n\n---\n\n");
+
+  const isolatedBriefing = wantsExecution && targetAsset ? extractSpecificBriefing(recentUserBriefing, targetAsset) : recentUserBriefing;
+
   const messagesPayload = wantsExecution && targetAsset
     ? [
         { role: "system", content: systemPrompt },
         { 
           role: "user", 
-          content: `Crie APENAS o JSON da peça ${targetAsset.toUpperCase()}. Siga as instruções literais do Briefing Aprovado à risca. Não use markdown.` 
+          content: `=== REGRAS OBRIGATÓRIAS DESTA PEÇA ===\n${isolatedBriefing}\n\n=== TAREFA ===\nGere AGORA o JSON para a peça ${targetAsset.toUpperCase()}. Siga as frases acima à risca.` 
         }
       ] as { role: "system" | "user", content: string }[]
     : [
@@ -271,9 +303,7 @@ export async function sendToOllama(history: ChatTurn[], brandContext: BrandConte
   try {
     const response = await fetch(resolveOllamaApiUrl(), {
       method: "POST", 
-      headers: {
-         "Content-Type": "application/json"
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         model,
         messages: messagesPayload,

@@ -1,9 +1,11 @@
 // src/components/briefflow/SocialPreview.tsx
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { Editable } from "./Editable";
 import type { BuilderState } from "@/types/builder";
 import { buildPollinationsUrl, buildFallbackUrl } from "@/lib/pollinations";
-import { Loader2, Heart, MessageCircle, Send, Bookmark, MoreHorizontal, AlertCircle } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Loader2, Heart, MessageCircle, Send, Bookmark, MoreHorizontal, AlertCircle, Upload, RefreshCw } from "lucide-react";
+import { useBriefflowStore } from "@/store/briefflow";
 
 interface Props {
   state: BuilderState;
@@ -13,10 +15,15 @@ interface Props {
 export function SocialPreview({ state, onChange }: Props) {
   const [imageStatus, setImageStatus] = useState<"loading" | "loaded" | "error">("loading");
   const [useFallback, setUseFallback] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const { builder } = useBriefflowStore();
 
   const prompt = state.imagePrompt || "";
   const isProductImage = !!state.productImageUrl;
   const themeColor = state.themeColor || "#2563EB";
+
+  const offerStr = builder.discoveryPlan?.offer;
+  const hasOffer = Boolean(offerStr && offerStr !== "null" && offerStr.trim() !== "" && offerStr.toLowerCase() !== "nenhum");
 
   const url = useMemo(() => {
       if (state.productImageUrl) return state.productImageUrl;
@@ -50,8 +57,28 @@ export function SocialPreview({ state, onChange }: Props) {
 
   const handleImageLoad = () => setImageStatus("loaded");
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      onChange({ productImageUrl: event.target?.result as string });
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const handleRegenerate = () => {
+    setImageStatus("loading");
+    setUseFallback(false);
+    onChange({ 
+      imageSeed: Math.floor(Math.random() * 1_000_000),
+      productImageUrl: null 
+    });
+  };
+
   return (
-    <div className="mx-auto max-w-[420px]">
+    <div className="mx-auto flex w-full max-w-[420px] flex-col space-y-4">
       <div className="overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-black">
         
         {/* HEADER POST */}
@@ -70,10 +97,12 @@ export function SocialPreview({ state, onChange }: Props) {
 
         {/* IMAGEM AREA */}
         <div className="relative aspect-[4/5] w-full bg-[#050508] border-y border-slate-100 dark:border-slate-900 overflow-hidden">
-          {/* BADGE DE OFERTA FLUTUANTE */}
-          <div className="absolute top-4 right-4 z-30 rotate-12 bg-rose-600 text-white text-[11px] font-black uppercase tracking-widest px-4 py-2 rounded-full shadow-xl border-2 border-white dark:border-slate-900">
-            <Editable as="span" value="OFERTA ESPECIAL" onChange={() => {}} />
-          </div>
+          
+          {hasOffer && (
+            <div className="absolute top-4 right-4 z-30 rotate-12 bg-rose-600 text-white text-[11px] font-black uppercase tracking-widest px-4 py-2 rounded-full shadow-xl border-2 border-white dark:border-slate-900">
+              <Editable as="span" value="OFERTA ESPECIAL" onChange={() => {}} />
+            </div>
+          )}
 
           {url ? (
             <>
@@ -112,7 +141,21 @@ export function SocialPreview({ state, onChange }: Props) {
             <Editable as="p" multiline value={state.caption ?? "Legenda..."} onChange={(v) => onChange({ caption: v })} className="inline leading-[1.6] whitespace-pre-wrap break-words font-light" />
           </div>
         </div>
+      </div>
 
+      <div className="flex items-center justify-between rounded-xl border border-border/60 bg-background/50 p-3 shadow-sm opacity-80 hover:opacity-100 transition-opacity">
+        <div className="min-w-0 flex-1 truncate pr-4 text-[11px] text-muted-foreground font-bold uppercase tracking-widest">
+          Peça: <span style={{ color: themeColor }} className="mr-3">POST SOCIAL</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <input type="file" accept="image/*" className="hidden" ref={fileRef} onChange={handleFileChange} />
+          <Button size="sm" variant="outline" className="h-8 text-xs shrink-0 font-bold border-border-strong bg-surface-2" onClick={() => fileRef.current?.click()}>
+            <Upload className="mr-2 size-3.5" /> Importar
+          </Button>
+          <Button size="sm" variant="ghost" className="h-8 text-xs shrink-0 font-bold" onClick={handleRegenerate}>
+            <RefreshCw className="mr-2 size-3.5" /> Gerar IA
+          </Button>
+        </div>
       </div>
     </div>
   );

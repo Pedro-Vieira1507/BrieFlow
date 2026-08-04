@@ -1,10 +1,10 @@
 // src/components/briefflow/BannerPreview.tsx
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { Editable } from "./Editable";
 import type { BuilderState } from "@/types/builder";
 import { Button } from "@/components/ui/button";
 import { buildPollinationsUrl, buildFallbackUrl } from "@/lib/pollinations";
-import { RefreshCw, Loader2, AlertCircle, ArrowUpRight, Sparkles, Hexagon } from "lucide-react";
+import { RefreshCw, Loader2, AlertCircle, ArrowUpRight, Sparkles, Hexagon, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface Props {
@@ -15,12 +15,16 @@ interface Props {
 export function BannerPreview({ state, onChange }: Props) {
   const [imageStatus, setImageStatus] = useState<"loading" | "loaded" | "error">("loading");
   const [useFallback, setUseFallback] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const prompt = state.imagePrompt || "";
   const isProductImage = !!state.productImageUrl;
   const themeColor = state.themeColor || "#2563EB"; 
-  const secondaryColor = state.secondaryColor || "#FF5722"; // Laranja/Vibrante por padrão
+  const secondaryColor = state.secondaryColor || "#FF5722"; 
   const layoutStyle = state.layoutStyle || "split"; 
+
+  const rawCta = state.cta || "Saiba Mais";
+  const cleanCta = rawCta.replace(/\[|\]|\*/g, '').replace(/nenhum/i, '').trim();
 
   const url = useMemo(() => {
       if (state.productImageUrl) return state.productImageUrl;
@@ -57,6 +61,26 @@ export function BannerPreview({ state, onChange }: Props) {
 
   const handleImageLoad = () => setImageStatus("loaded");
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      onChange({ productImageUrl: event.target?.result as string });
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const handleRegenerate = () => {
+    setImageStatus("loading");
+    setUseFallback(false);
+    onChange({ 
+      imageSeed: Math.floor(Math.random() * 1_000_000),
+      productImageUrl: null 
+    });
+  };
+
   const ImageLayer = ({ className }: { className: string }) => {
     if (imageStatus === "error") {
       return (
@@ -79,7 +103,6 @@ export function BannerPreview({ state, onChange }: Props) {
     );
   };
 
-  // HEADER FANTASMA COM LOGO PARA ANCORAGEM DA MARCA
   const BrandHeader = ({ dark = false }: { dark?: boolean }) => (
     <div className={cn("absolute top-6 left-6 md:top-8 md:left-10 z-30 flex items-center gap-2", dark ? "text-slate-900" : "text-white")}>
       <div className={cn("size-8 rounded-lg flex items-center justify-center shadow-lg", dark ? "bg-slate-900 text-white" : "bg-white text-slate-900")}>
@@ -102,7 +125,7 @@ export function BannerPreview({ state, onChange }: Props) {
               <Editable as="p" value={state.subtitle ?? "Subtítulo"} onChange={(v) => onChange({ subtitle: v })} className="text-slate-600 text-[15px] md:text-[17px] font-medium max-w-md mb-8" />
               {state.cta && (
                 <div className="w-fit px-8 py-4 rounded-xl font-bold uppercase tracking-widest shadow-xl hover:scale-105 transition-transform text-white" style={{ backgroundColor: secondaryColor }}>
-                  <Editable as="span" value={state.cta} onChange={(v) => onChange({ cta: v })} />
+                  <Editable as="span" value={cleanCta} onChange={(v) => onChange({ cta: v })} />
                 </div>
               )}
             </div>
@@ -119,7 +142,7 @@ export function BannerPreview({ state, onChange }: Props) {
               {state.subtitle && <Editable as="p" value={state.subtitle} onChange={(v) => onChange({ subtitle: v })} className="text-white/90 text-[15px] md:text-[16px] font-medium leading-relaxed mb-8 drop-shadow-sm" />}
               {state.cta && (
                 <div className="w-fit px-7 py-3.5 rounded-lg text-slate-900 font-black uppercase tracking-widest shadow-2xl flex items-center gap-3 transition-transform hover:scale-105 bg-white">
-                  <Editable as="span" value={state.cta} onChange={(v) => onChange({ cta: v })} />
+                  <Editable as="span" value={cleanCta} onChange={(v) => onChange({ cta: v })} />
                   <ArrowUpRight className="size-5" strokeWidth={3} />
                 </div>
               )}
@@ -129,7 +152,6 @@ export function BannerPreview({ state, onChange }: Props) {
       case "centered":
       case "split":
       default:
-        // Mantive o split como padrão atualizado
         return (
           <div className="relative flex aspect-[21/9] md:aspect-[2.5/1] min-h-[360px] w-full shrink-0 overflow-hidden rounded-[24px] bg-[#f0f4f9] shadow-2xl flex-row">
             <BrandHeader />
@@ -142,7 +164,7 @@ export function BannerPreview({ state, onChange }: Props) {
               {state.subtitle && <Editable as="p" value={state.subtitle} onChange={(v) => onChange({ subtitle: v })} className="text-white/80 text-[14px] md:text-[15px] font-medium leading-relaxed mb-8" />}
               {state.cta && (
                 <div className="w-fit px-8 py-3.5 bg-white rounded-md font-black uppercase tracking-widest shadow-xl transition-transform hover:scale-105" style={{ color: themeColor }}>
-                  <Editable as="span" value={state.cta} onChange={(v) => onChange({ cta: v })} />
+                  <Editable as="span" value={cleanCta} onChange={(v) => onChange({ cta: v })} />
                 </div>
               )}
             </div>
@@ -169,11 +191,15 @@ export function BannerPreview({ state, onChange }: Props) {
         <div className="min-w-0 flex-1 truncate pr-4 text-[11px] text-muted-foreground font-bold uppercase tracking-widest">
           Estilo: <span style={{ color: themeColor }} className="mr-3">{layoutStyle}</span>
         </div>
-        {!isProductImage && (
-          <Button size="sm" variant="ghost" className="h-8 text-xs shrink-0 font-bold" onClick={() => { setImageStatus("loading"); setUseFallback(false); onChange({ imageSeed: Math.floor(Math.random() * 1_000_000) }); }}>
-            <RefreshCw className="mr-2 size-3.5" /> Gerar Outra Imagem
+        <div className="flex items-center gap-2">
+          <input type="file" accept="image/*" className="hidden" ref={fileRef} onChange={handleFileChange} />
+          <Button size="sm" variant="outline" className="h-8 text-xs shrink-0 font-bold border-border-strong bg-surface-2" onClick={() => fileRef.current?.click()}>
+            <Upload className="mr-2 size-3.5" /> Importar
           </Button>
-        )}
+          <Button size="sm" variant="ghost" className="h-8 text-xs shrink-0 font-bold" onClick={handleRegenerate}>
+            <RefreshCw className="mr-2 size-3.5" /> Gerar IA
+          </Button>
+        </div>
       </div>
     </div>
   );
