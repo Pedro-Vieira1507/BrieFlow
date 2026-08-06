@@ -3,6 +3,7 @@ import type { BrandContext, BuilderState, CampaignAsset, DiscoveryPlan } from "@
 import { formatSiteContextForAgent, type ScrapedProductData } from "@/lib/scrape-site";
 import type { AiAssetType, AiChatMessage, AiGenerationMeta, AiIntent } from "@/types/ai";
 import { toast } from "sonner";
+import { cleanOffer } from "@/lib/sanitize";
 
 const DISCOVERY_AGENT_PROMPT = (
   currentPlan: DiscoveryPlan | undefined,
@@ -81,9 +82,7 @@ const EXECUTION_AGENT_PROMPT = (
   targetAsset: AiAssetType,
   options: OllamaGenerationOptions,
 ) => {
-  const offer = plan?.offer && plan.offer !== 'null' && plan.offer.trim() !== '' && plan.offer.toLowerCase() !== 'nenhum'
-     ? plan.offer
-     : null;
+  const offer = cleanOffer(plan?.offer);
    
   const offerGuidance = offer
      ? `3. OFERTA/CUPOM: A campanha possui a seguinte oferta: [${offer}]. É OBRIGATÓRIO aplicar isso na copy.`
@@ -190,18 +189,28 @@ function extractBalancedJson(text: string): string | null {
       if (depth === 0) return text.slice(start, index + 1);
     }
   }
+  // Recuperação best-effort para JSON truncado: fecha objetos abertos.
+  if (depth > 0) return text.slice(start) + "}".repeat(depth);
   return null;
 }
 
 function tryParseJson(text: string): OllamaResponse | null {
-  let cleanText = text.replace(/<think>[\s\S]*?<\/think>/gi, "").replace(/```json/gi, "").replace(/```/g, "").trim();
-  cleanText = cleanText.replace(/[\n\r\t]/g, " ");
-  cleanText = cleanText.replace(/,\s*([}\]])/g, '$1');
-  try { return JSON.parse(cleanText) as OllamaResponse; } catch { }
-  
-  const extracted = extractBalancedJson(cleanText);
+  if (!text || !text.trim()) return null;
+  const cleanText = text.replace(/<think>[\s\S]*?<\/think>/gi, "").replace(/```json/gi, "").replace(/```/g, "").trim();
+
+  // 1) Tenta o mais direto (preserva quebras dentro de strings)
+  try { return JSON.parse(cleanText) as OllamaResponse; } catch { /* segue */ }
+
+  // 2) Achata whitespace e remove trailing commas
+  const flat = cleanText.replace(/[\n\r\t]/g, " ").replace(/,\s*([}\]])/g, "$1");
+  try { return JSON.parse(flat) as OllamaResponse; } catch { /* segue */ }
+
+  // 3) Extrai o primeiro objeto balanceado (ou tenta recuperar truncado)
+  const extracted = extractBalancedJson(flat);
   if (extracted) {
-    try { return JSON.parse(extracted) as OllamaResponse; } catch { }
+    try { return JSON.parse(extracted) as OllamaResponse; } catch { /* segue */ }
+    const softened = extracted.replace(/,\s*([}\]])/g, "$1");
+    try { return JSON.parse(softened) as OllamaResponse; } catch { /* fim */ }
   }
   return null;
 }
@@ -329,7 +338,7 @@ async function callOmniRouteAPI(
               if (partialChat) options.onStream?.(partialChat);
             }
           }
-        } catch { }
+        } catch { /* stream chunk parse error, ignore */ }
       }
     }
   }
@@ -395,7 +404,7 @@ async function callLocalOllama(
             if (partialChat) options.onStream?.(partialChat);
           }
         }
-      } catch { }
+      } catch { /* ignore malformed chunk */ }
     }
   }
 
@@ -404,7 +413,7 @@ async function callLocalOllama(
     try {
       const finalChunk = JSON.parse(pendingChunk.trim()) as { message?: { content?: string } };
       if (finalChunk.message?.content) rawJson += finalChunk.message.content;
-    } catch { }
+    } catch { /* ignore trailing chunk */ }
   }
 
   return rawJson;
@@ -482,7 +491,9 @@ export async function sendToOllama(history: ChatTurn[], brandContext: BrandConte
     };
 
     if (!parsed && wantsExecution) {
-      throw new Error("A IA gerou um JSON corrompido ou foi interrompida.");
+      throw new Error(
+        "A IA não conseguiu concluir a resposta a tempo. Peça para gerar novamente esta peça.",
+      );
     }
 
     if (!parsed) {

@@ -22,27 +22,27 @@ interface BriefflowState {
   scraping: boolean;
   generatingLabel?: string;
   user: any | null;
-  uploadedImage: string | null; // <-- Novo estado para anexo
+  uploadedImage: string | null;
 
   // actions
   setMessages: (updater: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => void;
   appendMessage: (msg: ChatMessage) => void;
   updateMessage: (id: string, patch: Partial<ChatMessage>) => void;
-
   setBuilder: (updater: BuilderState | ((prev: BuilderState) => BuilderState)) => void;
   patchBuilder: (patch: Partial<BuilderState>) => void;
   patchCampaignAssets: (assets: CampaignAsset[]) => void;
-
+  updateCampaignAsset: (
+    kind: "banner" | "email" | "social",
+    updater: CampaignAsset | ((prev?: CampaignAsset) => CampaignAsset),
+  ) => void;
   setBrandContext: (updater: BrandContext | ((prev: BrandContext) => BrandContext)) => void;
   mergeSiteIntoContext: (site: SiteBrandData) => void;
-
   setScores: (scores?: Scores) => void;
   setLoading: (v: boolean) => void;
   setScraping: (v: boolean) => void;
   setGeneratingLabel: (v?: string) => void;
   setUser: (user: any | null) => void;
-  setUploadedImage: (img: string | null) => void; // <-- Nova ação
-
+  setUploadedImage: (img: string | null) => void;
   reset: () => void;
 }
 
@@ -87,6 +87,31 @@ export const useBriefflowStore = create<BriefflowState>((set) => ({
     set((s) => ({
       builder: { ...s.builder, type: "campaign", campaignAssets } as BuilderState,
     })),
+
+  updateCampaignAsset: (kind, updater) =>
+    set((s) => {
+      const prevAssets =
+        s.builder.type === "campaign" ? s.builder.campaignAssets ?? [] : [];
+      const idx = prevAssets.findIndex((a) => a.type === kind);
+      const prevAsset = idx >= 0 ? prevAssets[idx] : undefined;
+      const nextAsset =
+        typeof updater === "function"
+          ? (updater as (p?: CampaignAsset) => CampaignAsset)(prevAsset)
+          : updater;
+
+      const nextAssets =
+        idx >= 0
+          ? prevAssets.map((a, i) => (i === idx ? nextAsset : a))
+          : [...prevAssets, nextAsset];
+
+      return {
+        builder: {
+          ...s.builder,
+          type: "campaign",
+          campaignAssets: nextAssets,
+        } as BuilderState,
+      };
+    }),
 
   setBrandContext: (updater) =>
     set((s) => ({

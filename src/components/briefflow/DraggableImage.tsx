@@ -1,11 +1,13 @@
 // src/components/briefflow/DraggableImage.tsx
 import { useState, useRef, useEffect } from "react";
+import { ImageOff } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 export function DraggableImage({ src }: { src: string }) {
   const [pos, setPos] = useState({ x: 0, y: 0 });
   const [scale, setScale] = useState(1);
   const [isActive, setIsActive] = useState(false);
-  
+
   const isDragging = useRef(false);
   const isResizing = useRef(false);
   const startMousePos = useRef({ x: 0, y: 0 });
@@ -13,25 +15,36 @@ export function DraggableImage({ src }: { src: string }) {
   const initialScale = useRef(1);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const isExternal = src && src.startsWith("http") && !src.includes("wsrv.nl") && !src.includes("picsum.photos");
-  
-  const proxy1 = isExternal ? `https://wsrv.nl/?url=${encodeURIComponent(src)}&output=webp&w=600` : src;
-  const proxy2 = isExternal ? `https://api.allorigins.win/raw?url=${encodeURIComponent(src)}` : "";
-  
+  const isExternal =
+    !!src &&
+    src.startsWith("http") &&
+    !src.includes("wsrv.nl") &&
+    !src.includes("picsum.photos");
+
+  const proxy1 = isExternal
+    ? `https://wsrv.nl/?url=${encodeURIComponent(src)}&output=webp&w=600`
+    : src;
+  const proxy2 = isExternal
+    ? `https://api.allorigins.win/raw?url=${encodeURIComponent(src)}`
+    : "";
+
   const [imgSrc, setImgSrc] = useState(proxy1);
   const [proxyLevel, setProxyLevel] = useState(0);
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     setImgSrc(proxy1);
     setProxyLevel(0);
+    setFailed(false);
   }, [proxy1]);
 
   useEffect(() => {
-    const handleMouseMove = (e: MouseEvent | TouchEvent) => {
+    const handleMove = (e: MouseEvent | TouchEvent) => {
       if (!isDragging.current && !isResizing.current) return;
-      
-      let clientX = e instanceof MouseEvent ? e.clientX : e.touches[0].clientX;
-      let clientY = e instanceof MouseEvent ? e.clientY : e.touches[0].clientY;
+      const clientX =
+        e instanceof MouseEvent ? e.clientX : e.touches[0].clientX;
+      const clientY =
+        e instanceof MouseEvent ? e.clientY : e.touches[0].clientY;
 
       if (isDragging.current) {
         setPos({
@@ -39,12 +52,12 @@ export function DraggableImage({ src }: { src: string }) {
           y: initialPos.current.y + (clientY - startMousePos.current.y),
         });
       } else if (isResizing.current) {
-        const delta = (clientX - startMousePos.current.x) * 0.005; 
+        const delta = (clientX - startMousePos.current.x) * 0.005;
         setScale(Math.max(0.2, Math.min(initialScale.current + delta, 5)));
       }
     };
 
-    const handleMouseUp = () => {
+    const handleUp = () => {
       isDragging.current = false;
       isResizing.current = false;
     };
@@ -56,80 +69,143 @@ export function DraggableImage({ src }: { src: string }) {
     };
 
     if (isActive) {
-      window.addEventListener("mousemove", handleMouseMove);
-      window.addEventListener("touchmove", handleMouseMove, { passive: false });
-      window.addEventListener("mouseup", handleMouseUp);
-      window.addEventListener("touchend", handleMouseUp);
-      
+      window.addEventListener("mousemove", handleMove);
+      window.addEventListener("touchmove", handleMove, { passive: false });
+      window.addEventListener("mouseup", handleUp);
+      window.addEventListener("touchend", handleUp);
       document.addEventListener("mousedown", handleClickOutside);
       document.addEventListener("touchstart", handleClickOutside);
     }
 
     return () => {
-      window.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("touchmove", handleMouseMove);
-      window.removeEventListener("mouseup", handleMouseUp);
-      window.removeEventListener("touchend", handleMouseUp);
+      window.removeEventListener("mousemove", handleMove);
+      window.removeEventListener("touchmove", handleMove);
+      window.removeEventListener("mouseup", handleUp);
+      window.removeEventListener("touchend", handleUp);
       document.removeEventListener("mousedown", handleClickOutside);
       document.removeEventListener("touchstart", handleClickOutside);
     };
   }, [isActive]);
 
-  const onPointerDown = (e: React.PointerEvent | React.MouseEvent | React.TouchEvent) => {
+  const onPointerDown = (
+    e: React.PointerEvent | React.MouseEvent | React.TouchEvent,
+  ) => {
     e.stopPropagation();
+    if (failed) return;
     setIsActive(true);
     isDragging.current = true;
-    
-    let clientX = 0; let clientY = 0;
-    if ('clientX' in e) { clientX = e.clientX; clientY = e.clientY; }
-    else if ('touches' in e) { clientX = e.touches[0].clientX; clientY = e.touches[0].clientY; }
 
+    let clientX = 0;
+    let clientY = 0;
+    if ("clientX" in e) {
+      clientX = e.clientX;
+      clientY = e.clientY;
+    } else if ("touches" in e) {
+      clientX = e.touches[0].clientX;
+      clientY = e.touches[0].clientY;
+    }
     startMousePos.current = { x: clientX, y: clientY };
     initialPos.current = { ...pos };
   };
 
-  const onResizeDown = (e: React.PointerEvent | React.MouseEvent | React.TouchEvent) => {
+  const onResizeDown = (
+    e: React.PointerEvent | React.MouseEvent | React.TouchEvent,
+  ) => {
     e.stopPropagation();
     setIsActive(true);
     isResizing.current = true;
-    
-    let clientX = 0; let clientY = 0;
-    if ('clientX' in e) { clientX = e.clientX; clientY = e.clientY; }
-    else if ('touches' in e) { clientX = e.touches[0].clientX; clientY = e.touches[0].clientY; }
 
+    let clientX = 0;
+    let clientY = 0;
+    if ("clientX" in e) {
+      clientX = e.clientX;
+      clientY = e.clientY;
+    } else if ("touches" in e) {
+      clientX = e.touches[0].clientX;
+      clientY = e.touches[0].clientY;
+    }
     startMousePos.current = { x: clientX, y: clientY };
     initialScale.current = scale;
   };
 
+  const handleImgError = () => {
+    if (isExternal && proxyLevel === 0) {
+      setProxyLevel(1);
+      setImgSrc(proxy2);
+    } else if (isExternal && proxyLevel === 1) {
+      setProxyLevel(2);
+      setImgSrc(src);
+    } else {
+      setFailed(true);
+    }
+  };
+
+  if (failed) {
+    // Fallback visual coeso — nunca deixa "buraco" no preview
+    return (
+      <div
+        ref={containerRef}
+        data-testid="draggable-image-fallback"
+        className={cn(
+          "absolute z-40 flex h-[180px] w-[180px] flex-col items-center justify-center gap-1.5 rounded-xl",
+          "border-2 border-dashed border-slate-300 bg-slate-100/80 backdrop-blur-sm",
+          "text-slate-400 shadow-lg",
+        )}
+        style={{ transform: `translate(${pos.x}px, ${pos.y}px) scale(${scale})` }}
+        onPointerDown={onPointerDown}
+      >
+        <ImageOff className="size-6" />
+        <span className="text-[10px] font-bold uppercase tracking-widest">
+          Imagem indisponível
+        </span>
+      </div>
+    );
+  }
+
   return (
     <div
       ref={containerRef}
-      className={`absolute z-50 cursor-move transition-shadow ${isActive ? 'ring-2 ring-brand ring-dashed shadow-2xl' : 'hover:ring-2 hover:ring-white/50 hover:ring-dashed drop-shadow-2xl'}`}
-      style={{ transform: `translate(${pos.x}px, ${pos.y}px) scale(${scale})`, transformOrigin: 'center' }}
+      data-testid="draggable-image"
+      className={cn(
+        "absolute z-40 cursor-move transition-shadow",
+        isActive
+          ? "ring-2 ring-dashed ring-brand shadow-2xl"
+          : "drop-shadow-2xl hover:ring-2 hover:ring-dashed hover:ring-white/50",
+      )}
+      style={{
+        transform: `translate(${pos.x}px, ${pos.y}px) scale(${scale})`,
+        transformOrigin: "center",
+      }}
       onPointerDown={onPointerDown}
     >
-      <img 
-        src={imgSrc} 
-        alt="Produto" 
-        className="max-h-[250px] w-auto object-contain pointer-events-none rounded-xl bg-transparent mix-blend-multiply select-none" 
-        draggable={false} 
-        onError={() => {
-          if (isExternal && proxyLevel === 0) {
-            setProxyLevel(1);
-            setImgSrc(proxy2);
-          } else if (isExternal && proxyLevel === 1) {
-            setProxyLevel(2);
-            setImgSrc(src);
-          }
-        }}
+      <img
+        src={imgSrc}
+        alt="Produto"
+        loading="lazy"
+        decoding="async"
+        className="pointer-events-none max-h-[250px] w-auto select-none rounded-xl bg-transparent object-contain mix-blend-multiply"
+        draggable={false}
+        onError={handleImgError}
       />
-      
+
       {isActive && (
         <>
-          <div onPointerDown={onResizeDown} className="absolute -top-2.5 -left-2.5 w-5 h-5 bg-white border-[3px] border-brand rounded-full cursor-nwse-resize z-50 shadow-md" />
-          <div onPointerDown={onResizeDown} className="absolute -top-2.5 -right-2.5 w-5 h-5 bg-white border-[3px] border-brand rounded-full cursor-nesw-resize z-50 shadow-md" />
-          <div onPointerDown={onResizeDown} className="absolute -bottom-2.5 -left-2.5 w-5 h-5 bg-white border-[3px] border-brand rounded-full cursor-nesw-resize z-50 shadow-md" />
-          <div onPointerDown={onResizeDown} className="absolute -bottom-2.5 -right-2.5 w-5 h-5 bg-white border-[3px] border-brand rounded-full cursor-nwse-resize z-50 shadow-md" />
+          <div
+            onPointerDown={onResizeDown}
+            className="absolute -left-2.5 -top-2.5 z-50 h-5 w-5 cursor-nwse-resize rounded-full border-[3px] border-brand bg-white shadow-md"
+          />
+          <div
+            onPointerDown={onResizeDown}
+            className="absolute -right-2.5 -top-2.5 z-50 h-5 w-5 cursor-nesw-resize rounded-full border-[3px] border-brand bg-white shadow-md"
+          />
+          <div
+            onPointerDown={onResizeDown}
+            className="absolute -bottom-2.5 -left-2.5 z-50 h-5 w-5 cursor-nesw-resize rounded-full border-[3px] border-brand bg-white shadow-md"
+          />
+          <div
+            onPointerDown={onResizeDown}
+            className="absolute -bottom-2.5 -right-2.5 z-50 h-5 w-5 cursor-nwse-resize rounded-full border-[3px] border-brand bg-white shadow-md"
+          />
         </>
       )}
     </div>
