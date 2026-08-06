@@ -1,6 +1,7 @@
 // src/components/briefflow/EmailPreview.tsx
 import { useEffect, useMemo, useState, useRef } from "react";
 import { Editable } from "./Editable";
+import { DraggableImage } from "./DraggableImage";
 import type { BuilderState } from "@/types/builder";
 import { buildPollinationsUrl, buildFallbackUrl } from "@/lib/pollinations";
 import { Button } from "@/components/ui/button";
@@ -50,14 +51,18 @@ export function EmailPreview({ state, onChange }: Props) {
   const hasOffer = Boolean(offerStr && offerStr !== "null" && offerStr.trim() !== "" && offerStr.toLowerCase() !== "nenhum");
   const couponCode = hasOffer ? offerStr!.toUpperCase() : null;
 
+  const images = Array.from(new Set([
+    ...(state.productImageUrl ? [state.productImageUrl] : []),
+    ...(state.productImages || [])
+  ]));
+
   const heroUrl = useMemo(
     () => {
-      if (state.productImageUrl) return state.productImageUrl;
       return prompt ? useFallback 
-          ? buildFallbackUrl(prompt, { width: 1200, height: 600, seed: state.imageSeed }) 
-          : buildPollinationsUrl(prompt, { width: 1200, height: 600, seed: state.imageSeed }) 
-        : null;
-    }, [state.productImageUrl, prompt, state.imageSeed, useFallback]
+           ? buildFallbackUrl(prompt, { width: 1200, height: 600, seed: state.imageSeed }) 
+           : buildPollinationsUrl(prompt, { width: 1200, height: 600, seed: state.imageSeed }) 
+         : null;
+    }, [prompt, state.imageSeed, useFallback]
   );
 
   useEffect(() => { 
@@ -74,7 +79,7 @@ export function EmailPreview({ state, onChange }: Props) {
           }
           return prev;
         });
-      }, 12000);
+      }, 5000);
       return () => clearTimeout(timer);
     } 
   }, [heroUrl, useFallback, isProductImage]);
@@ -102,13 +107,13 @@ export function EmailPreview({ state, onChange }: Props) {
     setUseFallback(false);
     onChange({ 
       imageSeed: Math.floor(Math.random() * 1_000_000),
-      productImageUrl: null 
     });
   };
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col space-y-4">
       <div className="overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-[#09090b]">
+        
         <div className="flex items-center gap-3 bg-slate-100 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-5 py-3.5">
           <div className="flex gap-2">
             <div className="size-3 rounded-full bg-red-400" />
@@ -131,17 +136,23 @@ export function EmailPreview({ state, onChange }: Props) {
             </div>
 
             {heroUrl ? (
-              <div className="relative aspect-[2.2/1] w-full bg-slate-100 dark:bg-slate-900 overflow-hidden">
+              <div className="relative aspect-[2.2/1] w-full bg-slate-100 dark:bg-slate-900 overflow-hidden flex items-center justify-center">
                 {imageStatus === "loading" && <div className="absolute inset-0 flex items-center justify-center z-10"><Loader2 className="size-8 animate-spin text-slate-400" /></div>}
+                
                 {imageStatus === "error" ? (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-200/50 dark:bg-slate-800/50 border-y border-dashed border-slate-500/30">
+                  <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-200/50 dark:bg-slate-800/50 border-y border-dashed border-slate-500/30 z-0">
                     <AlertCircle className="size-8 text-slate-400 mb-2" />
                     <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Falha ao carregar capa</span>
                   </div>
                 ) : (
-                  <img src={heroUrl} alt="Hero" onLoad={handleImageLoad} onError={handleImageError}
-                    className={`h-full w-full ${isProductImage ? 'object-contain mix-blend-multiply bg-white p-8' : 'object-cover'} ${imageStatus === 'loading' ? 'opacity-0' : 'opacity-100 transition-opacity duration-700'}`} />
+                  <img src={heroUrl} alt="Hero" onLoad={handleImageLoad} onError={handleImageError} 
+                    className={`absolute inset-0 z-0 h-full w-full object-cover ${imageStatus === 'loading' ? 'opacity-0' : 'opacity-100 transition-opacity duration-700'}`} />
                 )}
+
+                {/* IMAGENS ARRASTÁVEIS NO EMAIL */}
+                {images.map((src, i) => (
+                   <DraggableImage key={i} src={src} />
+                ))}
               </div>
             ) : null}
 
@@ -150,12 +161,12 @@ export function EmailPreview({ state, onChange }: Props) {
               
               <div className="space-y-4">
                 {paragraphs.map((p, i) => {
-                  const isBullet = /^[-•*]\s/.test(p.trim());
+                  const isBullet = /^[- *]\s/.test(p.trim());
                   if (isBullet) {
                     return (
                       <div key={i} className="flex items-start gap-3 bg-slate-50 dark:bg-slate-800/30 p-4 rounded-xl border border-slate-100 dark:border-slate-800">
                         <CheckCircle2 className="size-5 text-emerald-500 shrink-0 mt-0.5" />
-                        <Editable as="p" multiline value={p.replace(/^[-•*]\s/, '')} 
+                        <Editable as="p" multiline value={p.replace(/^[- *]\s/, '')} 
                           onChange={(v) => { const next = [...paragraphs]; next[i] = `- ${v}`; onChange({ body: next.join("\n") }); }} 
                           className="text-[15px] leading-relaxed font-medium text-slate-700 dark:text-slate-300" />
                       </div>
@@ -201,7 +212,7 @@ export function EmailPreview({ state, onChange }: Props) {
         <div className="flex items-center gap-2">
           <input type="file" accept="image/*" className="hidden" ref={fileRef} onChange={handleFileChange} />
           <Button size="sm" variant="outline" className="h-8 text-xs shrink-0 font-bold border-border-strong bg-surface-2" onClick={() => fileRef.current?.click()}>
-            <Upload className="mr-2 size-3.5" /> Importar
+            <Upload className="mr-2 size-3.5" /> Upload Foto
           </Button>
           <Button size="sm" variant="ghost" className="h-8 text-xs shrink-0 font-bold" onClick={handleRegenerate}>
             <RefreshCw className="mr-2 size-3.5" /> Gerar IA

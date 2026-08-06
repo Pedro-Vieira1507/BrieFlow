@@ -32,7 +32,7 @@ export function ChatHeader({ currentStep, showStepper }: Props) {
             BrieFlow
           </h1>
           <p className="text-[11px] font-medium text-fg-tertiary">
-            Diretor de Arte autônomo
+            Diretor de Arte
           </p>
         </div>
       </div>

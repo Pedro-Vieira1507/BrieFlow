@@ -1,4 +1,5 @@
-import { useRef, useState } from "react";
+// src/components/briefflow/chat/ChatInput.tsx
+import { useRef, useState, useEffect } from "react";
 import { Send, Paperclip, X } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
@@ -12,9 +13,15 @@ interface Props {
 
 export function ChatInput({ disabled, onSend }: Props) {
   const [value, setValue] = useState("");
+  const [mounted, setMounted] = useState(false);
   const ref = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const { uploadedImage, setUploadedImage } = useBriefflowStore();
+
+  // Garante que as extensões do navegador não quebrem o SSR (Evita a Tela Vermelha)
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const submit = () => {
     const t = value.trim();
@@ -49,7 +56,7 @@ export function ChatInput({ disabled, onSend }: Props) {
           </button>
         </div>
       )}
-
+      
       <div
         className={cn(
           "relative rounded-2xl border border-border-strong bg-surface-2",
@@ -77,14 +84,18 @@ export function ChatInput({ disabled, onSend }: Props) {
           )}
         />
         
-        {/* BOTÃO DE ANEXO */}
-        <input 
-          type="file" 
-          accept="image/*" 
-          ref={fileRef} 
-          className="hidden" 
-          onChange={handleFileChange} 
-        />
+        {/* BOTÃO DE ANEXO BLINDADO CONTRA EXTENSÕES DE NAVEGADOR */}
+        {mounted && (
+          <input 
+            type="file" 
+            accept="image/*" 
+            ref={fileRef} 
+            className="hidden" 
+            onChange={handleFileChange}
+            suppressHydrationWarning
+          />
+        )}
+        
         <button 
           onClick={() => fileRef.current?.click()}
           disabled={disabled}

@@ -88,10 +88,13 @@ export interface BuilderState {
   footerText?: string;
   productImageUrl?: string | null;
   productSku?: string | null;
-  // Campos de Design Dinâmico Gerais
+  productImages?: string[];
   themeColor?: string;
   secondaryColor?: string;
   layoutStyle?: "diagonal" | "split" | "minimalist" | "centered";
+  imagePosX?: number;
+  imagePosY?: number;
+  imageScale?: number;
 }
 
 export interface SiteBrandData {

@@ -1,6 +1,7 @@
 // src/components/briefflow/SocialPreview.tsx
 import { useEffect, useMemo, useState, useRef } from "react";
 import { Editable } from "./Editable";
+import { DraggableImage } from "./DraggableImage";
 import type { BuilderState } from "@/types/builder";
 import { buildPollinationsUrl, buildFallbackUrl } from "@/lib/pollinations";
 import { Button } from "@/components/ui/button";
@@ -25,11 +26,14 @@ export function SocialPreview({ state, onChange }: Props) {
   const offerStr = builder.discoveryPlan?.offer;
   const hasOffer = Boolean(offerStr && offerStr !== "null" && offerStr.trim() !== "" && offerStr.toLowerCase() !== "nenhum");
 
+  const images = Array.from(new Set([
+    ...(state.productImageUrl ? [state.productImageUrl] : []),
+    ...(state.productImages || [])
+  ]));
+
   const url = useMemo(() => {
-      if (state.productImageUrl) return state.productImageUrl;
-      return prompt ? useFallback ? buildFallbackUrl(prompt, { width: 1080, height: 1350, seed: state.imageSeed }) : buildPollinationsUrl(prompt, { width: 1080, height: 1350, seed: state.imageSeed }) : null;
-    }, [state.productImageUrl, prompt, state.imageSeed, useFallback]
-  );
+    return prompt ? useFallback ? buildFallbackUrl(prompt, { width: 1080, height: 1350, seed: state.imageSeed }) : buildPollinationsUrl(prompt, { width: 1080, height: 1350, seed: state.imageSeed }) : null;
+  }, [prompt, state.imageSeed, useFallback]);
 
   useEffect(() => { 
     if (url) { 
@@ -45,7 +49,7 @@ export function SocialPreview({ state, onChange }: Props) {
           }
           return prev;
         });
-      }, 12000);
+      }, 5000);
       return () => clearTimeout(timer);
     } 
   }, [url, useFallback, isProductImage]);
@@ -73,7 +77,6 @@ export function SocialPreview({ state, onChange }: Props) {
     setUseFallback(false);
     onChange({ 
       imageSeed: Math.floor(Math.random() * 1_000_000),
-      productImageUrl: null 
     });
   };
 
@@ -96,32 +99,38 @@ export function SocialPreview({ state, onChange }: Props) {
         </div>
 
         {/* IMAGEM AREA */}
-        <div className="relative aspect-[4/5] w-full bg-[#050508] border-y border-slate-100 dark:border-slate-900 overflow-hidden">
+        <div className="relative aspect-[4/5] w-full bg-[#050508] border-y border-slate-100 dark:border-slate-900 overflow-hidden flex items-center justify-center">
           
           {hasOffer && (
-            <div className="absolute top-4 right-4 z-30 rotate-12 bg-rose-600 text-white text-[11px] font-black uppercase tracking-widest px-4 py-2 rounded-full shadow-xl border-2 border-white dark:border-slate-900">
+            <div className="absolute top-4 right-4 z-50 rotate-12 bg-rose-600 text-white text-[11px] font-black uppercase tracking-widest px-4 py-2 rounded-full shadow-xl border-2 border-white dark:border-slate-900">
               <Editable as="span" value="OFERTA ESPECIAL" onChange={() => {}} />
             </div>
           )}
 
           {url ? (
             <>
-              {imageStatus === "loading" && <div className="absolute inset-0 flex items-center justify-center z-20 bg-[#050508]/40"><Loader2 className="size-8 animate-spin text-white/50" /></div>}
+              {imageStatus === "loading" && <div className="absolute inset-0 flex items-center justify-center z-10 bg-[#050508]/40"><Loader2 className="size-8 animate-spin text-white/50" /></div>}
               
               {imageStatus === "error" ? (
-                <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900 z-10 border-y border-dashed border-slate-500/30">
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900 z-0 border-y border-dashed border-slate-500/30">
                   <AlertCircle className="size-8 text-slate-500 mb-2" />
                   <span className="text-xs font-bold uppercase tracking-widest text-slate-500 text-center">Recurso Visual<br/>Indisponível</span>
                 </div>
               ) : (
                 <>
                   <div className="absolute inset-0 opacity-20 blur-3xl z-0" style={{ backgroundColor: themeColor }} />
-                  <img src={url} alt="Post" onLoad={handleImageLoad} onError={handleImageError}
-                    className={`h-full w-full z-10 relative ${isProductImage ? "object-contain p-10 bg-white mix-blend-multiply" : "object-cover"} ${imageStatus === 'loading' ? 'opacity-0' : 'opacity-100 transition-opacity duration-700'}`} />
+                  <img src={url} alt="Post" onLoad={handleImageLoad} onError={handleImageError} 
+                    className={`absolute inset-0 z-0 h-full w-full object-cover ${imageStatus === 'loading' ? 'opacity-0' : 'opacity-100 transition-opacity duration-700'}`} />
                 </>
               )}
             </>
           ) : null}
+
+          {/* IMAGENS ARRASTÁVEIS NO POST */}
+          {images.map((src, i) => (
+              <DraggableImage key={i} src={src} />
+          ))}
+
         </div>
 
         {/* AÇÕES E LEGENDA */}
@@ -141,6 +150,7 @@ export function SocialPreview({ state, onChange }: Props) {
             <Editable as="p" multiline value={state.caption ?? "Legenda..."} onChange={(v) => onChange({ caption: v })} className="inline leading-[1.6] whitespace-pre-wrap break-words font-light" />
           </div>
         </div>
+
       </div>
 
       <div className="flex items-center justify-between rounded-xl border border-border/60 bg-background/50 p-3 shadow-sm opacity-80 hover:opacity-100 transition-opacity">
@@ -150,7 +160,7 @@ export function SocialPreview({ state, onChange }: Props) {
         <div className="flex items-center gap-2">
           <input type="file" accept="image/*" className="hidden" ref={fileRef} onChange={handleFileChange} />
           <Button size="sm" variant="outline" className="h-8 text-xs shrink-0 font-bold border-border-strong bg-surface-2" onClick={() => fileRef.current?.click()}>
-            <Upload className="mr-2 size-3.5" /> Importar
+            <Upload className="mr-2 size-3.5" /> Upload Foto
           </Button>
           <Button size="sm" variant="ghost" className="h-8 text-xs shrink-0 font-bold" onClick={handleRegenerate}>
             <RefreshCw className="mr-2 size-3.5" /> Gerar IA
