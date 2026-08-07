@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+// src/components/briefflow/builder/CampaignTabs.tsx
+import { useEffect } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { BuilderState, CampaignAsset } from "@/types/builder";
 import { EmailPreview } from "@/components/briefflow/EmailPreview";
@@ -9,6 +10,9 @@ import { cn } from "@/lib/utils";
 interface Props {
   assets: CampaignAsset[];
   onAssetChange: (assetId: string, patch: Partial<BuilderState>) => void;
+  // NOVAS PROPS: Comunicação direta com o PageBuilder
+  activeTab: CampaignAsset["type"];
+  onTabChange: (tab: CampaignAsset["type"]) => void;
 }
 
 const CHANNELS: Array<{ key: CampaignAsset["type"]; label: string }> = [
@@ -17,71 +21,60 @@ const CHANNELS: Array<{ key: CampaignAsset["type"]; label: string }> = [
   { key: "social", label: "Social" },
 ];
 
-export function CampaignTabs({ assets, onAssetChange }: Props) {
-  const [tab, setTab] = useState<CampaignAsset["type"]>(
-    assets[0]?.type ?? "banner",
-  );
-
-  // Ao aparecer um novo asset, foca nele
+export function CampaignTabs({ assets, onAssetChange, activeTab, onTabChange }: Props) {
+  // Ao aparecer um novo asset gerado pela IA, foca automaticamente nele
   useEffect(() => {
-    if (assets.length) setTab(assets[assets.length - 1].type);
-  }, [assets.length]);
+    if (assets.length) {
+      onTabChange(assets[assets.length - 1].type);
+    }
+  }, [assets.length, onTabChange]);
 
   return (
-    <Tabs value={tab} onValueChange={(v) => setTab(v as CampaignAsset["type"])} className="w-full">
-      <TabsList
-        className={cn(
-          "mx-auto mb-8 grid h-12 w-full max-w-md grid-cols-3 rounded-2xl p-1",
-          "border border-border-strong bg-surface-2",
-        )}
-      >
-        {CHANNELS.map(({ key, label }) => {
-          const has = assets.some((a) => a.type === key);
-          return (
-            <TabsTrigger
-              key={key}
-              value={key}
-              disabled={!has}
-              className={cn(
-                "rounded-xl text-[11px] font-semibold uppercase tracking-widest transition-all",
-                "text-fg-muted",
-                "data-[state=active]:bg-surface-3 data-[state=active]:text-fg-primary",
-                "data-[state=active]:shadow-[var(--shadow-soft)]",
-              )}
-            >
-              {label}
-            </TabsTrigger>
-          );
-        })}
-      </TabsList>
+    <Tabs value={activeTab} onValueChange={(v) => onTabChange(v as CampaignAsset["type"])} className="w-full">
+      <div className="mb-8 flex justify-center">
+        <TabsList className="h-12 bg-surface-2 p-1 shadow-sm border border-border-subtle">
+          {CHANNELS.map(({ key, label }) => {
+            const exists = assets.some((a) => a.type === key);
+            return (
+              <TabsTrigger
+                key={key}
+                value={key}
+                disabled={!exists}
+                className={cn(
+                  "w-32 rounded-lg text-[13px] font-bold uppercase tracking-wider transition-all",
+                  "data-[state=active]:bg-brand data-[state=active]:text-brand-fg data-[state=active]:shadow-md",
+                  !exists && "opacity-40"
+                )}
+              >
+                {label}
+              </TabsTrigger>
+            );
+          })}
+        </TabsList>
+      </div>
 
       {assets.map((asset) => (
-        <TabsContent
-          key={asset.id}
-          value={asset.type}
-          className="mt-0 fade-in-up"
-        >
-          <AssetPreview
-            type={asset.type}
-            content={asset.content}
-            onChange={(patch) => onAssetChange(asset.id, patch)}
-          />
+        <TabsContent key={asset.id} value={asset.type} className="mt-0 outline-none">
+          {asset.type === "banner" && (
+            <BannerPreview
+              state={asset.content}
+              onChange={(patch) => onAssetChange(asset.id, patch)}
+            />
+          )}
+          {asset.type === "email" && (
+            <EmailPreview
+              state={asset.content}
+              onChange={(patch) => onAssetChange(asset.id, patch)}
+            />
+          )}
+          {asset.type === "social" && (
+            <SocialPreview
+              state={asset.content}
+              onChange={(patch) => onAssetChange(asset.id, patch)}
+            />
+          )}
         </TabsContent>
       ))}
     </Tabs>
   );
-}
-
-function AssetPreview({
-  type,
-  content,
-  onChange,
-}: {
-  type: CampaignAsset["type"];
-  content: BuilderState;
-  onChange: (patch: Partial<BuilderState>) => void;
-}) {
-  if (type === "email") return <EmailPreview state={content} onChange={onChange} />;
-  if (type === "banner") return <BannerPreview state={content} onChange={onChange} />;
-  return <SocialPreview state={content} onChange={onChange} />;
 }

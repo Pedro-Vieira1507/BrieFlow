@@ -1,15 +1,17 @@
+// src/components/briefflow/chat/ChatMessages.tsx
 import { useEffect, useRef, useState } from "react";
 import { Globe, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ChatMessage } from "./ChatMessage";
 import { ChatEmptyState } from "./ChatEmptyState";
 import type { ChatMessage as Msg } from "./types";
+import { useBriefflowStore } from "@/store/briefflow";
 
 const LOADING_TEXTS = [
-  "Lendo o briefing…",
-  "Analisando a marca…",
-  "Estruturando a estratégia…",
-  "Pensando no design perfeito…",
+  "Lendo o briefing...",
+  "Analisando a marca...",
+  "Estruturando a estratégia...",
+  "Pensando no design perfeito..."
 ];
 
 interface Props {
@@ -22,6 +24,8 @@ interface Props {
 export function ChatMessages({ messages, loading, scraping, onPickSuggestion }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const [textIdx, setTextIdx] = useState(0);
+  const { generatingLabel } = useBriefflowStore(); 
+  
   const busy = loading || scraping;
 
   useEffect(() => {
@@ -49,17 +53,25 @@ export function ChatMessages({ messages, loading, scraping, onPickSuggestion }: 
   return (
     <div className="flex-1 space-y-5 overflow-y-auto scroll-smooth px-5 py-6">
       {messages.length === 0 && <ChatEmptyState onPick={onPickSuggestion} />}
-
+      
       {messages.map((m) => (
         <ChatMessage key={m.id} message={m} />
       ))}
-
-      {scraping && <StatusPill icon={<Globe className="size-4 animate-spin text-brand" />} label="Acessando site…" />}
-      {lastAssistantEmpty && (
+      
+      {scraping && <StatusPill icon={<Globe className="size-4 animate-spin text-brand" />} label="Acessando site " />}
+      
+      {lastAssistantEmpty && !generatingLabel && (
         <StatusPill
           icon={<Loader2 className="size-4 animate-spin text-fg-muted" />}
           label={LOADING_TEXTS[textIdx]}
         />
+      )}
+
+      {loading && generatingLabel && (
+         <StatusPill 
+           icon={<Loader2 className="size-4 animate-spin text-brand" />} 
+           label={generatingLabel} 
+         />
       )}
 
       <div ref={bottomRef} className="h-2" />

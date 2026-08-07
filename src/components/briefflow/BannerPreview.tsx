@@ -1,11 +1,12 @@
 // src/components/briefflow/BannerPreview.tsx
+import { useEffect, useMemo, useState, useRef } from "react";
 import { Editable } from "./Editable";
 import { DraggableImage } from "./DraggableImage";
 import type { BuilderState } from "@/types/builder";
-import { Sparkles, Hexagon, Upload } from "lucide-react";
+import { buildPollinationsUrl, buildFallbackUrl } from "@/lib/pollinations";
 import { Button } from "@/components/ui/button";
+import { Sparkles, Hexagon, Upload, ImagePlus, RefreshCw, Loader2, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useRef } from "react";
 import { cleanText, isEmptyLike } from "@/lib/sanitize";
 
 interface Props {
@@ -14,15 +15,18 @@ interface Props {
 }
 
 export function BannerPreview({ state, onChange }: Props) {
+  const [imageStatus, setImageStatus] = useState<"loading" | "loaded" | "error">("loading");
+  const [useFallback, setUseFallback] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+
   const themeColor = state.themeColor || "#2563EB";
   const secondaryColor = state.secondaryColor || "#FF5722";
-
   const title = cleanText(state.title, "Título da campanha");
   const subtitle = cleanText(state.subtitle);
   const cta = cleanText(state.cta, "Saiba mais");
   const brandName = cleanText(state.brandName, "MARCA");
-
+  const prompt = cleanText(state.imagePrompt || "");
+  const isProductImage = !!state.productImageUrl;
   const hasSubtitle = !isEmptyLike(subtitle);
   const hasCta = !isEmptyLike(cta);
 
@@ -32,6 +36,36 @@ export function BannerPreview({ state, onChange }: Props) {
       ...(state.productImages || []),
     ]),
   );
+
+  const heroUrl = useMemo(() => {
+    if (!prompt) return null;
+    return useFallback
+      ? buildFallbackUrl(prompt, { width: 800, height: 800, seed: state.imageSeed })
+      : buildPollinationsUrl(prompt, { width: 800, height: 800, seed: state.imageSeed });
+  }, [prompt, state.imageSeed, useFallback]);
+
+  useEffect(() => {
+    if (!heroUrl) return;
+    setImageStatus("loading");
+    const timer = setTimeout(() => {
+      setImageStatus((prev) => {
+        if (prev === "loading") {
+          if (!useFallback && !isProductImage) {
+            setUseFallback(true);
+            return "loading";
+          }
+          return "error";
+        }
+        return prev;
+      });
+    }, 5000);
+    return () => clearTimeout(timer);
+  }, [heroUrl, useFallback, isProductImage]);
+
+  const handleImageError = () => {
+    if (!useFallback && !isProductImage) setUseFallback(true);
+    else setImageStatus("error");
+  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -44,137 +78,197 @@ export function BannerPreview({ state, onChange }: Props) {
     e.target.value = "";
   };
 
-  return (
-    <div
-      className="mx-auto flex w-full flex-col space-y-4"
-      data-testid="banner-preview"
-    >
-      {/*
-        LAYOUT ROBUSTO
-        - Grid principal em duas colunas (texto / produtos), cada uma se auto-organiza em rows.
-        - BrandHeader vive na PRIMEIRA row do grid da coluna de texto (nunca absoluto sobre título).
-        - Título/subtítulo usam break-words + line-clamp para não estourar.
-        - CTA usa mt-auto para colar no rodapé mesmo com texto longo.
-      */}
-      <div
-        className={cn(
-          "relative isolate w-full shrink-0 overflow-hidden rounded-[24px] shadow-2xl",
-          "aspect-[21/9] md:aspect-[2.5/1] min-h-[360px]",
-          "grid grid-cols-1 md:grid-cols-2 bg-[#f8fafc]",
-        )}
-      >
-        {/* Background layer decorativo */}
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-0 z-0 overflow-hidden bg-slate-50"
-        >
-          <div
-            className="absolute inset-0 opacity-20"
-            style={{
-              backgroundImage: `radial-gradient(circle at 100% 0%, ${secondaryColor}, transparent 50%)`,
-            }}
-          />
-          <div
-            className="absolute inset-0 opacity-10"
-            style={{
-              backgroundImage: `radial-gradient(circle at 0% 100%, ${themeColor}, transparent 70%)`,
-            }}
-          />
-        </div>
+  const handleRegenerate = () => {
+    setImageStatus("loading");
+    setUseFallback(false);
+    onChange({ imageSeed: Math.floor(Math.random() * 1_000_000) });
+  };
 
-        {/* Coluna de texto */}
+  return (
+    <div className="mx-auto flex w-full flex-col space-y-3" data-testid="banner-preview">
+      
+      {/* PAI: O @container fica sozinho aqui fora para medir larguras com precisão */}
+      <div id="banner-export-node" className="@container w-full h-full">
+        
+        {/* FILHO: Aqui ficam as regras de Flex que observam o @container */}
         <div
-          className="relative z-10 flex h-full min-w-0 flex-col px-8 py-6 md:px-14 md:py-8"
-          style={{ backgroundColor: themeColor }}
+          id="banner-inner-wrapper"
+          className={cn(
+            "relative isolate w-full h-full shrink-0 overflow-hidden shadow-2xl",
+            "rounded-[20px]", 
+            "min-h-[380px]", // <-- ESSA É A CLASSE QUE SALVA O PREVIEW! Garante que a imagem não vai sumir na UI
+            "flex flex-col @xl:flex-row items-stretch", 
+          )}
+          style={{
+            background: `linear-gradient(135deg, ${themeColor} 0%, ${themeColor}cc 55%, ${secondaryColor}99 100%)`,
+          }}
         >
-          {/* Header da marca (row 1) */}
-          <div className="flex items-center gap-2 text-white">
-            <div className="grid size-8 place-items-center rounded-lg bg-white text-slate-900 shadow-lg">
-              <Hexagon className="size-5 fill-current" />
-            </div>
-            <span className="truncate text-sm font-black uppercase tracking-widest drop-shadow-md">
-              {brandName}
-            </span>
+          <div aria-hidden className="pointer-events-none absolute inset-0 z-0 overflow-hidden">
+            <div
+              className="absolute -right-20 -top-20 size-[420px] rounded-full opacity-10"
+              style={{ background: `radial-gradient(circle, ${secondaryColor}, transparent 70%)` }}
+            />
+            <div
+              className="absolute -bottom-16 -left-16 size-[300px] rounded-full opacity-15"
+              style={{ background: `radial-gradient(circle, #ffffff, transparent 65%)` }}
+            />
           </div>
 
-          {/* Miolo (row flexível) */}
-          <div className="mt-6 flex min-h-0 flex-1 flex-col justify-center">
-            <div className="mb-3 flex w-fit items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-1 backdrop-blur-md">
-              <Sparkles className="size-3 text-white" />
-              <span className="text-[10px] font-bold uppercase tracking-widest text-white">
-                Lançamento
+          {/* ÁREA DE TEXTO */}
+          <div className="relative z-10 flex w-full @xl:w-[55%] shrink-0 flex-col justify-center overflow-hidden min-h-0 px-6 py-5 @xl:px-10 @xl:py-5">
+            
+            <div className="flex items-center gap-2 mb-3 @xl:mb-4 shrink-0">
+              <div
+                className="grid size-7 @xl:size-8 shrink-0 place-items-center rounded-lg shadow-lg"
+                style={{ backgroundColor: "rgba(255,255,255,0.2)", backdropFilter: "blur(8px)" }}
+              >
+                <Hexagon className="size-4 text-white drop-shadow-sm" />
+              </div>
+              <span className="truncate text-[10px] @xl:text-[11px] font-black uppercase tracking-[0.2em] text-[rgba(255,255,255,0.9)] drop-shadow-sm">
+                {brandName}
               </span>
             </div>
 
-            <Editable
-              as="h2"
-              value={title}
-              onChange={(v) => onChange({ title: v })}
-              className={cn(
-                "mb-3 text-white font-black leading-tight tracking-tight",
-                "text-[26px] md:text-[38px]",
-                "text-balance break-words line-clamp-3",
-              )}
-            />
+            <div className="flex min-h-0 flex-col justify-center gap-2 @xl:gap-2.5 shrink-0">
+              <div className="flex w-fit items-center gap-1.5 rounded-full border border-[rgba(255,255,255,0.2)] bg-[rgba(255,255,255,0.1)] px-2.5 py-1 backdrop-blur-md">
+                <Sparkles className="size-3 text-[#fde047]" />
+                <span className="text-[9px] @xl:text-[10px] font-extrabold uppercase tracking-widest text-[rgba(255,255,255,0.9)]">
+                  Lançamento
+                </span>
+              </div>
 
-            {hasSubtitle && (
+              {/* Ajuste fino na fonte e linha para garantir que caiba em 300px de altura sem encavalar */}
               <Editable
-                as="p"
-                value={subtitle}
-                onChange={(v) => onChange({ subtitle: v })}
+                as="h2"
+                value={title}
+                onChange={(v) => onChange({ title: v })}
                 className={cn(
-                  "text-white/85 font-medium leading-relaxed",
-                  "text-[13px] md:text-[15px]",
-                  "break-words line-clamp-2",
+                  "font-black leading-[1.15] tracking-tight text-white drop-shadow-md",
+                  "text-[20px] @sm:text-[24px] @md:text-[28px] @xl:text-[32px] @3xl:text-[36px]", 
+                  "break-words line-clamp-3",
                 )}
               />
+
+              {hasSubtitle && (
+                <Editable
+                  as="p"
+                  value={subtitle}
+                  onChange={(v) => onChange({ subtitle: v })}
+                  className={cn(
+                    "font-medium leading-snug text-[rgba(255,255,255,0.85)]",
+                    "text-[12px] @xl:text-[14px]",
+                    "break-words line-clamp-2",
+                  )}
+                />
+              )}
+            </div>
+
+            {hasCta && (
+              <div className="mt-3 @xl:mt-4 flex shrink-0">
+                <div
+                  className={cn(
+                    "inline-flex max-w-full items-center rounded-lg @xl:rounded-xl",
+                    "px-5 py-2.5 @xl:px-6 @xl:py-3",
+                    "font-black uppercase tracking-widest shadow-2xl",
+                    "transition-transform duration-200 hover:scale-105 cursor-pointer",
+                    "border border-[rgba(255,255,255,0.1)]",
+                  )}
+                  style={{
+                    backgroundColor: "white",
+                    color: themeColor,
+                  }}
+                >
+                  <Editable
+                    as="span"
+                    value={cta}
+                    onChange={(v) => onChange({ cta: v })}
+                    className="block max-w-[24ch] truncate text-[10px] @xl:text-[12px]"
+                  />
+                </div>
+              </div>
             )}
           </div>
 
-          {/* CTA (row rodapé, nunca cortado) */}
-          {hasCta && (
-            <div className="mt-6 flex">
-              <div
-                className={cn(
-                  "inline-flex max-w-full items-center rounded-md bg-white px-6 py-3 md:px-8 md:py-3.5",
-                  "font-black uppercase tracking-widest shadow-xl",
-                  "transition-transform hover:scale-105",
-                )}
-                style={{ color: themeColor }}
-              >
-                <Editable
-                  as="span"
-                  value={cta}
-                  onChange={(v) => onChange({ cta: v })}
-                  className="block max-w-[24ch] truncate"
-                />
-              </div>
-            </div>
-          )}
-        </div>
+          {/* ÁREA DA IMAGEM: Destravada pro Desktop (items-stretch) e bloqueada no mobile (min-h-[160px]) */}
+          <div
+            className={cn(
+              "relative z-10 flex w-full @xl:w-[45%] shrink-0 flex-col items-center justify-center overflow-hidden",
+              "min-h-[160px] @xl:min-h-0", 
+              "@xl:border-l @xl:border-[rgba(255,255,255,0.1)]",
+            )}
+          >
+            <div
+              aria-hidden
+              className="absolute inset-0"
+              style={{
+                background: `linear-gradient(to bottom-left, ${secondaryColor}30, ${themeColor}20)`,
+                backdropFilter: "blur(2px)",
+              }}
+            />
+            
+            {heroUrl && (
+               <>
+                 {imageStatus === "loading" && (
+                   <div className="absolute inset-0 z-10 flex items-center justify-center bg-[rgba(0,0,0,0.2)] backdrop-blur-sm">
+                     <Loader2 className="size-8 animate-spin text-[rgba(255,255,255,0.5)]" />
+                   </div>
+                 )}
+                 {imageStatus === "error" ? (
+                   <div className="absolute inset-0 z-0 flex flex-col items-center justify-center bg-[rgba(0,0,0,0.2)] backdrop-blur-sm">
+                     <AlertCircle className="mb-2 size-8 text-[rgba(255,255,255,0.5)]" />
+                   </div>
+                 ) : (
+                   <img
+                     src={heroUrl}
+                     alt="Arte do Banner"
+                     crossOrigin="anonymous" 
+                     onLoad={() => setImageStatus("loaded")}
+                     onError={handleImageError}
+                     loading="lazy"
+                     className={cn(
+                       "absolute inset-0 z-0 h-full w-full object-cover mix-blend-overlay opacity-60",
+                       "transition-opacity duration-700",
+                       imageStatus === "loading" ? "opacity-0" : "opacity-100",
+                     )}
+                   />
+                 )}
+               </>
+            )}
 
-        {/* Coluna de produtos */}
-        <div className="relative z-10 flex h-full min-h-[180px] items-center justify-center overflow-hidden">
-          {images.length > 0 ? (
-            images.map((src, i) => <DraggableImage key={`${src}-${i}`} src={src} />)
-          ) : (
-            <div className="flex flex-col items-center gap-2 rounded-xl border-2 border-dashed border-slate-300 p-6 text-center">
-              <Upload className="size-5 text-slate-400" />
-              <p className="text-sm font-medium text-slate-400">
-                Nenhum produto importado
-              </p>
-              <p className="text-[11px] text-slate-400/80">
-                Arraste ou faça upload abaixo
-              </p>
-            </div>
-          )}
+            {images.length > 0 ? (
+              <div className="relative z-20 flex h-full w-full items-center justify-center">
+                {images.map((src, i) => (
+                  <DraggableImage key={`${src}-${i}`} src={src} />
+                ))}
+              </div>
+            ) : !heroUrl ? (
+              <div className="relative z-10 flex flex-col items-center gap-4 px-6 py-8 text-center">
+                <div
+                  className="flex size-16 items-center justify-center rounded-2xl border border-[rgba(255,255,255,0.2)] shadow-inner"
+                  style={{ backgroundColor: "rgba(255,255,255,0.1)", backdropFilter: "blur(12px)" }}
+                >
+                  <ImagePlus className="size-7 text-[rgba(255,255,255,0.6)]" />
+                </div>
+                <div className="space-y-1">
+                  <p className="text-[13px] font-bold text-[rgba(255,255,255,0.7)]">
+                    Canvas de Produto
+                  </p>
+                  <p className="text-[11px] text-[rgba(255,255,255,0.45)]">
+                    Faça upload para visualizar
+                  </p>
+                </div>
+              </div>
+            ) : null}
+          </div>
         </div>
       </div>
 
-      <div className="flex items-center justify-between rounded-xl border border-border/60 bg-background/50 p-3 shadow-sm">
-        <div className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
-          Estúdio:{" "}
-          <span style={{ color: themeColor }}>CANVAS INTERATIVO</span>
+      <div className="flex items-center justify-between rounded-xl border border-border/60 bg-background/60 p-3 opacity-80 shadow-sm backdrop-blur-sm transition-opacity hover:opacity-100">
+        <div className="min-w-0 flex-1 truncate pr-4 text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
+          Peça:{" "}
+          <span style={{ color: themeColor }} className="mr-3">
+            BANNER INSTITUCIONAL
+          </span>
         </div>
         <div className="flex items-center gap-2">
           <input
@@ -185,14 +279,11 @@ export function BannerPreview({ state, onChange }: Props) {
             onChange={handleFileChange}
             data-testid="banner-upload-input"
           />
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-8 shrink-0 border-border-strong bg-surface-2 text-xs font-bold"
-            onClick={() => fileRef.current?.click()}
-            data-testid="banner-upload-btn"
-          >
-            <Upload className="mr-2 size-3.5" /> Upload Foto
+          <Button size="sm" variant="outline" className="h-8 shrink-0 border-border-strong bg-surface-2 text-xs font-bold" onClick={() => fileRef.current?.click()}>
+            <Upload className="mr-1.5 size-3.5" /> Upload Foto
+          </Button>
+          <Button size="sm" variant="ghost" className="h-8 shrink-0 text-xs font-bold" onClick={handleRegenerate}>
+            <RefreshCw className="mr-1.5 size-3.5" /> Gerar IA
           </Button>
         </div>
       </div>

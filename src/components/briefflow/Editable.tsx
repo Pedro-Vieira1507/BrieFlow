@@ -1,3 +1,4 @@
+// src/components/briefflow/Editable.tsx
 import { useEffect, useRef } from "react";
 import { Edit2 } from "lucide-react";
 
@@ -22,7 +23,6 @@ export function Editable({
 
   useEffect(() => {
     if (ref.current && document.activeElement !== ref.current) {
-      // Impede null ou string vazia quebrando marca (Fallback de segurança)
       const safeValue = value?.trim() || "Sua Marca";
       if (ref.current.innerText !== safeValue) {
         ref.current.innerText = safeValue;
@@ -47,7 +47,8 @@ export function Editable({
             (e.target as HTMLElement).blur();
           }
         }}
-        className={`editable-hover focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:bg-white/5 rounded-md px-1 -ml-1 transition-all ${className ?? ""}`}
+        // CORREÇÃO OKLAB: Cores de focus convertidas para RGBA
+        className={`editable-hover focus:outline-none focus:ring-2 focus:ring-[rgba(59,130,246,0.5)] focus:bg-[rgba(255,255,255,0.05)] rounded-md px-1 -ml-1 transition-all ${className ?? ""}`}
       />
       <div className="absolute -right-6 top-1/2 -translate-y-1/2 opacity-0 group-hover/editable:opacity-100 transition-opacity pointer-events-none text-white/30">
         <Edit2 className="size-3.5" />

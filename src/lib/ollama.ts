@@ -14,21 +14,31 @@ const DISCOVERY_AGENT_PROMPT = (
 1. IDIOMA: TODAS as suas respostas devem ser EXCLUSIVAMENTE em Português do Brasil (PT-BR).
 2. O campo "productSku" deve ser null a não ser que o usuário envie um link DIRETO para a página de UM produto.
 3. RETENÇÃO LITERAL: Se o usuário fornecer textos EXATOS para as peças (como "Título:", "Legenda:", "Hashtags"), você ESTÁ PROIBIDO de resumir. Transcreva essas regras PALAVRA POR PALAVRA para o "detectedContext".
-4. Responda ESTRITAMENTE em JSON válido.
+4. AÇÃO DE ROTEAMENTO (CRÍTICO): Você DEVE decidir o próximo passo da máquina de estados preenchendo o campo "action":
+   - "discovery_continue": O usuário está apenas conversando, respondendo perguntas, adicionando contexto ou recusando algo sem pedir para gerar/cancelar tudo.
+   - "generate_all": O usuário aprovou a geração, pediu para "criar as artes", "gerar campanha" ou recomeçar todas as peças.
+   - "generate_banner": O usuário pediu especificamente para gerar, editar ou alterar APENAS o banner.
+   - "generate_email": O usuário pediu especificamente para gerar, editar ou alterar APENAS o e-mail.
+   - "generate_social": O usuário pediu especificamente para gerar, editar ou alterar APENAS o post social.
+   - "cancel": O usuário expressou claro desejo de cancelar a operação inteira ou parar o fluxo.
+5. WHITELIST DE EDIÇÃO (NOVO E CRÍTICO): Se a ação for "generate_*" e o usuário pediu para alterar APENAS campos específicos (ex: "Mude só o botão", "Mude só a cor", "Altere o título"), liste os nomes originais desses campos no array "targetKeys" (ex: ["cta"], ["themeColor"], ["title"]). Se for uma peça nova, recriação total ou o usuário não restringiu, retorne ["all"].
 
 === DADOS DA MARCA E DO SITE ===
 ${brandContext.site ? formatSiteContextForAgent(brandContext.site) : "Nenhum site analisado ainda."}
 
 === RETORNO OBRIGATÓRIO (SCHEMA JSON) ===
 {
-  "chat": "Sua resposta humanizada confirmando o que capturou e perguntando se pode gerar.",
+  "chat": "Sua resposta humanizada confirmando o que capturou. Se a action for generate_*, diga que vai começar. Se for cancel, diga que cancelou.",
+  "action": "discovery_continue",
+  "targetKeys": ["all"],
   "builder": {
     "type": "discovery_plan",
     "discoveryPlan": {
-      "detectedContext": "TRANSCREVA AQUI TODAS AS EXIGÊNCIAS LITERAIS DE COPY DO CLIENTE. Se não houver, faça um resumo.",
-      "offer": "Qualquer desconto, promoção, porcentagem (ex: 20% OFF) ou código de cupom mencionado. Use null apenas se não houver NENHUMA menção a ofertas.",
-      "missingInfo": "O que realmente falta descobrir.",
-      "proposedStrategy": "Estratégia baseada APENAS nos fatos",
+      "detectedContext": "Transcreva as exigências do cliente ou resumo do briefing.",
+      "audience": "Extraia o público-alvo alvo desejado da conversa (ou null se não informado).",
+      "offer": "Qualquer desconto, promoção, porcentagem (ex: 20% OFF) ou código de cupom. Null se não houver.",
+      "missingInfo": "O que realmente falta descobrir antes de poder criar as artes finais.",
+      "proposedStrategy": "Estratégia baseada APENAS nos fatos.",
       "brandName": "Nome da marca",
       "productSku": "APENAS UM SKU AQUI OU UMA URL DIRETA (OU NULL)"
     }
@@ -54,7 +64,6 @@ function getAssetContentSchema(targetAsset: AiAssetType): string {
           ${designFields}
         }`;
   }
-
   if (targetAsset === "email") {
     return `"content": {
           "type": "email",
@@ -66,7 +75,6 @@ function getAssetContentSchema(targetAsset: AiAssetType): string {
           ${designFields}
         }`;
   }
-
   return `"content": {
           "type": "social",
           "caption": "<Gere uma legenda com a narrativa, pergunta final e hashtags adequadas ao briefing>",
@@ -83,16 +91,13 @@ const EXECUTION_AGENT_PROMPT = (
   options: OllamaGenerationOptions,
 ) => {
   const offer = cleanOffer(plan?.offer);
-   
   const offerGuidance = offer
-     ? `3. OFERTA/CUPOM: A campanha possui a seguinte oferta: [${offer}]. É OBRIGATÓRIO aplicar isso na copy.`
+    ? `3. OFERTA/CUPOM: A campanha possui a seguinte oferta: [${offer}]. É OBRIGATÓRIO aplicar isso na copy EXATAMENTE como solicitado.`
     : `3. PROIBIÇÃO DE OFERTAS (CRÍTICO): O usuário NÃO TEM cupom nem desconto. É ESTRITAMENTE PROIBIDO inventar promoções, usar o símbolo "%" ou a palavra "desconto" no seu texto.`;
-
   const exactBrand = plan?.brandName || context.brandName || "Sua Marca";
-  const safeImgUrl = options.productImageUrl ? options.productImageUrl.replace(/"/g, '') : null;
 
+  // Retiramos a injeção da URL crua do schema para não pesar na saída da IA!
   return `Você é o BrieFlow Art Director, gerando a peça: ${targetAsset.toUpperCase()}.
-
 === DIRETRIZES ===
 1. FIDELIDADE ABSOLUTA: Use OS TEXTOS LITERAIS que o cliente pediu. Não invente ou resuma se o cliente enviou a frase exata.
 2. TEXTO LIMPO E JSON VÁLIDO: ZERO formatação Markdown. NUNCA use quebras de linha reais (Enter) nos textos. Se precisar pular linha, digite EXATAMENTE os caracteres "\\n".
@@ -113,7 +118,7 @@ ${offerGuidance}
         "type": "${targetAsset}",
         "status": "draft",
         ${getAssetContentSchema(targetAsset)},
-        "productImageUrl": ${safeImgUrl ? `"${safeImgUrl}"` : "null"}
+        "productImageUrl": null
       }
     ]
   },
@@ -138,6 +143,8 @@ export interface OllamaResultMeta extends AiGenerationMeta {
 
 export interface OllamaResponse {
   chat: string;
+  action?: "discovery_continue" | "generate_all" | "generate_banner" | "generate_email" | "generate_social" | "cancel";
+  targetKeys?: string[];
   builder: BuilderState;
   scores?: { persuasion: number; clarity: number; seo: number; };
 }
@@ -153,17 +160,16 @@ function extractSpecificBriefing(text: string, targetAsset: string): string {
   const normalized = text.toUpperCase();
   const hasMarkers = /BANNER:|E-MAIL:|EMAIL:|POST SOCIAL:|SOCIAL:/i.test(text);
   if (!hasMarkers) return text;
-
+  
   let keyword = "";
   if (targetAsset === "banner") keyword = "BANNER:";
   else if (targetAsset === "email") keyword = normalized.includes("E-MAIL:") ? "E-MAIL:" : "EMAIL:";
   else if (targetAsset === "social") keyword = normalized.includes("POST SOCIAL:") ? "POST SOCIAL:" : "SOCIAL:";
-
+  
   if (!keyword || !normalized.includes(keyword)) return text;
   const startIndex = normalized.indexOf(keyword) + keyword.length;
   const otherKeywords = ["BANNER:", "E-MAIL:", "EMAIL:", "POST SOCIAL:", "SOCIAL:"].filter(k => k !== keyword);
   let endIndex = text.length;
-
   for (const kw of otherKeywords) {
     const idx = normalized.indexOf(kw, startIndex);
     if (idx !== -1 && idx < endIndex) {
@@ -176,6 +182,7 @@ function extractSpecificBriefing(text: string, targetAsset: string): string {
 function extractBalancedJson(text: string): string | null {
   const start = text.indexOf("{");
   if (start === -1) return null;
+
   let depth = 0; let inString = false; let escaped = false;
   for (let index = start; index < text.length; index += 1) {
     const character = text[index];
@@ -183,13 +190,13 @@ function extractBalancedJson(text: string): string | null {
     if (character === "\\") { escaped = true; continue; }
     if (character === '"') { inString = !inString; continue; }
     if (inString) continue;
+
     if (character === "{") depth += 1;
     if (character === "}") {
       depth -= 1;
       if (depth === 0) return text.slice(start, index + 1);
     }
   }
-  // Recuperação best-effort para JSON truncado: fecha objetos abertos.
   if (depth > 0) return text.slice(start) + "}".repeat(depth);
   return null;
 }
@@ -197,15 +204,9 @@ function extractBalancedJson(text: string): string | null {
 function tryParseJson(text: string): OllamaResponse | null {
   if (!text || !text.trim()) return null;
   const cleanText = text.replace(/<think>[\s\S]*?<\/think>/gi, "").replace(/```json/gi, "").replace(/```/g, "").trim();
-
-  // 1) Tenta o mais direto (preserva quebras dentro de strings)
   try { return JSON.parse(cleanText) as OllamaResponse; } catch { /* segue */ }
-
-  // 2) Achata whitespace e remove trailing commas
   const flat = cleanText.replace(/[\n\r\t]/g, " ").replace(/,\s*([}\]])/g, "$1");
   try { return JSON.parse(flat) as OllamaResponse; } catch { /* segue */ }
-
-  // 3) Extrai o primeiro objeto balanceado (ou tenta recuperar truncado)
   const extracted = extractBalancedJson(flat);
   if (extracted) {
     try { return JSON.parse(extracted) as OllamaResponse; } catch { /* segue */ }
@@ -254,8 +255,8 @@ function normalizeBuilder(response: OllamaResponse, currentPlan: DiscoveryPlan |
   if (builder.type === "campaign" && Array.isArray(builder.campaignAssets) && targetAsset) {
     const campaignAssets = builder.campaignAssets
       .filter((asset) => 
-         String(asset.type).toLowerCase().includes(targetAsset) || 
-         String((asset.content as any)?.type).toLowerCase().includes(targetAsset)
+           String(asset.type).toLowerCase().includes(targetAsset) || 
+           String((asset.content as any)?.type).toLowerCase().includes(targetAsset)
       )
       .filter((asset) => validateAsset(asset, targetAsset))
       .map((asset) => ({
@@ -279,7 +280,7 @@ async function callOmniRouteAPI(
   const apiKey = import.meta.env.VITE_OMNIROUTE_API_KEY as string | undefined;
   const apiUrl = (import.meta.env.VITE_OMNIROUTE_API_URL as string | undefined) ?? "http://localhost:20128/v1/chat/completions";
   const model = (import.meta.env.VITE_OMNIROUTE_MODEL as string | undefined) ?? "gpt-4o-mini";
-
+  
   if (!apiKey) throw new Error("API Key não configurada para Omniroute.");
 
   const isExecution = Boolean(options.targetAsset);
@@ -295,7 +296,7 @@ async function callOmniRouteAPI(
       messages: messagesPayload,
       stream: !isExecution,
       temperature: isExecution ? 0.1 : 0.3,
-      max_tokens: isExecution ? 4000 : 1500,
+      max_tokens: isExecution ? 8000 : 4000,
       response_format: { type: "json_object" } 
     }),
     signal: controller.signal,
@@ -312,6 +313,7 @@ async function callOmniRouteAPI(
   }
 
   if (!response.body) throw new Error("Streaming não suportado pelo OmniRoute.");
+
   const reader = response.body.getReader();
   const decoder = new TextDecoder("utf-8");
   let rawJson = ""; 
@@ -320,9 +322,11 @@ async function callOmniRouteAPI(
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
+
     pendingChunk += decoder.decode(value, { stream: true });
     const lines = pendingChunk.split("\n");
     pendingChunk = lines.pop() ?? "";
+
     for (const line of lines) {
       const trimmedLine = line.trim();
       if (!trimmedLine || trimmedLine === "data: [DONE]") continue;
@@ -342,6 +346,7 @@ async function callOmniRouteAPI(
       }
     }
   }
+
   return rawJson;
 }
 
@@ -380,6 +385,7 @@ async function callLocalOllama(
   }
 
   if (!response.body) throw new Error("Streaming não suportado pelo Ollama.");
+
   const reader = response.body.getReader();
   const decoder = new TextDecoder("utf-8");
   let rawJson = ""; 
@@ -388,12 +394,15 @@ async function callLocalOllama(
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
+
     pendingChunk += decoder.decode(value, { stream: true });
     const lines = pendingChunk.split("\n");
     pendingChunk = lines.pop() ?? "";
+
     for (const line of lines) {
       const trimmedLine = line.trim();
       if (!trimmedLine) continue;
+
       try {
         const chunk = JSON.parse(trimmedLine) as { message?: { content?: string } };
         const content = chunk.message?.content;
@@ -466,7 +475,7 @@ export async function sendToOllama(history: ChatTurn[], brandContext: BrandConte
         
         console.warn(`[Omniroute Falhou] Acionando fallback para Ollama Local: ${cloudError.message}`);
         if (typeof window !== "undefined") {
-          toast.warning("Conexão rápida falhou. Acionando IA Local (pode levar 1 a 2 minutos)...", { 
+          toast.warning("Conexão com a nuvem falhou. Acionando IA Local (pode demorar)...", { 
             id: "omniroute-fallback-toast", 
             duration: 6000 
           });
@@ -498,17 +507,10 @@ export async function sendToOllama(history: ChatTurn[], brandContext: BrandConte
 
     if (!parsed) {
         return {
-          chat: "Entendi perfeitamente o briefing! Posso prosseguir com a geração das peças de marketing?",
-          builder: {
-            type: "discovery_plan",
-            discoveryPlan: {
-              detectedContext: recentUserBriefing.substring(0, 200),
-              missingInfo: "Nenhuma.",
-              proposedStrategy: "Criar materiais promocionais de alta conversão.",
-              brandName: brandContext.brandName || "Marca"
-            }
-          },
-          meta: { ...metaBase, stage: "ready_to_generate", latencyMs: Date.now() - startedAt },
+          chat: "Desculpe, tive um problema ao processar seu pedido. Podemos tentar novamente?",
+          action: "discovery_continue",
+          builder: createFallbackBuilder(currentPlan),
+          meta: { ...metaBase, stage: "discovery", latencyMs: Date.now() - startedAt },
         };
     }
 
@@ -516,6 +518,8 @@ export async function sendToOllama(history: ChatTurn[], brandContext: BrandConte
 
     return {
       chat: parsed.chat || (wantsExecution ? "Peça gerada." : "Briefing atualizado."),
+      action: parsed.action || "discovery_continue",
+      targetKeys: parsed.targetKeys,
       builder, scores: parsed.scores,
       meta: { ...metaBase, stage: wantsExecution ? "completed" : "ready_to_generate", latencyMs: Date.now() - startedAt },
     };

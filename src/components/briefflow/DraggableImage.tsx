@@ -7,7 +7,6 @@ export function DraggableImage({ src }: { src: string }) {
   const [pos, setPos] = useState({ x: 0, y: 0 });
   const [scale, setScale] = useState(1);
   const [isActive, setIsActive] = useState(false);
-
   const isDragging = useRef(false);
   const isResizing = useRef(false);
   const startMousePos = useRef({ x: 0, y: 0 });
@@ -94,7 +93,6 @@ export function DraggableImage({ src }: { src: string }) {
     if (failed) return;
     setIsActive(true);
     isDragging.current = true;
-
     let clientX = 0;
     let clientY = 0;
     if ("clientX" in e) {
@@ -114,7 +112,6 @@ export function DraggableImage({ src }: { src: string }) {
     e.stopPropagation();
     setIsActive(true);
     isResizing.current = true;
-
     let clientX = 0;
     let clientY = 0;
     if ("clientX" in e) {
@@ -141,15 +138,15 @@ export function DraggableImage({ src }: { src: string }) {
   };
 
   if (failed) {
-    // Fallback visual coeso — nunca deixa "buraco" no preview
     return (
       <div
         ref={containerRef}
         data-testid="draggable-image-fallback"
         className={cn(
           "absolute z-40 flex h-[180px] w-[180px] flex-col items-center justify-center gap-1.5 rounded-xl",
-          "border-2 border-dashed border-slate-300 bg-slate-100/80 backdrop-blur-sm",
-          "text-slate-400 shadow-lg",
+          // CORREÇÃO OKLAB: bg-slate e borders substituídos por HEX e RGBA
+          "border-2 border-dashed border-[#cbd5e1] bg-[rgba(241,245,249,0.8)] backdrop-blur-sm",
+          "text-[#94a3b8] shadow-lg",
         )}
         style={{ transform: `translate(${pos.x}px, ${pos.y}px) scale(${scale})` }}
         onPointerDown={onPointerDown}
@@ -181,13 +178,13 @@ export function DraggableImage({ src }: { src: string }) {
       <img
         src={imgSrc}
         alt="Produto"
+        crossOrigin="anonymous" 
         loading="lazy"
         decoding="async"
         className="pointer-events-none max-h-[250px] w-auto select-none rounded-xl bg-transparent object-contain mix-blend-multiply"
         draggable={false}
         onError={handleImgError}
       />
-
       {isActive && (
         <>
           <div
