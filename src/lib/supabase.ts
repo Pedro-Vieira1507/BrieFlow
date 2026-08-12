@@ -10,6 +10,12 @@ export const supabase: SupabaseClient | null = isSupabaseConfigured
   ? createClient(supabaseUrl!, supabaseAnonKey!)
   : null;
 
+export async function getAuthToken(): Promise<string | null> {
+  if (!supabase) return null;
+  const { data } = await supabase.auth.getSession();
+  return data?.session?.access_token ?? null;
+}
+
 export async function saveAssetToLibrary(name: string, state: BuilderState) {
   if (!supabase) {
     throw new Error(
@@ -17,28 +23,22 @@ export async function saveAssetToLibrary(name: string, state: BuilderState) {
     );
   }
 
-  // NOVO: Pega o usuário logado
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Você precisa fazer login para salvar campanhas na biblioteca.");
 
   const { data, error } = await supabase
     .from("assets")
-    .insert([
-      {
-        user_id: user.id, // NOVO: Relaciona ao usuário logado
-        name,
-        type: state.type,
-        content: state,
-        status: "draft",
-      },
-    ])
+    .insert([{
+      user_id: user.id,
+      name,
+      type: state.type,
+      content: state,
+      status: "draft",
+    }])
     .select()
     .single();
 
-  if (error) {
-    console.error("Erro ao salvar asset:", error);
-    throw error;
-  }
+  if (error) throw error;
   return data;
 }
 
@@ -54,10 +54,6 @@ export async function getSavedAssets() {
     .select("*")
     .order("created_at", { ascending: false });
 
-  if (error) {
-    console.error("Erro ao buscar assets:", error);
-    throw error;
-  }
-
+  if (error) throw error;
   return data;
 }
