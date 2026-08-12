@@ -50,9 +50,11 @@ export function EmailPreview({ state, onChange }: Props) {
 
   const prompt = cleanText(state.emailHeroImagePrompt);
   const isProductImage = !!state.productImageUrl;
+  
+  // Lógica do Cupom Ajustada
   const offerRaw = builder.discoveryPlan?.offer;
   const hasOffer = !isEmptyLike(offerRaw);
-  const couponCode = hasOffer ? cleanText(offerRaw).toUpperCase() : null;
+  const couponCode = state.footerText || "LAB70";
 
   const images = Array.from(
     new Set([
@@ -71,6 +73,7 @@ export function EmailPreview({ state, onChange }: Props) {
   useEffect(() => {
     if (!heroUrl) return;
     setImageStatus("loading");
+
     const timer = setTimeout(() => {
       setImageStatus((prev) => {
         if (prev === "loading") {
@@ -83,6 +86,7 @@ export function EmailPreview({ state, onChange }: Props) {
         return prev;
       });
     }, 5000);
+
     return () => clearTimeout(timer);
   }, [heroUrl, useFallback, isProductImage]);
 
@@ -125,7 +129,7 @@ export function EmailPreview({ state, onChange }: Props) {
             <span className="font-semibold text-slate-700">{title}</span>
           </p>
         </div>
-        
+
         <div className="px-4 py-6 md:px-8 md:py-8" style={{ backgroundColor: `${themeColor}10` }}>
           <div
             className="flex flex-col overflow-hidden rounded-2xl bg-white shadow-xl"
@@ -232,22 +236,30 @@ export function EmailPreview({ state, onChange }: Props) {
                 )}
               </div>
 
-              {couponCode && (
-                <div className="relative mb-6 mt-10 overflow-hidden rounded-2xl border-2 border-dashed border-slate-300 bg-gradient-to-br from-slate-50 to-white px-6 py-8">
+              {hasOffer && (
+                <div className="relative mb-6 mt-10 rounded-2xl border-2 border-dashed border-slate-300 bg-gradient-to-br from-slate-50 to-white px-6 py-8">
                   <div
-                    className="absolute -top-3.5 left-1/2 -translate-x-1/2 flex items-center gap-1.5 rounded-full border px-4 py-1 text-[11px] font-extrabold uppercase tracking-widest"
+                    className="absolute z-10 -top-3.5 left-1/2 -translate-x-1/2 flex items-center gap-1.5 rounded-full border px-4 py-1 text-[11px] font-extrabold uppercase tracking-widest"
                     style={{ borderColor: `${themeColor}40`, backgroundColor: "white", color: themeColor }}
                   >
                     <TicketPercent className="size-3.5" /> Desconto Exclusivo
                   </div>
-                  <div className="flex flex-col items-center gap-3 pt-2">
-                    <span
-                      className="rounded-xl border border-dashed px-6 py-3 text-2xl font-black tracking-[0.25em] text-slate-900"
+                  <div className="flex flex-col items-center gap-3 pt-2 relative z-0">
+                    <p className="text-center text-[14px] font-bold text-slate-700 max-w-[90%] leading-snug mb-1">
+                      {cleanText(offerRaw)}
+                    </p>
+                    <div 
+                      className="rounded-xl border-2 border-dashed px-8 py-3 bg-white"
                       style={{ borderColor: `${themeColor}50` }}
                     >
-                      {couponCode}
-                    </span>
-                    <p className="text-[12px] font-medium text-slate-400">Use o código acima ao finalizar a compra</p>
+                      <Editable 
+                        as="span" 
+                        value={couponCode} 
+                        onChange={(v) => onChange({ footerText: v })} 
+                        className="text-2xl font-black tracking-[0.25em] text-slate-900 uppercase"
+                      />
+                    </div>
+                    <p className="text-[12px] font-medium text-slate-400 mt-1">Use o código acima ao finalizar a compra</p>
                   </div>
                   <div className="absolute -left-3 top-1/2 size-6 -translate-y-1/2 rounded-full bg-slate-100" />
                   <div className="absolute -right-3 top-1/2 size-6 -translate-y-1/2 rounded-full bg-slate-100" />
@@ -264,6 +276,7 @@ export function EmailPreview({ state, onChange }: Props) {
                     <Editable as="span" value={cta} onChange={(v) => onChange({ cta: v })} className="block max-w-[28ch] truncate" />
                     <ChevronRight className="size-4 shrink-0 transition-transform group-hover:translate-x-0.5" strokeWidth={3} />
                   </button>
+
                   <div className="flex flex-wrap items-center justify-center gap-4">
                     <div className="flex items-center gap-1.5 text-slate-400">
                       <ShieldCheck className="size-4" />
@@ -298,7 +311,6 @@ export function EmailPreview({ state, onChange }: Props) {
         </div>
       </div>
 
-      {/* Barra de controle inferior - Sem botão de exportação duplicado */}
       <div className="flex items-center justify-between rounded-xl border border-border/60 bg-background/60 p-3 opacity-80 shadow-sm backdrop-blur-sm transition-opacity hover:opacity-100">
         <div className="min-w-0 flex-1 truncate pr-4 text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
           Peça:{" "}

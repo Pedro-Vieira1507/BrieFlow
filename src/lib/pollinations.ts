@@ -26,11 +26,8 @@ export function buildFallbackUrl(
   prompt: string,
   opts: { width?: number; height?: number; seed?: number } = {},
 ): string {
-  const { width = 1080, height = 1080, seed } = opts;
-  
-  // Geração Determinística: Transforma o texto num número fixo para manter a arte sempre idêntica
-  const textHash = Math.abs(prompt.split('').reduce((a, b) => { a = ((a << 5) - a) + b.charCodeAt(0); return a & a }, 0));
-  const safeSeed = seed ?? (textHash % 10000 || 42);
-
-  return `https://picsum.photos/seed/${safeSeed}/${width}/${height}`;
+  const { width = 1080, height = 1080 } = opts;
+  // Fallback alterado: removemos o picsum.photos (que trazia imagens aleatórias) 
+  // e colocamos um placeholder neutro corporativo.
+  return `https://placehold.co/${width}x${height}/f1f5f9/94a3b8?text=Arte+em+Geracao`;
 }

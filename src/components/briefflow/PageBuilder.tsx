@@ -6,13 +6,15 @@ import { toCanvas } from "html-to-image";
 import { useBriefflowStore } from "@/store/briefflow";
 import { isSupabaseConfigured, saveAssetToLibrary } from "@/lib/supabase";
 import { buildPollinationsUrl } from "@/lib/pollinations";
-import { cleanText } from "@/lib/sanitize";
+import { cleanText, isEmptyLike } from "@/lib/sanitize";
+
 import { BuilderHeader } from "./builder/BuilderHeader";
 import { GeneratingBanner } from "./builder/GeneratingBanner";
 import { CampaignTabs } from "./builder/CampaignTabs";
 import { DiscoveryPlanView } from "./builder/DiscoveryPlanView";
 import { BuilderEmptyState } from "./builder/BuilderEmptyState";
 import type { BuilderState, CampaignAsset } from "@/types/builder";
+
 import {
   AlertDialog,
   AlertDialogAction,
@@ -49,7 +51,7 @@ export function PageBuilder({ onRefine }: Props) {
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [exportFormat, setExportFormat] = useState("png");
   const [exportW, setExportW] = useState("1200");
-  const [exportH, setExportH] = useState("300"); // Altura configurável
+  const [exportH, setExportH] = useState("300");
 
   const isSavingRef = useRef(false);
   const isExportingRef = useRef(false);
@@ -89,18 +91,17 @@ export function PageBuilder({ onRefine }: Props) {
 
   const handleExportClick = () => {
     if (activeTab === "banner") {
-      // Abre o modal APENAS para o Banner, com valores padrão da web
       setExportW("1200");
       setExportH("300");
       setExportDialogOpen(true);
     } else {
-      // E-mail e Social exportam direto, sem modal
       executeExport();
     }
   };
 
   const executeExport = async () => {
     if (builder.type !== "campaign" || !builder.campaignAssets || isExportingRef.current) return;
+
     const asset = builder.campaignAssets.find((a) => a.type === activeTab);
     if (!asset) return;
 
@@ -110,7 +111,6 @@ export function PageBuilder({ onRefine }: Props) {
     const c = asset.content as any;
     const brandName = cleanText(c.brandName, "Marca");
     const themeColor = c.themeColor || "#2563EB";
-
     const images = Array.from(
       new Set([
         ...(c.productImageUrl ? [c.productImageUrl] : []),
@@ -157,20 +157,21 @@ export function PageBuilder({ onRefine }: Props) {
               backgroundColor: exportFormat === 'jpeg' ? '#000000' : null,
               skipFonts: true, 
               fontEmbedCSS: '', 
-          });
-          
+           });
+           
           const finalData = canvas.toDataURL(`image/${exportFormat}`, 1.0);
-          
+           
           const a = document.createElement("a");
           a.href = finalData;
           a.download = `banner_${brandName.replace(/\s+/g, '_').toLowerCase()}_${targetWidth}x${targetHeight}.${exportFormat}`;
           a.click();
-          
+           
           toast.success("Banner exportado com sucesso!", { duration: 4000 });
         } finally {
           bannerElement.setAttribute('style', originalBannerStyle);
           innerElement.setAttribute('style', originalInnerStyle);
         }
+
       } 
       else if (activeTab === "email") {
         toast.info("Gerando HTML do e-mail...", { duration: 3000 });
@@ -178,7 +179,10 @@ export function PageBuilder({ onRefine }: Props) {
         const title = cleanText(c.title, "Título do e-mail");
         const cta = cleanText(c.cta, "");
         const hasCta = cta.trim().length > 0;
-        const couponCode = builder.discoveryPlan?.offer ? cleanText(builder.discoveryPlan.offer).toUpperCase() : null;
+        
+        const offerRaw = builder.discoveryPlan?.offer;
+        const hasOffer = !isEmptyLike(offerRaw);
+        const couponCode = c.footerText || "LAB70";
         
         const paragraphs = cleanText(c.body || "")
           .split(/\n+/)
@@ -216,13 +220,19 @@ export function PageBuilder({ onRefine }: Props) {
     <tr>
       <td style="padding: 40px 30px; text-align: center;">
         <h2 style="color: #1e293b; font-size: 24px; margin-top: 0; margin-bottom: 20px;">${title}</h2>
+        
         ${paragraphs.map((p: string) => `<p style="color: #475569; font-size: 16px; line-height: 1.6; margin-bottom: 16px;">${p}</p>`).join('')}
-        ${couponCode && couponCode !== 'NULL' && couponCode !== 'NENHUM' ? `
-          <div style="background-color: ${themeColor}10; border: 2px dashed ${themeColor}; border-radius: 8px; padding: 20px; margin: 30px 0;">
-            <p style="margin: 0 0 10px 0; color: ${themeColor}; font-size: 12px; text-transform: uppercase; font-weight: bold;">Cupom Exclusivo</p>
-            <h3 style="margin: 0; color: #1e293b; font-size: 28px; letter-spacing: 4px;">${couponCode}</h3>
+
+        ${hasOffer ? `
+          <div style="background-color: ${themeColor}05; border: 2px dashed #cbd5e1; border-radius: 16px; padding: 30px 20px; margin: 40px 0; text-align: center; position: relative;">
+            <p style="margin: 0 0 20px 0; color: #334155; font-size: 16px; font-weight: bold; line-height: 1.5;">${cleanText(offerRaw)}</p>
+            <div style="display: inline-block; background-color: #ffffff; border: 2px dashed ${themeColor}; border-radius: 12px; padding: 15px 30px;">
+                <h3 style="margin: 0; color: #1e293b; font-size: 26px; letter-spacing: 4px; text-transform: uppercase;">${couponCode}</h3>
+            </div>
+            <p style="margin: 15px 0 0 0; color: #94a3b8; font-size: 12px;">Use o código acima ao finalizar a compra</p>
           </div>
         ` : ''}
+
         ${hasCta ? `
           <div style="margin-top: 30px;">
             <a href="#" style="display: inline-block; background-color: ${themeColor}; color: #ffffff; padding: 16px 32px; text-decoration: none; border-radius: 8px; font-weight: bold; text-transform: uppercase; font-size: 14px;">${cta}</a>
@@ -309,8 +319,10 @@ export function PageBuilder({ onRefine }: Props) {
             window.open(imgUrl, "_blank"); // Fallback agressivo se der erro de CORS na tela
           }
         }
+
         toast.success("Post social exportado com sucesso!", { duration: 4000 });
       }
+
     } catch (e) {
       toast.error("Erro ao exportar arquivos.", { duration: 4000 });
       console.error(e);
@@ -339,6 +351,7 @@ export function PageBuilder({ onRefine }: Props) {
         onExport={handleExportClick}
         onSave={handleSave}
       />
+
       <div
         className={cn(
           "relative flex-1 overflow-y-auto p-6 lg:p-12",
@@ -417,6 +430,7 @@ export function PageBuilder({ onRefine }: Props) {
               <Label htmlFor="width" className="text-right text-fg-secondary">Largura (px)</Label>
               <Input id="width" value={exportW} onChange={(e) => setExportW(e.target.value)} className="col-span-3 bg-surface-2 border-border-subtle text-fg-primary" />
             </div>
+
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="height" className="text-right text-fg-secondary">Altura (px)</Label>
               <Input id="height" value={exportH} onChange={(e) => setExportH(e.target.value)} className="col-span-3 bg-surface-2 border-border-subtle text-fg-primary" />

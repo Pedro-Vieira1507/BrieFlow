@@ -75,12 +75,6 @@ export function useBriefflowAgent() {
         return site;
       } catch {
         toast.warning("Site protegido contra leituras automáticas");
-        appendMessage({
-          id: uid(),
-          role: "assistant",
-          content:
-            "Não consegui acessar os detalhes do site automaticamente (bloqueio de segurança). Pode me contar um pouco sobre o que a marca faz e qual o objetivo da campanha?",
-        });
         return null;
       } finally {
         setScraping(false);

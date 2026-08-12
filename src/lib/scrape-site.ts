@@ -107,7 +107,7 @@ function inferBrandName(title: string, url: string): string {
 
 function extractColors(html: string): string[] {
   const colors = new Set<string>();
-  
+
   const themeMatch = html.match(/<meta[^>]+name=["']theme-color["'][^>]+content=["'](#[0-9a-fA-F]{3,6})["']/i);
   if (themeMatch) colors.add(themeMatch[1].toUpperCase());
 
@@ -119,7 +119,7 @@ function extractColors(html: string): string[] {
 
   const ignoreList = ['#FFFFFF', '#000000', '#111111', '#222222', '#333333', '#EEEEEE', '#DDDDDD', '#CCCCCC', '#F5F5F5', '#FAFAFA'];
   const brandColors = Array.from(colors).filter(c => !ignoreList.includes(c));
-  
+
   return brandColors.slice(0, 5);
 }
 
@@ -134,7 +134,7 @@ export function parseWebsiteHtml(html: string, url: string): SiteBrandData {
   const colors = extractColors(html);
 
   return {
-    url, title, description, brandName, headings, bodySnippet, 
+    url, title, description, brandName, headings, bodySnippet,
     ogImage: ogImage || undefined, keywords: keywords || undefined, colors,
   };
 }
@@ -156,7 +156,7 @@ async function fetchWebsite(url: string): Promise<SiteBrandData> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000);
   try {
-    const res = await fetch(url, {
+    let res = await fetch(url, {
       signal: controller.signal,
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -165,22 +165,24 @@ async function fetchWebsite(url: string): Promise<SiteBrandData> {
       redirect: "follow",
     });
 
-    if (!res.ok) throw new Error(`Site retornou HTTP ${res.status}`);
-    
+    // Se o site der block (Cloudflare 403, etc), tentamos via proxy anônimo
+    if (!res.ok) {
+      const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+      res = await fetch(proxyUrl, { signal: controller.signal });
+      if (!res.ok) throw new Error(`Site e Proxy retornaram HTTP ${res.status}`);
+    }
+
     const contentType = res.headers.get("content-type") ?? "";
     if (contentType && !contentType.includes("text/html") && !contentType.includes("application/xhtml")) {
       throw new Error("A URL não aponta para uma página HTML.");
     }
-
     const html = await res.text();
     if (!html || html.length < 40) throw new Error("Página vazia ou inacessível.");
-
     return parseWebsiteHtml(html, url);
   } finally {
     clearTimeout(timeout);
   }
 }
-
 export interface ScrapedProductData {
   sku: string;
   name: string | null;
@@ -286,14 +288,14 @@ function extractProductData(html: string, baseUrl: string, sku: string): Omit<Sc
 
 function resolveUrl(url: string | null, base: string): string | null {
   if (!url || url.startsWith("data:")) return null;
-  try { return /^https?:\/\//i.test(url) ? url : new URL(url, new URL(base).origin).toString(); } 
+  try { return /^https?:\/\//i.test(url) ? url : new URL(url, new URL(base).origin).toString(); }
   catch { return null; }
 }
 
 async function scrapeProductBySku(siteUrl: string, sku: string): Promise<ScrapedProductData> {
-  const cleanSku = sku.split(',')[0].trim(); 
+  const cleanSku = sku.split(',')[0].trim();
   const candidates = buildProductSearchUrls(siteUrl, cleanSku);
-  
+
   for (const candidateUrl of candidates) {
     try {
       const controller = new AbortController();
@@ -305,9 +307,9 @@ async function scrapeProductBySku(siteUrl: string, sku: string): Promise<Scraped
       });
       clearTimeout(timeout);
       if (!res.ok || !(res.headers.get("content-type") ?? "").includes("text/html")) continue;
-      
+
       let html = await res.text();
-      let currentUrl = res.url; 
+      let currentUrl = res.url;
       if (!html || html.length < 100) continue;
 
       const skuRegex = new RegExp(cleanSku.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&'), 'i');
@@ -328,23 +330,23 @@ async function scrapeProductBySku(siteUrl: string, sku: string): Promise<Scraped
         const prodController = new AbortController();
         const prodTimeout = setTimeout(() => prodController.abort(), 10_000);
         const prodRes = await fetch(foundLink, {
-            signal: prodController.signal, headers: { "User-Agent": "Mozilla/5.0", Accept: "text/html" }, redirect: "follow",
+          signal: prodController.signal, headers: { "User-Agent": "Mozilla/5.0", Accept: "text/html" }, redirect: "follow",
         });
         clearTimeout(prodTimeout);
         if (prodRes.ok && (prodRes.headers.get("content-type") ?? "").includes("text/html")) {
-            html = await prodRes.text(); currentUrl = prodRes.url;
+          html = await prodRes.text(); currentUrl = prodRes.url;
         }
       }
 
       const extracted = extractProductData(html, currentUrl, cleanSku);
-      
+
       const lowerName = extracted.name?.toLowerCase() || "";
-      const isInvalidName = !extracted.name || 
-        lowerName.includes("melhor loja") || 
-        lowerName.includes("resultados para") || 
+      const isInvalidName = !extracted.name ||
+        lowerName.includes("melhor loja") ||
+        lowerName.includes("resultados para") ||
         lowerName === "home" ||
         lowerName === "forlabexpress" ||
-        lowerName.includes("forlab") || 
+        lowerName.includes("forlab") ||
         lowerName.length < 3;
 
       const isLikelyProduct = !isInvalidName && (extracted.price || extracted.imageUrl);
@@ -374,14 +376,14 @@ async function scrapeProductByUrl(productUrl: string): Promise<ScrapedProductDat
       redirect: "follow",
     });
     clearTimeout(timeout);
-    
+
     if (!res.ok || !(res.headers.get("content-type") ?? "").includes("text/html")) {
-        throw new Error("Página não é HTML válido.");
+      throw new Error("Página não é HTML válido.");
     }
-    
+
     const html = await res.text();
     const extracted = extractProductData(html, res.url, "");
-    
+
     const lowerName = extracted.name?.toLowerCase() || "";
     const isInvalidName = !extracted.name || lowerName.includes("melhor loja") || lowerName.includes("resultados para") || lowerName.length < 3;
     const isLikelyProduct = !isInvalidName && (extracted.price || extracted.imageUrl || extracted.name);

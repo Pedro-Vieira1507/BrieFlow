@@ -459,8 +459,9 @@ export async function sendToOllama(history: ChatTurn[], brandContext: BrandConte
       ] as { role: "system" | "user", content: string }[];
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), wantsExecution ? 240_000 : 180_000);
-
+  // 1. REDUZA O TIMEOUT: de 240_000 para 45_000
+  const timeoutId = setTimeout(() => controller.abort(), wantsExecution ? 45_000 : 30_000);
+  
   let rawJson = "";
   let providerUsed: "omniroute" | "ollama" = "omniroute";
   let usedFallback = false;
@@ -473,16 +474,11 @@ export async function sendToOllama(history: ChatTurn[], brandContext: BrandConte
       } catch (cloudError: any) {
         if (cloudError.name === "AbortError") throw cloudError;
         
-        console.warn(`[Omniroute Falhou] Acionando fallback para Ollama Local: ${cloudError.message}`);
-        if (typeof window !== "undefined") {
-          toast.warning("Conexão com a nuvem falhou. Acionando IA Local (pode demorar)...", { 
-            id: "omniroute-fallback-toast", 
-            duration: 6000 
-          });
-        }
-        usedFallback = true;
-        providerUsed = "ollama";
-        rawJson = await callLocalOllama(messagesPayload, options, controller);
+        // 2. DESLIGUE O FALLBACK LOCAL SILENCIOSO
+        // Ao invés de tentar o callLocalOllama aqui e travar o PC do usuário, 
+        // falhamos rápido para a interface avisar do erro.
+        console.error("Erro na nuvem:", cloudError);
+        throw new Error(`A Nuvem falhou ao processar: ${cloudError.message}`);
       }
     } else {
       providerUsed = "ollama";
