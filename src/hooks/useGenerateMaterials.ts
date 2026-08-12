@@ -1,16 +1,7 @@
 // src/hooks/useGenerateMaterials.ts
-//
-// DX layer: um hook único para gerar peças de marketing.
-//
-// Fluxo: MarketingBrief -> buildMaterialPrompt -> generateCompletion(+Zod)
-//        -> toBuilderContent -> BuilderState pronto para o preview.
-//
-// Nenhuma regra de prompt e nenhuma chamada HTTP vive aqui: este arquivo só
-// orquestra e expõe estado de UI (loading por peça, erro, cancelamento).
-
 import { useCallback, useRef, useState } from "react";
-
-import { AiClientError, generateCompletion, type AiCompletionMeta } from "@/lib/aiClient";
+import { AiClientError, generateCompletion, type AiCompletionMeta, type AiProviderName } from "@/lib/aiClient";
+import { useCreditsStore } from "@/hooks/useCredits"; 
 import {
   buildMaterialPrompt,
   extractChannelBriefing,
@@ -28,16 +19,16 @@ import type { BuilderState } from "@/types/builder";
 export interface GenerateMaterialParams<T extends MaterialType = MaterialType> {
   brief: MarketingBrief;
   material: T;
-  /** Briefing bruto do usuário; o trecho do canal é extraído automaticamente. */
   rawBriefing?: string;
   prompt?: MaterialPromptOptions;
   images?: string[];
+  provider?: AiProviderName; // <-- NOVO
 }
 
+// ... (tipagens omitidas para economizar espaço - igual ao seu código atual)
 export interface GeneratedMaterial<T extends MaterialType = MaterialType> {
   material: T;
   copy: GeneratedCopyByMaterial[T];
-  /** Conteúdo já adaptado para o builder/preview. */
   content: BuilderState;
   meta: AiCompletionMeta;
 }
@@ -46,7 +37,6 @@ export interface UseGenerateMaterialsResult {
   generateMaterial: <T extends MaterialType>(
     params: GenerateMaterialParams<T>,
   ) => Promise<GeneratedMaterial<T>>;
-  /** Gera várias peças em sequência; erros de uma não abortam as outras. */
   generateMaterials: (
     materials: MaterialType[],
     params: Omit<GenerateMaterialParams, "material">,
@@ -57,7 +47,6 @@ export interface UseGenerateMaterialsResult {
   }>;
   cancel: () => void;
   isGenerating: boolean;
-  /** Peça em produção agora, para exibir progresso na UI. */
   currentMaterial: MaterialType | null;
   lastError: Error | null;
 }
@@ -75,7 +64,6 @@ function toRenderContext(
       ].filter((url): url is string => Boolean(url)),
     ),
   );
-
   return {
     brandName: brief.brandName,
     productImageUrl: unique[0] ?? null,
@@ -84,7 +72,6 @@ function toRenderContext(
   };
 }
 
-/** Mensagem amigável (pt-BR) para qualquer falha da camada de IA. */
 export function describeAiError(error: unknown): string {
   if (error instanceof AiClientError) {
     switch (error.code) {
@@ -121,6 +108,7 @@ export function useGenerateMaterials(): UseGenerateMaterialsResult {
       rawBriefing,
       prompt,
       images,
+      provider = 'omniroute' // <-- Opcional
     }: GenerateMaterialParams<T>): Promise<GeneratedMaterial<T>> => {
       const controller = controllerRef.current ?? new AbortController();
       controllerRef.current = controller;
@@ -148,7 +136,10 @@ export function useGenerateMaterials(): UseGenerateMaterialsResult {
           user,
           schema,
           signal: controller.signal,
+          provider // <-- Repassa o provedor para API
         });
+
+        useCreditsStore.getState().refresh();
 
         return {
           material,
@@ -173,7 +164,6 @@ export function useGenerateMaterials(): UseGenerateMaterialsResult {
     async (materials, params, onEach) => {
       const results: GeneratedMaterial[] = [];
       const errors: { material: MaterialType; error: Error }[] = [];
-
       controllerRef.current = new AbortController();
 
       for (const material of materials) {

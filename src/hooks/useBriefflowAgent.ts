@@ -5,6 +5,7 @@ import { useBriefflowStore, uid } from "@/store/briefflow";
 import { sendToOllama, type ChatTurn } from "@/lib/ollama";
 import { useGenerateMaterials, describeAiError } from "@/hooks/useGenerateMaterials";
 import { toMarketingBrief } from "@/types/brief";
+import { useCreditsStore } from "@/hooks/useCredits";
 import {
   extractUrlsFromText,
   scrapeProductBySkuFn,
@@ -20,9 +21,7 @@ import type {
 } from "@/types/builder";
 
 type CampaignChannel = "banner" | "email" | "social";
-
 const ALL_CHANNELS: CampaignChannel[] = ["banner", "email", "social"];
-
 const CHANNEL_LABEL: Record<CampaignChannel, string> = {
   banner: "Banner",
   email: "E-mail",
@@ -45,16 +44,15 @@ export function useBriefflowAgent() {
     setLoading,
     setScraping,
     setGeneratingLabel,
+    enqueueOllama,
+    dequeueOllama,
   } = useBriefflowStore();
 
   const { generateMaterial } = useGenerateMaterials();
-
   const discoveryPlanRef = useRef<DiscoveryPlan | undefined>(undefined);
   const scrapedProductsRef = useRef<ScrapedProductData[]>([]);
-
   const brandContextRef = useRef(brandContext);
   brandContextRef.current = brandContext;
-
   const builderRef = useRef(builder);
   builderRef.current = builder;
 
@@ -62,14 +60,12 @@ export function useBriefflowAgent() {
     async (text: string): Promise<SiteBrandData | null> => {
       const urls = extractUrlsFromText(text);
       if (urls.length === 0) return null;
-
       const targetUrl = urls[0];
       const existing = brandContextRef.current.site;
       if (existing && targetUrl.length > existing.url.length + 20) return null;
-
       setScraping(true);
       try {
-        const site = await scrapeWebsite({ data: { url: targetUrl } });
+        const site = await scrapeWebsite(targetUrl);
         mergeSiteIntoContext(site);
         toast.success("Site analisado com sucesso");
         return site;
@@ -80,7 +76,7 @@ export function useBriefflowAgent() {
         setScraping(false);
       }
     },
-    [appendMessage, mergeSiteIntoContext, setScraping],
+    [mergeSiteIntoContext, setScraping],
   );
 
   const buildErrorAsset = useCallback(
@@ -91,7 +87,6 @@ export function useBriefflowAgent() {
         brandContextRef.current.site?.brandName ||
         brandContextRef.current.brandName ||
         "Sua marca";
-
       const errorContent: any = {
         type: channel,
         brandName: brand,
@@ -103,17 +98,14 @@ export function useBriefflowAgent() {
 
       if (channel === "banner") {
         errorContent.title = "Não consegui gerar este banner";
-        errorContent.subtitle =
-          "A resposta da IA foi interrompida. Peça para gerar novamente ou refine o briefing.";
+        errorContent.subtitle = "A resposta da IA foi interrompida. Peça para gerar novamente ou refine o briefing.";
         errorContent.cta = "Tentar novamente";
       } else if (channel === "email") {
         errorContent.title = "Não consegui gerar este e-mail";
-        errorContent.body =
-          "A requisição excedeu o tempo limite. Você pode pedir para regenerar apenas o e-mail, sem afetar as outras peças.";
+        errorContent.body = "A requisição excedeu o tempo limite. Você pode pedir para regenerar apenas o e-mail, sem afetar as outras peças.";
         errorContent.cta = "Tentar novamente";
       } else {
-        errorContent.caption =
-          "Não consegui gerar este post. Peça para regenerar somente o social e o restante da campanha permanece intacto.";
+        errorContent.caption = "Não consegui gerar este post. Peça para regenerar somente o social e o restante da campanha permanece intacto.";
         errorContent.hashtags = [];
       }
 
@@ -128,7 +120,7 @@ export function useBriefflowAgent() {
   );
 
   const generateCampaignSafely = useCallback(
-    async (baseHistory: ChatTurn[], only?: CampaignChannel, targetKeys: string[] = ["all"]) => {
+    async (baseHistory: ChatTurn[], only?: CampaignChannel, targetKeys: string[] = ["all"], provider: "ollama" | "omniroute" = "omniroute") => {
       const plan =
         discoveryPlanRef.current ??
         (builderRef.current.type === "discovery_plan"
@@ -136,7 +128,6 @@ export function useBriefflowAgent() {
           : undefined);
 
       const channels: CampaignChannel[] = only ? [only] : ALL_CHANNELS;
-
       setLoading(true);
 
       const allImages = [
@@ -154,7 +145,7 @@ export function useBriefflowAgent() {
         id: assistantId,
         role: "assistant",
         content: only
-          ? `Ok! Vou regerar apenas o **${CHANNEL_LABEL[only]}** — as outras peças permanecem como estão.`
+          ? `Ok! Vou regerar apenas o **${CHANNEL_LABEL[only]}** – as outras peças permanecem como estão.`
           : `Mão na massa! Gerando ${channels.length} peças sequencialmente.`,
       });
 
@@ -166,21 +157,18 @@ export function useBriefflowAgent() {
         );
 
         try {
-          // --- INÍCIO DA VALIDAÇÃO E MAPEAMENTO DO STRICT MERGE ---
           const safeTargetKeys = Array.isArray(targetKeys) ? targetKeys : ["all"];
-          const isAll = safeTargetKeys.length === 0 || safeTargetKeys.some(k => 
-            ["all", "tudo", "todos", "geral", "completo"].includes(String(k).toLowerCase())
+          const isAll = safeTargetKeys.length === 0 || safeTargetKeys.some(k =>
+              ["all", "tudo", "todos", "geral", "completo"].includes(String(k).toLowerCase())
           );
           
           const allowedKeys = new Set<string>();
-
           if (!isAll) {
             const normalizedStr = safeTargetKeys.join(" ").toLowerCase();
-            // Dicionário de Sinônimos Robusto (Fuzzy Matcher)
             const schemaMap: Record<string, string[]> = {
               cta: ["cta", "botão", "botao", "button", "chamada", "action", "clique", "link"],
               title: ["title", "headline", "título", "titulo", "cabeçalho", "header", "principal"],
-              subtitle: ["subtitle", "subheadline", "subtítulo", "subtitulo", "descrição", "apoio", "fina"],
+              subtitle: ["subtitle", "subheadline", "subtítulo", "subtitulo", "descrição", "apoio", "final"],
               body: ["body", "corpo", "parágrafo", "paragrafo", "conteúdo", "mensagem", "texto"],
               caption: ["caption", "legenda", "post", "texto do post"],
               hashtags: ["hashtags", "tags", "marcadores", "palavras", "hashtag"],
@@ -194,17 +182,12 @@ export function useBriefflowAgent() {
               }
             }
 
-            console.log(`[Strict Merge Debug - ${channel}] LLM Target Keys:`, safeTargetKeys);
-            console.log(`[Strict Merge Debug - ${channel}] Chaves Canônicas Ativadas:`, Array.from(allowedKeys));
-
             if (allowedKeys.size === 0) {
-              console.error(`[Strict Merge Error] Nenhuma chave mapeada para:`, safeTargetKeys);
               toast.error(`Falha ao identificar o campo solicitado. Tente usar termos mais comuns como "título", "botão" ou "cor".`);
               hasErrors = true;
-              continue; // Short-circuit: Aborta o LLM e evita o feedback falso-positivo
+              continue; 
             }
           }
-          // --- FIM DA VALIDAÇÃO DO STRICT MERGE ---
 
           const brief = toMarketingBrief({
             brandContext: brandContextRef.current,
@@ -217,15 +200,14 @@ export function useBriefflowAgent() {
             availableImageUrls: uniqueImages,
           });
 
-          const existingAsset = builderRef.current.type === "campaign" 
-            ? builderRef.current.campaignAssets?.find((a) => a.type === channel) 
-            : undefined;
+          const existingAsset = builderRef.current.type === "campaign"
+              ? builderRef.current.campaignAssets?.find((a) => a.type === channel)
+              : undefined;
 
           let currentContentContext = "";
           if (existingAsset?.content) {
             try {
               const c = existingAsset.content as any;
-              // Cria objeto seguro contendo apenas textos (sem Base64/productImages)
               const safeContext: any = {
                 title: c.title,
                 subtitle: c.subtitle,
@@ -238,12 +220,10 @@ export function useBriefflowAgent() {
                 secondaryColor: c.secondaryColor
               };
               
-              // Remove chaves indefinidas para limpar o JSON enviado ao prompt
               Object.keys(safeContext).forEach(key => safeContext[key] === undefined && delete safeContext[key]);
-
               currentContentContext = `\n\n=== CONTEÚDO ATUAL DA PEÇA ===\nATENÇÃO: Preserve o texto abaixo exatamente como está para todos os campos que o usuário NÃO pediu para alterar:\n${JSON.stringify(safeContext, null, 2)}`;
-            } catch (e) {
-               console.warn("Falha ao serializar contexto seguro para a IA", e);
+            } catch (e) { 
+              console.warn("Falha ao serializar contexto seguro para a IA", e);
             }
           }
 
@@ -254,9 +234,9 @@ export function useBriefflowAgent() {
             material: channel,
             rawBriefing: rawBriefing,
             images: uniqueImages,
+            provider
           });
 
-          // Aplicação Final Segura (com Strict Merge Tolerante)
           updateCampaignAsset(channel, (prevAsset) => {
             const prevContent = prevAsset?.content || {};
             let mergedContent: any = { ...prevContent };
@@ -301,11 +281,10 @@ export function useBriefflowAgent() {
                 ...mergedContent,
                 type: channel,
                 brandName: content.brandName || plan?.brandName || (prevAsset?.content as any)?.brandName,
-                productImages: uniqueImages, // Retorna os arrays visuais pesados (protegidos fora do merge AI)
+                productImages: uniqueImages, 
               },
             };
           });
-
         } catch (err) {
           console.error(`Erro ao gerar ${channel}:`, describeAiError(err), err);
           hasErrors = true;
@@ -343,6 +322,11 @@ export function useBriefflowAgent() {
 
   const handleSend = useCallback(
     async (text: string, isHiddenAction = false) => {
+      // 1. DEDUZ OS PLANOS E O PROVEDOR DE IA
+      const currentPlan = useCreditsStore.getState().plan?.plan || 'free';
+      const isPro = currentPlan === 'pro' || currentPlan === 'agency';
+      const provider = isPro ? 'omniroute' : 'ollama';
+
       const tryScrapeProduct = async (
         skuOrUrl: string,
         hidden: boolean,
@@ -366,11 +350,12 @@ export function useBriefflowAgent() {
               isHomepage = true;
           } catch { /* noop */ }
         }
-        if (isHomepage) return;
 
+        if (isHomepage) return;
         if (!isUrl && !brandContextRef.current.site?.url) return;
 
         setLoading(true);
+
         try {
           let productData: ScrapedProductData = {
             sku: value,
@@ -408,13 +393,8 @@ export function useBriefflowAgent() {
             };
           } else {
             productData = isUrl
-              ? await scrapeProductByUrlFn({ data: { url: value } })
-              : await scrapeProductBySkuFn({
-                  data: {
-                    siteUrl: brandContextRef.current.site!.url,
-                    sku: value,
-                  },
-                });
+              ? await scrapeProductByUrlFn(value)
+              : await scrapeProductBySkuFn(value);
           }
 
           if (productData.found && productData.imageUrl) {
@@ -422,11 +402,13 @@ export function useBriefflowAgent() {
               ...scrapedProductsRef.current,
               productData,
             ];
+
             if (!hidden) {
               const pName = productData.name ? "*" + productData.name + "*\n" : "";
               const pImg = "![Imagem](" + productData.imageUrl + ")\n\n";
               const pFooter =
                 "*(Ele já está salvo e pronto para ser arrastado no seu Canvas)*";
+
               appendMessage({
                 id: uid(),
                 role: "assistant",
@@ -476,6 +458,12 @@ export function useBriefflowAgent() {
 
       setLoading(true);
 
+      // 2. CONTROLE DA FILA COM TICKET ÚNICO
+      const ticketId = uid();
+      if (!isPro) {
+        await enqueueOllama(ticketId);
+      }
+
       try {
         const response = await sendToOllama(
           history,
@@ -483,6 +471,7 @@ export function useBriefflowAgent() {
           discoveryPlanRef.current,
           {
             intent: "discovery",
+            provider,
             onStream: (partial) => {
               if (!isHiddenAction) {
                 updateMessage(assistantId, { content: partial });
@@ -490,6 +479,8 @@ export function useBriefflowAgent() {
             },
           },
         );
+
+        useCreditsStore.getState().refresh();
 
         if (!isHiddenAction) {
           updateMessage(assistantId, { content: response.chat });
@@ -519,18 +510,18 @@ export function useBriefflowAgent() {
         }
 
         const action = response.action || "discovery_continue";
-        const targetKeys = response.targetKeys || ["all"]; 
+        const targetKeys = response.targetKeys || ["all"];
 
         if (action === "generate_all") {
-          await generateCampaignSafely(history, undefined, targetKeys);
+          await generateCampaignSafely(history, undefined, targetKeys, provider);
         } else if (action === "generate_banner") {
-          await generateCampaignSafely(history, "banner", targetKeys);
+          await generateCampaignSafely(history, "banner", targetKeys, provider);
         } else if (action === "generate_email") {
-          await generateCampaignSafely(history, "email", targetKeys);
+          await generateCampaignSafely(history, "email", targetKeys, provider);
         } else if (action === "generate_social") {
-          await generateCampaignSafely(history, "social", targetKeys);
+          await generateCampaignSafely(history, "social", targetKeys, provider);
         } else if (action === "cancel") {
-           // Fluxo cancelado pelo LLM. Sem transição de estado da UI.
+          // Fluxo cancelado pelo LLM. Sem transição de estado da UI.
         }
       } catch (err) {
         toast.error("Falha ao processar", { description: String(err) });
@@ -541,6 +532,9 @@ export function useBriefflowAgent() {
           });
         }
       } finally {
+        if (!isPro) {
+          await dequeueOllama(ticketId); // Libera a máquina Local
+        }
         setLoading(false);
       }
     },
@@ -553,6 +547,8 @@ export function useBriefflowAgent() {
       setLoading,
       setMessages,
       updateMessage,
+      enqueueOllama,
+      dequeueOllama
     ],
   );
 

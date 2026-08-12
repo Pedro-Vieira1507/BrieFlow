@@ -12,6 +12,10 @@ import { useEffect, type ReactNode } from "react";
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 
+// --> Imports adicionados para autenticação global
+import { supabase } from "../lib/supabase";
+import { useBriefflowStore } from "../store/briefflow";
+
 function NotFoundComponent() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
@@ -37,9 +41,11 @@ function NotFoundComponent() {
 function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
   console.error(error);
   const router = useRouter();
+
   useEffect(() => {
     reportLovableError(error, { boundary: "tanstack_root_error_component" });
   }, [error]);
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="max-w-md text-center">
@@ -100,7 +106,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       {
         rel: "stylesheet",
         href: "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Geist:wght@400;500;600;700;800;900&display=swap",
-        crossOrigin: "anonymous", // <-- A PERMISSÃO DE SEGURANÇA QUE FALTAVA
+        crossOrigin: "anonymous",
       },
     ],
   }),
@@ -126,6 +132,28 @@ function RootShell({ children }: { children: ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+  const setUser = useBriefflowStore((state) => state.setUser);
+
+  // Sincronização Global de Sessão
+  useEffect(() => {
+    if (!supabase) return;
+
+    // 1. Carrega a sessão inicial para persistência após F5/Refresh
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+    });
+
+    // 2. Escuta mudanças globais de estado (Login concluído, Logout, Token expirado)
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+
+    // Limpeza de memória
+    return () => subscription.unsubscribe();
+  }, [setUser]);
+
   return (
     <QueryClientProvider client={queryClient}>
       <Outlet />

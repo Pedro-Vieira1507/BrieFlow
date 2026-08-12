@@ -27,6 +27,7 @@ export function BannerPreview({ state, onChange }: Props) {
   const brandName = cleanText(state.brandName, "MARCA");
   const prompt = cleanText(state.imagePrompt || "");
   const isProductImage = !!state.productImageUrl;
+
   const hasSubtitle = !isEmptyLike(subtitle);
   const hasCta = !isEmptyLike(cta);
 
@@ -47,6 +48,7 @@ export function BannerPreview({ state, onChange }: Props) {
   useEffect(() => {
     if (!heroUrl) return;
     setImageStatus("loading");
+
     const timer = setTimeout(() => {
       setImageStatus((prev) => {
         if (prev === "loading") {
@@ -59,6 +61,7 @@ export function BannerPreview({ state, onChange }: Props) {
         return prev;
       });
     }, 5000);
+
     return () => clearTimeout(timer);
   }, [heroUrl, useFallback, isProductImage]);
 
@@ -70,6 +73,7 @@ export function BannerPreview({ state, onChange }: Props) {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
     const reader = new FileReader();
     reader.onload = (event) => {
       onChange({ productImageUrl: event.target?.result as string });
@@ -89,14 +93,14 @@ export function BannerPreview({ state, onChange }: Props) {
       
       {/* PAI: O @container fica sozinho aqui fora para medir larguras com precisão */}
       <div id="banner-export-node" className="@container w-full h-full">
-        
+         
         {/* FILHO: Aqui ficam as regras de Flex que observam o @container */}
         <div
           id="banner-inner-wrapper"
           className={cn(
             "relative isolate w-full h-full shrink-0 overflow-hidden shadow-2xl",
             "rounded-[20px]", 
-            "min-h-[380px]", // <-- ESSA É A CLASSE QUE SALVA O PREVIEW! Garante que a imagem não vai sumir na UI
+            "min-h-[380px]", 
             "flex flex-col @xl:flex-row items-stretch", 
           )}
           style={{
@@ -116,7 +120,7 @@ export function BannerPreview({ state, onChange }: Props) {
 
           {/* ÁREA DE TEXTO */}
           <div className="relative z-10 flex w-full @xl:w-[55%] shrink-0 flex-col justify-center overflow-hidden min-h-0 px-6 py-5 @xl:px-10 @xl:py-5">
-            
+             
             <div className="flex items-center gap-2 mb-3 @xl:mb-4 shrink-0">
               <div
                 className="grid size-7 @xl:size-8 shrink-0 place-items-center rounded-lg shadow-lg"
@@ -137,15 +141,15 @@ export function BannerPreview({ state, onChange }: Props) {
                 </span>
               </div>
 
-              {/* Ajuste fino na fonte e linha para garantir que caiba em 300px de altura sem encavalar */}
+              {/* Ajuste fino na fonte e linha para não cortar nada */}
               <Editable
                 as="h2"
                 value={title}
                 onChange={(v) => onChange({ title: v })}
                 className={cn(
                   "font-black leading-[1.15] tracking-tight text-white drop-shadow-md",
-                  "text-[20px] @sm:text-[24px] @md:text-[28px] @xl:text-[32px] @3xl:text-[36px]", 
-                  "break-words line-clamp-3",
+                  "text-[20px] @sm:text-[24px] @md:text-[28px] @xl:text-[32px] @3xl:text-[36px]",
+                  "break-words",
                 )}
               />
 
@@ -157,7 +161,7 @@ export function BannerPreview({ state, onChange }: Props) {
                   className={cn(
                     "font-medium leading-snug text-[rgba(255,255,255,0.85)]",
                     "text-[12px] @xl:text-[14px]",
-                    "break-words line-clamp-2",
+                    "break-words",
                   )}
                 />
               )}
@@ -189,7 +193,7 @@ export function BannerPreview({ state, onChange }: Props) {
             )}
           </div>
 
-          {/* ÁREA DA IMAGEM: Destravada pro Desktop (items-stretch) e bloqueada no mobile (min-h-[160px]) */}
+          {/* ÁREA DA IMAGEM */}
           <div
             className={cn(
               "relative z-10 flex w-full @xl:w-[45%] shrink-0 flex-col items-center justify-center overflow-hidden",
@@ -213,6 +217,7 @@ export function BannerPreview({ state, onChange }: Props) {
                      <Loader2 className="size-8 animate-spin text-[rgba(255,255,255,0.5)]" />
                    </div>
                  )}
+
                  {imageStatus === "error" ? (
                    <div className="absolute inset-0 z-0 flex flex-col items-center justify-center bg-[rgba(0,0,0,0.2)] backdrop-blur-sm">
                      <AlertCircle className="mb-2 size-8 text-[rgba(255,255,255,0.5)]" />

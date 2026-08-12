@@ -7,14 +7,12 @@ import { useBriefflowStore } from "@/store/briefflow";
 import { isSupabaseConfigured, saveAssetToLibrary } from "@/lib/supabase";
 import { buildPollinationsUrl } from "@/lib/pollinations";
 import { cleanText, isEmptyLike } from "@/lib/sanitize";
-
 import { BuilderHeader } from "./builder/BuilderHeader";
 import { GeneratingBanner } from "./builder/GeneratingBanner";
 import { CampaignTabs } from "./builder/CampaignTabs";
 import { DiscoveryPlanView } from "./builder/DiscoveryPlanView";
 import { BuilderEmptyState } from "./builder/BuilderEmptyState";
 import type { BuilderState, CampaignAsset } from "@/types/builder";
-
 import {
   AlertDialog,
   AlertDialogAction,
@@ -32,27 +30,26 @@ import { Loader2 } from "lucide-react";
 
 interface Props {
   onRefine: (prompt: string) => void;
+  onOpenSettings?: () => void;
 }
 
-export function PageBuilder({ onRefine }: Props) {
+export function PageBuilder({ onRefine, onOpenSettings }: Props) {
   const {
+    user,
     builder,
     loading,
     generatingLabel,
     patchBuilder,
     setBuilder,
   } = useBriefflowStore();
-
   const [activeTab, setActiveTab] = useState<CampaignAsset["type"]>("banner");
   const [isSaving, setIsSaving] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
 
-  // Controle do Dialog de Exportação Visual
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [exportFormat, setExportFormat] = useState("png");
   const [exportW, setExportW] = useState("1200");
   const [exportH, setExportH] = useState("300");
-
   const isSavingRef = useRef(false);
   const isExportingRef = useRef(false);
 
@@ -64,25 +61,32 @@ export function PageBuilder({ onRefine }: Props) {
       ? Boolean(builder.campaignAssets?.length)
       : true);
 
+  const parsedW = parseInt(exportW, 10);
+  const parsedH = parseInt(exportH, 10);
+  const isExportValid = !isNaN(parsedW) && parsedW >= 1 && !isNaN(parsedH) && parsedH >= 1;
+
   const handleSave = async () => {
     if (!isSupabaseConfigured) {
-      toast.error("Biblioteca não configurada", { duration: 4000 });
+      toast.error("Biblioteca não configurada");
       return;
     }
-
+    if (!user) {
+      toast.error("Acesso restrito", { description: "Faça login no perfil no topo da tela para salvar sua campanha." });
+      return;
+    }
     if (isSavingRef.current) return;
     
     isSavingRef.current = true;
     setIsSaving(true);
     
     await new Promise((resolve) => setTimeout(resolve, 150));
-    toast.info("Salvando campanha na biblioteca...", { duration: 3000 });
+    const toastId = toast.loading("Salvando campanha na biblioteca...");
     
     try {
       await saveAssetToLibrary("Campanha AI", builder);
-      toast.success("Salvo na biblioteca com sucesso!", { duration: 4000 });
-    } catch {
-      toast.error("Erro ao salvar a campanha", { duration: 4000 });
+      toast.success("Salvo na biblioteca com sucesso!", { id: toastId });
+    } catch (e: any) {
+      toast.error(e.message || "Erro ao salvar a campanha", { id: toastId });
     } finally {
       isSavingRef.current = false;
       setIsSaving(false);
@@ -101,13 +105,10 @@ export function PageBuilder({ onRefine }: Props) {
 
   const executeExport = async () => {
     if (builder.type !== "campaign" || !builder.campaignAssets || isExportingRef.current) return;
-
     const asset = builder.campaignAssets.find((a) => a.type === activeTab);
     if (!asset) return;
-
     isExportingRef.current = true;
     setIsExporting(true);
-
     const c = asset.content as any;
     const brandName = cleanText(c.brandName, "Marca");
     const themeColor = c.themeColor || "#2563EB";
@@ -117,16 +118,16 @@ export function PageBuilder({ onRefine }: Props) {
         ...(c.productImages || []),
       ]),
     );
-
+    let toastId;
     try {
       if (activeTab === "banner") {
-        toast.info("Processando responsividade e capturando...", { duration: 3000 });
+        toastId = toast.loading("Processando responsividade e capturando...");
         
         const bannerElement = document.getElementById("banner-export-node");
         const innerElement = document.getElementById("banner-inner-wrapper");
         
         if (!bannerElement || !innerElement) {
-            toast.error("Erro: Banner não encontrado na tela.");
+            toast.error("Erro: Banner não encontrado na tela.", { id: toastId });
             setIsExportingRef.current = false;
             setIsExporting(false);
             setExportDialogOpen(false);
@@ -157,25 +158,23 @@ export function PageBuilder({ onRefine }: Props) {
               backgroundColor: exportFormat === 'jpeg' ? '#000000' : null,
               skipFonts: true, 
               fontEmbedCSS: '', 
-           });
-           
+            });
+            
           const finalData = canvas.toDataURL(`image/${exportFormat}`, 1.0);
-           
+          
           const a = document.createElement("a");
           a.href = finalData;
           a.download = `banner_${brandName.replace(/\s+/g, '_').toLowerCase()}_${targetWidth}x${targetHeight}.${exportFormat}`;
           a.click();
-           
-          toast.success("Banner exportado com sucesso!", { duration: 4000 });
+          
+          toast.success("Banner exportado com sucesso!", { id: toastId });
         } finally {
           bannerElement.setAttribute('style', originalBannerStyle);
           innerElement.setAttribute('style', originalInnerStyle);
         }
-
       } 
       else if (activeTab === "email") {
-        toast.info("Gerando HTML do e-mail...", { duration: 3000 });
-
+        toastId = toast.loading("Gerando HTML do e-mail...");
         const title = cleanText(c.title, "Título do e-mail");
         const cta = cleanText(c.cta, "");
         const hasCta = cta.trim().length > 0;
@@ -260,10 +259,10 @@ export function PageBuilder({ onRefine }: Props) {
         document.body.removeChild(aHtml);
         URL.revokeObjectURL(htmlUrl);
         
-        toast.success("E-mail HTML exportado com sucesso!", { duration: 4000 });
+        toast.success("E-mail HTML exportado com sucesso!", { id: toastId });
       } 
       else if (activeTab === "social") {
-        toast.info("Preparando arquivos para download...", { duration: 3000 });
+        toastId = toast.loading("Preparando arquivos para download...");
         
         // Texto
         const caption = cleanText(c.caption, "");
@@ -302,7 +301,6 @@ export function PageBuilder({ onRefine }: Props) {
                 const ctx = canvas.getContext("2d");
                 if (ctx) {
                   ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-                  // Usamos PNG como padrão para o post social gerado direto pelo botão de cima
                   const finalData = canvas.toDataURL(`image/png`, 1.0);
                   const aImg = document.createElement("a");
                   aImg.href = finalData;
@@ -316,15 +314,13 @@ export function PageBuilder({ onRefine }: Props) {
             });
             URL.revokeObjectURL(objUrl);
           } catch (e) {
-            window.open(imgUrl, "_blank"); // Fallback agressivo se der erro de CORS na tela
+            window.open(imgUrl, "_blank");
           }
         }
-
-        toast.success("Post social exportado com sucesso!", { duration: 4000 });
+        toast.success("Post social exportado com sucesso!", { id: toastId });
       }
-
-    } catch (e) {
-      toast.error("Erro ao exportar arquivos.", { duration: 4000 });
+    } catch (e: any) {
+      toast.error(e.message || "Erro ao exportar arquivos.", { id: toastId });
       console.error(e);
     } finally {
       isExportingRef.current = false;
@@ -350,8 +346,8 @@ export function PageBuilder({ onRefine }: Props) {
         loading={loading}
         onExport={handleExportClick}
         onSave={handleSave}
+        onOpenSettings={onOpenSettings}
       />
-
       <div
         className={cn(
           "relative flex-1 overflow-y-auto p-6 lg:p-12",
@@ -370,7 +366,6 @@ export function PageBuilder({ onRefine }: Props) {
           {loading && generatingLabel && builder.type === "campaign" && (
             <GeneratingBanner label={generatingLabel} />
           )}
-
           {builder.type === "campaign" && builder.campaignAssets && (
             <div className="fade-in-up">
               <CampaignTabs
@@ -381,7 +376,6 @@ export function PageBuilder({ onRefine }: Props) {
               />
             </div>
           )}
-
           {builder.type === "discovery_plan" && builder.discoveryPlan && (
             <DiscoveryPlanView
               plan={builder.discoveryPlan}
@@ -394,12 +388,10 @@ export function PageBuilder({ onRefine }: Props) {
               }
             />
           )}
-
           {builder.type === "none" && <BuilderEmptyState />}
         </div>
       </div>
 
-      {/* MODAL AGORA É EXCLUSIVO PARA O BANNER */}
       <AlertDialog open={exportDialogOpen} onOpenChange={setExportDialogOpen}>
         <AlertDialogContent className="bg-surface-1 border-border-strong text-fg-primary shadow-2xl sm:max-w-[425px]">
           <AlertDialogHeader>
@@ -428,15 +420,13 @@ export function PageBuilder({ onRefine }: Props) {
             
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="width" className="text-right text-fg-secondary">Largura (px)</Label>
-              <Input id="width" value={exportW} onChange={(e) => setExportW(e.target.value)} className="col-span-3 bg-surface-2 border-border-subtle text-fg-primary" />
+              <Input id="width" type="number" min="1" value={exportW} onChange={(e) => setExportW(e.target.value)} className="col-span-3 bg-surface-2 border-border-subtle text-fg-primary" />
             </div>
-
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="height" className="text-right text-fg-secondary">Altura (px)</Label>
-              <Input id="height" value={exportH} onChange={(e) => setExportH(e.target.value)} className="col-span-3 bg-surface-2 border-border-subtle text-fg-primary" />
+              <Input id="height" type="number" min="1" value={exportH} onChange={(e) => setExportH(e.target.value)} className="col-span-3 bg-surface-2 border-border-subtle text-fg-primary" />
             </div>
           </div>
-
           <AlertDialogFooter className="mt-4">
             <AlertDialogCancel className="border-border-strong bg-transparent text-fg-secondary hover:bg-surface-2 hover:text-fg-primary" onClick={() => setExportDialogOpen(false)}>
               Cancelar
@@ -444,10 +434,14 @@ export function PageBuilder({ onRefine }: Props) {
             <AlertDialogAction
               onClick={(e) => {
                 e.preventDefault();
+                if (!isExportValid) {
+                  toast.error("Dimensões inválidas", { description: "Insira valores numéricos positivos e maiores que zero." });
+                  return;
+                }
                 executeExport();
               }}
-              disabled={isExporting}
-              className="bg-brand text-brand-fg hover:brightness-110 shadow-[var(--shadow-brand)]"
+              disabled={isExporting || !isExportValid}
+              className="bg-brand text-brand-fg hover:brightness-110 shadow-[var(--shadow-brand)] disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isExporting ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
               Baixar Arte

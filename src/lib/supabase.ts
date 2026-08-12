@@ -1,3 +1,4 @@
+// src/lib/supabase.ts
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { BuilderState } from "@/types/builder";
 
@@ -22,22 +23,19 @@ export async function saveAssetToLibrary(name: string, state: BuilderState) {
       "Supabase não configurado. Defina VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY.",
     );
   }
-
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Você precisa fazer login para salvar campanhas na biblioteca.");
-
   const { data, error } = await supabase
     .from("assets")
     .insert([{
       user_id: user.id,
-      name,
+      name: state.brandName ? `Campanha ${state.brandName}` : name,
       type: state.type,
       content: state,
       status: "draft",
     }])
     .select()
     .single();
-
   if (error) throw error;
   return data;
 }
@@ -48,12 +46,23 @@ export async function getSavedAssets() {
       "Supabase não configurado. Defina VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY.",
     );
   }
-
   const { data, error } = await supabase
     .from("assets")
     .select("*")
     .order("created_at", { ascending: false });
-
   if (error) throw error;
   return data;
+}
+
+export async function deleteSavedAsset(id: string) {
+  if (!supabase) {
+    throw new Error(
+      "Supabase não configurado. Defina VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY.",
+    );
+  }
+  const { error } = await supabase
+    .from("assets")
+    .delete()
+    .eq("id", id);
+  if (error) throw error;
 }

@@ -1,20 +1,15 @@
 // src/lib/ollama.ts
-//
-// Todas as chamadas de IA passam pelo edge function ai-proxy.
-// Nenhuma chave de API (OmniRoute/Ollama) é exposta no bundle do cliente.
-//
-// A interface pública sendToOllama() é idêntica à versão anterior.
+// Chamadas de IA com Bypass (Direct API) + Supabase RPC para Créditos.
+// Roteia entre Ollama Local (Gratuito) e Omniroute Nuvem (PRO/Agência).
 
 import type { BrandContext, BuilderState, CampaignAsset, DiscoveryPlan } from "@/types/builder";
-import { formatSiteContextForAgent, type ScrapedProductData } from "@/lib/scrape-site";
-import type { AiAssetType, AiChatMessage, AiGenerationMeta, AiIntent } from "@/types/ai";
-import { cleanOffer } from "@/lib/sanitize";
+import { formatSiteContextForAgent } from "@/lib/scrape-site";
+import type { AiAssetType, AiGenerationMeta, AiIntent } from "@/types/ai";
 import { supabase } from "@/lib/supabase";
 
 // ============================================================
-// PROMPTS (inalterados)
+// PROMPTS
 // ============================================================
-
 const DISCOVERY_AGENT_PROMPT = (
   currentPlan: DiscoveryPlan | undefined,
   brandContext: BrandContext,
@@ -66,7 +61,6 @@ function EXECUTION_AGENT_PROMPT(
   options: { productImageUrl?: string | null },
 ): string {
   return `Você é o BrieFlow Creative Director, modo EXECUÇÃO.
-
 Gere AGORA o JSON para a peça ${targetAsset.toUpperCase()}.
 
 === CONTEXTO DA MARCA ===
@@ -96,9 +90,8 @@ Responda em JSON válido:
 }
 
 // ============================================================
-// TIPOS (inalterados)
+// TIPOS
 // ============================================================
-
 export type ChatTurn = { role: "user" | "assistant"; content: string };
 
 export interface OllamaGenerationOptions {
@@ -107,6 +100,7 @@ export interface OllamaGenerationOptions {
   requestId?: string;
   productImageUrl?: string | null;
   onStream?: (partialChat: string) => void;
+  provider?: "ollama" | "omniroute";
 }
 
 export interface OllamaResultMeta extends AiGenerationMeta {
@@ -124,9 +118,8 @@ export interface OllamaResponse {
 export type OllamaResult = OllamaResponse & { meta: OllamaResultMeta };
 
 // ============================================================
-// HELPERS (inalterados)
+// HELPERS
 // ============================================================
-
 function createRequestId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
   return `bf_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
@@ -135,25 +128,32 @@ function createRequestId(): string {
 function extractSpecificBriefing(text: string, targetAsset: string): string {
   const normalized = text.toUpperCase();
   const hasMarkers = /BANNER:|E-MAIL:|EMAIL:|POST SOCIAL:|SOCIAL:/i.test(text);
+
   if (!hasMarkers) return text;
+
   let keyword = "";
   if (targetAsset === "banner") keyword = "BANNER:";
   else if (targetAsset === "email") keyword = normalized.includes("E-MAIL:") ? "E-MAIL:" : "EMAIL:";
   else if (targetAsset === "social") keyword = normalized.includes("POST SOCIAL:") ? "POST SOCIAL:" : "SOCIAL:";
+
   if (!keyword || !normalized.includes(keyword)) return text;
+
   const startIndex = normalized.indexOf(keyword) + keyword.length;
   const otherKeywords = ["BANNER:", "E-MAIL:", "EMAIL:", "POST SOCIAL:", "SOCIAL:"].filter((k) => k !== keyword);
+
   let endIndex = text.length;
   for (const kw of otherKeywords) {
     const idx = normalized.indexOf(kw, startIndex);
     if (idx !== -1 && idx < endIndex) endIndex = idx;
   }
+
   return text.substring(startIndex, endIndex).trim();
 }
 
 function extractBalancedJson(text: string): string | null {
   const start = text.indexOf("{");
   if (start === -1) return null;
+
   let depth = 0; let inString = false; let escaped = false;
   for (let index = start; index < text.length; index += 1) {
     const character = text[index];
@@ -161,6 +161,7 @@ function extractBalancedJson(text: string): string | null {
     if (character === "\\") { escaped = true; continue; }
     if (character === '"') { inString = !inString; continue; }
     if (inString) continue;
+
     if (character === "{") depth += 1;
     if (character === "}") {
       depth -= 1;
@@ -173,24 +174,31 @@ function extractBalancedJson(text: string): string | null {
 
 function tryParseJson(text: string): OllamaResponse | null {
   if (!text || !text.trim()) return null;
+
   const cleanText = text.replace(/<think>[\s\S]*?<\/think>/gi, "").replace(/```json/gi, "").replace(/```/g, "").trim();
+
   try { return JSON.parse(cleanText) as OllamaResponse; } catch { /* segue */ }
+
   const flat = cleanText.replace(/[\n\r\t]/g, " ").replace(/,\s*([}\]])/g, "$1");
   try { return JSON.parse(flat) as OllamaResponse; } catch { /* segue */ }
+
   const extracted = extractBalancedJson(flat);
   if (extracted) {
     try { return JSON.parse(extracted) as OllamaResponse; } catch { /* segue */ }
     const softened = extracted.replace(/,\s*([}\]])/g, "$1");
     try { return JSON.parse(softened) as OllamaResponse; } catch { /* fim */ }
   }
+
   return null;
 }
 
 function extractChatField(rawJson: string): string | null {
-  const match = rawJson.match(/"chat"\s*:\s*"/");
+  const match = rawJson.match(/"chat"\s*:\s*"/);
   if (!match || match.index === undefined) return null;
+
   const start = match.index + match[0].length;
   let result = ""; let escaped = false;
+
   for (let index = start; index < rawJson.length; index += 1) {
     const character = rawJson[index];
     if (escaped) {
@@ -221,6 +229,7 @@ function createFallbackBuilder(currentPlan: DiscoveryPlan | undefined): BuilderS
 function normalizeBuilder(response: OllamaResponse, currentPlan: DiscoveryPlan | undefined, targetAsset?: AiAssetType, productImageUrl?: string | null): BuilderState {
   const builder = response.builder;
   if (!builder) return createFallbackBuilder(currentPlan);
+
   if (builder.type === "campaign" && Array.isArray(builder.campaignAssets) && targetAsset) {
     const campaignAssets = builder.campaignAssets
       .filter((asset) =>
@@ -238,85 +247,140 @@ function normalizeBuilder(response: OllamaResponse, currentPlan: DiscoveryPlan |
       }));
     return { type: "campaign", campaignAssets };
   }
+
   return builder;
 }
 
 // ============================================================
-// CHAMADA ÚNICA — através do edge function ai-proxy
+// CHAMADA DIRETA – Roteia entre Ollama e Omniroute
 // ============================================================
-
-const AI_PROXY_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ai-proxy`;
-
-async function callAiProxy(
+async function callDirectAi(
   messagesPayload: { role: "system" | "user"; content: string }[],
   options: OllamaGenerationOptions,
   controller: AbortController,
 ): Promise<{ raw: string; provider: "omniroute" | "ollama" }> {
-  if (!supabase) throw new Error("Supabase não configurado.");
-
-  const { data: sessionData } = await supabase.auth.getSession();
-  const token = sessionData?.session?.access_token;
-  if (!token) throw new Error("Faça login para usar a IA.");
-
   const isExecution = Boolean(options.targetAsset);
-  const action = isExecution ? options.targetAsset ?? "chat" : "discovery";
+  const wantsStream = false;
+  const provider = options.provider || "omniroute";
 
-  const response = await fetch(AI_PROXY_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-      "X-Client-Info": "brieflow/1.0",
-    },
-    body: JSON.stringify({
-      messages: messagesPayload,
-      action,
-      temperature: isExecution ? 0.1 : 0.3,
-      max_tokens: isExecution ? 8000 : 4000,
-      response_format: { type: "json_object" },
-      request_id: options.requestId ?? createRequestId(),
-    }),
-    signal: controller.signal,
-  });
-
-  if (!response.ok) {
-    let errBody: Record<string, unknown> = {};
-    try { errBody = await response.json(); } catch { /* ignore */ }
-    const reason = String(errBody.error ?? `http_${response.status}`);
-    if (response.status === 401) throw new Error("Sessão expirada. Faça login novamente.");
-    if (response.status === 402) {
-      throw new Error(
-        reason === "subscription_past_due"
-          ? "Assinatura com pagamento pendente."
-          : "Créditos insuficientes para esta geração.",
-      );
+  // 1. DEDUZ CRÉDITO NO SUPABASE (Para qualquer provedor)
+  if (supabase) {
+    const { data: session } = await supabase.auth.getSession();
+    if (session?.session) {
+      const { data: success, error } = await supabase.rpc("deduct_user_credit", { cost: 1 });
+      if (error || !success) throw new Error("Créditos diários esgotados. Acesse as Configurações da Conta e faça o upgrade do seu plano.");
     }
-    if (response.status === 429) throw new Error("Muitas requisições. Aguarde um momento.");
-    if (response.status === 502) throw new Error("Servidores de IA indisponíveis no momento.");
-    throw new Error(`Erro no proxy de IA: ${reason}`);
   }
 
-  const data = await response.json() as {
-    choices?: { message: { content: string } }[];
-    _meta?: { provider?: string };
-  };
+  // 2. ROTEAMENTO OLLAMA LOCAL
+  if (provider === "ollama") {
+    const ollamaUrl = import.meta.env.VITE_OLLAMA_URL || "http://localhost:11434/api/chat";
+    
+    // DETECÇÃO DINÂMICA DO MODELO (Discovery vs Execution)
+    const model = isExecution
+      ? (import.meta.env.VITE_OLLAMA_EXECUTION_MODEL || import.meta.env.VITE_OLLAMA_MODEL || "qwen2.5:7b")
+      : (import.meta.env.VITE_OLLAMA_DISCOVERY_MODEL || import.meta.env.VITE_OLLAMA_MODEL || "qwen2.5:7b");
 
-  const content = data.choices?.[0]?.message?.content ?? "";
-  const provider = (data._meta?.provider ?? "omniroute") as "omniroute" | "ollama";
+    const response = await fetch(ollamaUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model, // <-- Modelo dinâmico do seu .env
+        messages: messagesPayload,
+        stream: wantsStream,
+        format: "json",
+        options: {
+          temperature: isExecution ? 0.1 : 0.3,
+          num_predict: isExecution ? 8000 : 4000
+        }
+      }),
+      signal: controller.signal,
+    });
 
-  // Stream partial chat for discovery mode
-  if (!isExecution && options.onStream) {
-    const partialChat = extractChatField(content);
-    if (partialChat) options.onStream(partialChat);
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Ollama Local Erro ${response.status}: ${errText}`);
+    }
+
+    const data = await response.json();
+    return { raw: data.message?.content ?? "", provider: "ollama" };
+  } 
+  
+  // 3. ROTEAMENTO OMNIROUTE
+  else {
+    const apiKey = import.meta.env.VITE_OMNIROUTE_API_KEY;
+    const apiUrl = import.meta.env.VITE_OMNIROUTE_API_URL || "https://api.openai.com/v1/chat/completions";
+    const model = import.meta.env.VITE_OMNIROUTE_MODEL || "gpt-4o-mini";
+
+    if (!apiKey) throw new Error("API Key não configurada no .env (VITE_OMNIROUTE_API_KEY)");
+
+    const response = await fetch(apiUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages: messagesPayload,
+        temperature: isExecution ? 0.1 : 0.3,
+        max_tokens: isExecution ? 8000 : 4000,
+        stream: wantsStream,
+        response_format: { type: "json_object" },
+      }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`HTTP ${response.status}: ${errText}`);
+    }
+
+    if (wantsStream && response.body) {
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder("utf-8");
+      let rawJson = "";
+      let pendingChunk = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        pendingChunk += decoder.decode(value, { stream: true });
+        const lines = pendingChunk.split("\n");
+        pendingChunk = lines.pop() ?? "";
+
+        for (const line of lines) {
+          const trimmedLine = line.trim();
+          if (!trimmedLine || trimmedLine === "data: [DONE]") continue;
+
+          if (trimmedLine.startsWith("data: ")) {
+            try {
+              const chunk = JSON.parse(trimmedLine.slice(6));
+              const content = chunk.choices?.[0]?.delta?.content;
+              if (content) {
+                rawJson += content;
+                if (options.onStream) {
+                  const partialChat = extractChatField(rawJson);
+                  if (partialChat) options.onStream(partialChat);
+                }
+              }
+            } catch { /* Ignora falhas de parse de pedaços incompletos */ }
+          }
+        }
+      }
+      return { raw: rawJson, provider: "omniroute" };
+    } else {
+      const data = await response.json();
+      const content = data.choices?.[0]?.message?.content ?? "";
+      return { raw: content, provider: "omniroute" };
+    }
   }
-
-  return { raw: content, provider };
 }
 
 // ============================================================
-// FUNÇÃO PÚBLICA PRINCIPAL (interface inalterada)
+// FUNÇÃO PÚBLICA PRINCIPAL
 // ============================================================
-
 export async function sendToOllama(
   history: ChatTurn[],
   brandContext: BrandContext,
@@ -361,18 +425,17 @@ export async function sendToOllama(
   let providerUsed: "omniroute" | "ollama" = "omniroute";
 
   try {
-    const result = await callAiProxy(messagesPayload, options, controller);
+    const result = await callDirectAi(messagesPayload, options, controller);
     rawJson = result.raw;
-    providerUsed = result.provider;
+    providerUsed = result.provider as "omniroute" | "ollama";
 
     const parsed = tryParseJson(rawJson);
-
     const metaBase: OllamaResultMeta = {
       requestId: options.requestId ?? createRequestId(),
       model: providerUsed,
       intent: options.intent ?? (wantsExecution ? "campaign" : "discovery"),
       stage: wantsExecution ? "generating" : "discovery",
-      usedFallback: false,
+      usedFallback: true, 
       generatedAt: new Date().toISOString(),
       provider: providerUsed,
     };
@@ -392,14 +455,14 @@ export async function sendToOllama(
       };
     }
 
-    const builder = normalizeBuilder(parsed, currentPlan, targetAsset, options.productImageUrl);
-
+    const builder = normalizeBuilder(parsed as OllamaResponse, currentPlan, targetAsset, options.productImageUrl);
+    
     return {
-      chat: parsed.chat || (wantsExecution ? "Peça gerada." : "Briefing atualizado."),
-      action: parsed.action || "discovery_continue",
-      targetKeys: parsed.targetKeys,
+      chat: (parsed as OllamaResponse).chat || (wantsExecution ? "Peça gerada." : "Briefing atualizado."),
+      action: (parsed as OllamaResponse).action || "discovery_continue",
+      targetKeys: (parsed as OllamaResponse).targetKeys,
       builder,
-      scores: parsed.scores,
+      scores: (parsed as OllamaResponse).scores,
       meta: { ...metaBase, stage: wantsExecution ? "completed" : "ready_to_generate", latencyMs: Date.now() - startedAt },
     };
   } catch (error: unknown) {

@@ -1,39 +1,35 @@
 // src/components/briefflow/CreditsBar.tsx
-//
-// Exibe os créditos restantes do usuário no topo do painel.
 import { useCredits, planLabel } from "@/hooks/useCredits";
+import { cn } from "@/lib/utils";
 
-export function CreditsBar() {
-  const { plan, loading, isLow, isPastDue, creditsPercent } = useCredits();
+interface Props {
+  className?: string;
+}
+
+export function CreditsBar({ className }: Props) {
+  const { plan, loading, isLow, creditsPercent } = useCredits();
 
   if (loading || !plan) return null;
 
-  const barColor = isPastDue
-    ? "bg-red-500"
-    : isLow
-    ? "bg-amber-400"
-    : "bg-emerald-500";
-
   return (
-    <div className="flex items-center gap-3 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm">
-      <span className="shrink-0 font-medium text-foreground">
-        {planLabel(plan.plan)}
-      </span>
-      <div className="relative flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+    <div className={cn("px-5 py-3 border-b border-border-subtle bg-surface-2 flex flex-col gap-2", className)}>
+      <div className="flex justify-between items-center text-[10px] font-bold uppercase tracking-widest">
+        <span className="text-fg-secondary">
+          Créditos ({planLabel(plan.plan)})
+        </span>
+        <span className={cn(isLow ? "text-rose-400" : "text-fg-primary")}>
+          {plan.creditsRemaining} / {plan.creditsMonthly}
+        </span>
+      </div>
+      <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-surface-3">
         <div
-          className={`h-full rounded-full transition-all ${barColor}`}
+          className={cn(
+            "h-full transition-all duration-500",
+            isLow ? "bg-rose-500" : "bg-brand"
+          )}
           style={{ width: `${Math.min(100, creditsPercent)}%` }}
         />
       </div>
-      <span
-        className={`shrink-0 tabular-nums ${
-          isPastDue ? "text-red-500" : isLow ? "text-amber-500" : "text-muted-foreground"
-        }`}
-      >
-        {isPastDue
-          ? "Pagamento pendente"
-          : `${plan.creditsRemaining}/${plan.creditsMonthly} créditos`}
-      </span>
     </div>
   );
 }
