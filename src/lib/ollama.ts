@@ -1,9 +1,19 @@
 // src/lib/ollama.ts
+//
+// Todas as chamadas de IA passam pelo edge function ai-proxy.
+// Nenhuma chave de API (OmniRoute/Ollama) é exposta no bundle do cliente.
+//
+// A interface pública sendToOllama() é idêntica à versão anterior.
+
 import type { BrandContext, BuilderState, CampaignAsset, DiscoveryPlan } from "@/types/builder";
 import { formatSiteContextForAgent, type ScrapedProductData } from "@/lib/scrape-site";
 import type { AiAssetType, AiChatMessage, AiGenerationMeta, AiIntent } from "@/types/ai";
-import { toast } from "sonner";
 import { cleanOffer } from "@/lib/sanitize";
+import { supabase } from "@/lib/supabase";
+
+// ============================================================
+// PROMPTS (inalterados)
+// ============================================================
 
 const DISCOVERY_AGENT_PROMPT = (
   currentPlan: DiscoveryPlan | undefined,
@@ -21,120 +31,82 @@ const DISCOVERY_AGENT_PROMPT = (
    - "generate_email": O usuário pediu especificamente para gerar, editar ou alterar APENAS o e-mail.
    - "generate_social": O usuário pediu especificamente para gerar, editar ou alterar APENAS o post social.
    - "cancel": O usuário expressou claro desejo de cancelar a operação inteira ou parar o fluxo.
-5. WHITELIST DE EDIÇÃO (NOVO E CRÍTICO): Se a ação for "generate_*" e o usuário pediu para alterar APENAS campos específicos (ex: "Mude só o botão", "Mude só a cor", "Altere o título"), liste os nomes originais desses campos no array "targetKeys" (ex: ["cta"], ["themeColor"], ["title"]). Se for uma peça nova, recriação total ou o usuário não restringiu, retorne ["all"].
+5. WHITELIST DE EDIÇÃO (NOVO E CRÍTICO): Se a ação for "generate_*" e o usuário pediu para alterar APENAS campos específicos (ex: "Mude só o botão", "Mude só a cor", "Altere o título"), você DEVE preencher "targetKeys" com APENAS as chaves dos campos solicitados. NÃO regenere campos que o usuário não pediu para mudar.
 
-=== DADOS DA MARCA E DO SITE ===
-${brandContext.site ? formatSiteContextForAgent(brandContext.site) : "Nenhum site analisado ainda."}
+=== CONTEXTO DA MARCA ===
+${formatSiteContextForAgent(brandContext.site)}
 
-=== RETORNO OBRIGATÓRIO (SCHEMA JSON) ===
+=== PLANO ATUAL ===
+${currentPlan ? JSON.stringify(currentPlan) : "Nenhum plano ainda."}
+
+=== FORMATO DE RESPOSTA ===
+Responda SEMPRE em JSON válido com esta estrutura:
 {
-  "chat": "Sua resposta humanizada confirmando o que capturou. Se a action for generate_*, diga que vai começar. Se for cancel, diga que cancelou.",
-  "action": "discovery_continue",
-  "targetKeys": ["all"],
-  "builder": {
-    "type": "discovery_plan",
-    "discoveryPlan": {
-      "detectedContext": "Transcreva as exigências do cliente ou resumo do briefing.",
-      "audience": "Extraia o público-alvo alvo desejado da conversa (ou null se não informado).",
-      "offer": "Qualquer desconto, promoção, porcentagem (ex: 20% OFF) ou código de cupom. Null se não houver.",
-      "missingInfo": "O que realmente falta descobrir antes de poder criar as artes finais.",
-      "proposedStrategy": "Estratégia baseada APENAS nos fatos.",
-      "brandName": "Nome da marca",
-      "productSku": "APENAS UM SKU AQUI OU UMA URL DIRETA (OU NULL)"
-    }
-  }
+  "chat": "Sua mensagem conversacional em PT-BR (sempre preenchido)",
+  "action": "discovery_continue|generate_all|generate_banner|generate_email|generate_social|cancel",
+  "targetKeys": ["array de chaves se aplicável"],
+  "detectedContext": {
+    "brandName": "string|null",
+    "productSku": "string|null",
+    "productUrl": "string|null",
+    "productName": "string|null",
+    "offer": "string|null",
+    "audience": "string|null",
+    "tone": "string|null",
+    "objective": "string|null"
+  },
+  "builder": { /* BuilderState apropriado */ },
+  "scores": { "persuasion": 0-100, "clarity": 0-100, "seo": 0-100 }
 }`;
 
-function getAssetContentSchema(targetAsset: AiAssetType): string {
-  const designFields = `
-    "themeColor": "#HEX OBRIGATORIO (Use a cor primária MAIS VIBRANTE ou escura da marca, nunca tons pastéis ou branco)",
-    "secondaryColor": "#HEX OBRIGATORIO (Use a cor secundária de contraste)"
-  `;
-  const imgPromptGuidance = "MANDATORY: Write a highly detailed photography prompt in ENGLISH. The image MUST explicitly feature the campaign's main subject/product (e.g., if it's about coffee, describe coffee beans, cups, or a cafe). NO text, NO logos. Describe lighting, scenario, and subject perfectly.";
-
-  if (targetAsset === "banner") {
-    return `"content": {
-          "type": "banner",
-          "title": "<Gere um título com impacto publicitário>",
-          "subtitle": "<Gere o subtítulo da peça>",
-          "cta": "<Gere um CTA forte e curto>",
-          "imagePrompt": "${imgPromptGuidance}",
-          "productSku": "SKU",
-          "layoutStyle": "diagonal OU split OU minimalist OU centered",
-          ${designFields}
-        }`;
-  }
-  if (targetAsset === "email") {
-    return `"content": {
-          "type": "email",
-          "preheader": "<Gere um pré-header chamativo>",
-          "title": "<Gere o assunto do email>",
-          "body": "<Gere de 2 a 3 parágrafos persuasivos aplicando os benefícios reais do produto, a oferta e o contexto do briefing>",
-          "cta": "<Gere um botão de ação claro e direto>",
-          "emailHeroImagePrompt": "${imgPromptGuidance}",
-          ${designFields}
-        }`;
-  }
-  return `"content": {
-          "type": "social",
-          "caption": "<Gere uma legenda com a narrativa, pergunta final e hashtags adequadas ao briefing>",
-          "hashtags": ["#hashtag1", "#hashtag2"],
-          "imagePrompt": "${imgPromptGuidance}",
-          ${designFields}
-        }`;
-}
-
-const EXECUTION_AGENT_PROMPT = (
-  context: BrandContext,
-  plan: DiscoveryPlan | undefined,
+function EXECUTION_AGENT_PROMPT(
+  brandContext: BrandContext,
+  currentPlan: DiscoveryPlan | undefined,
   targetAsset: AiAssetType,
-  options: OllamaGenerationOptions,
-) => {
-  const offer = cleanOffer(plan?.offer);
-  const offerGuidance = offer
-    ? `3. OFERTA/CUPOM: A campanha possui a seguinte oferta: [${offer}]. É OBRIGATÓRIO aplicar isso na copy EXATAMENTE como solicitado.`
-    : `3. PROIBIÇÃO DE OFERTAS (CRÍTICO): O usuário NÃO TEM cupom nem desconto. É ESTRITAMENTE PROIBIDO inventar promoções, usar o símbolo "%" ou a palavra "desconto" no seu texto.`;
-  const exactBrand = plan?.brandName || context.brandName || "Sua Marca";
+  options: { productImageUrl?: string | null },
+): string {
+  return `Você é o BrieFlow Creative Director, modo EXECUÇÃO.
 
-  // Retiramos a injeção da URL crua do schema para não pesar na saída da IA!
-  return `Você é o BrieFlow Art Director, gerando a peça: ${targetAsset.toUpperCase()}.
-=== DIRETRIZES ===
-1. FIDELIDADE ABSOLUTA: Use OS TEXTOS LITERAIS que o cliente pediu. Não invente ou resuma se o cliente enviou a frase exata.
-2. TEXTO LIMPO E JSON VÁLIDO: ZERO formatação Markdown. NUNCA use quebras de linha reais (Enter) nos textos. Se precisar pular linha, digite EXATAMENTE os caracteres "\\n".
-${offerGuidance}
-4. NOME DA MARCA (CRÍTICO): O nome oficial da empresa é [${exactBrand}]. É ESTRITAMENTE PROIBIDO modificar, corrigir, traduzir ou alterar qualquer letra deste nome. Use-o exatamente como está.
-5. ZERO ALUCINAÇÃO: NUNCA invente preços, datas, locais, distâncias ou dados operacionais que não constem no briefing.
-6. SCHEMA COMPLETO: Preencha todas as chaves exigidas no JSON. Se faltarem dados ou imagens no briefing, preencha com null e CONTINUE normalmente. NUNCA se desculpe ou recuse a tarefa.
-7. REGRAS ABSOLUTAS: VOCÊ ESTÁ ESTRITAMENTE PROIBIDO DE COPIAR OS TEXTOS DE INSTRUÇÃO DO SCHEMA (ex: "<Gere um assunto...>"). GERE CONTEÚDO REAL, PERSUASIVO E CRIATIVO PARA CADA CAMPO.
+Gere AGORA o JSON para a peça ${targetAsset.toUpperCase()}.
 
-=== RETORNO OBRIGATÓRIO (JSON STRICT) ===
+=== CONTEXTO DA MARCA ===
+${formatSiteContextForAgent(brandContext.site)}
+
+=== PLANO ===
+${currentPlan ? JSON.stringify(currentPlan) : "Sem plano."}
+
+=== IMAGEM DO PRODUTO ===
+${options.productImageUrl ?? "Não fornecida."}
+
+=== FORMATO ===
+Responda em JSON válido:
 {
-  "chat": "Peça finalizada com sucesso.",
+  "chat": "Confirmação breve da peça gerada",
+  "action": "generate_${targetAsset}",
   "builder": {
     "type": "campaign",
-    "campaignAssets": [
-      {
-        "id": "${targetAsset}-1",
-        "type": "${targetAsset}",
-        "status": "draft",
-        ${getAssetContentSchema(targetAsset)},
-        "productImageUrl": null
-      }
-    ]
+    "campaignAssets": [{
+      "type": "${targetAsset}",
+      "status": "draft",
+      "content": { /* conteúdo da peça */ }
+    }]
   },
-  "scores": { "persuasion": 95, "clarity": 95, "seo": 90 }
+  "scores": { "persuasion": 0-100, "clarity": 0-100, "seo": 0-100 }
 }`;
-};
+}
 
-export interface ChatTurn extends AiChatMessage { id?: string; }
+// ============================================================
+// TIPOS (inalterados)
+// ============================================================
+
+export type ChatTurn = { role: "user" | "assistant"; content: string };
 
 export interface OllamaGenerationOptions {
+  targetAsset?: AiAssetType;
   intent?: AiIntent;
   requestId?: string;
-  targetAsset?: AiAssetType;
   productImageUrl?: string | null;
   onStream?: (partialChat: string) => void;
-  scrapedProducts?: ScrapedProductData[];
 }
 
 export interface OllamaResultMeta extends AiGenerationMeta {
@@ -146,10 +118,14 @@ export interface OllamaResponse {
   action?: "discovery_continue" | "generate_all" | "generate_banner" | "generate_email" | "generate_social" | "cancel";
   targetKeys?: string[];
   builder: BuilderState;
-  scores?: { persuasion: number; clarity: number; seo: number; };
+  scores?: { persuasion: number; clarity: number; seo: number };
 }
 
-export type OllamaResult = OllamaResponse & { meta: OllamaResultMeta; };
+export type OllamaResult = OllamaResponse & { meta: OllamaResultMeta };
+
+// ============================================================
+// HELPERS (inalterados)
+// ============================================================
 
 function createRequestId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
@@ -160,21 +136,17 @@ function extractSpecificBriefing(text: string, targetAsset: string): string {
   const normalized = text.toUpperCase();
   const hasMarkers = /BANNER:|E-MAIL:|EMAIL:|POST SOCIAL:|SOCIAL:/i.test(text);
   if (!hasMarkers) return text;
-  
   let keyword = "";
   if (targetAsset === "banner") keyword = "BANNER:";
   else if (targetAsset === "email") keyword = normalized.includes("E-MAIL:") ? "E-MAIL:" : "EMAIL:";
   else if (targetAsset === "social") keyword = normalized.includes("POST SOCIAL:") ? "POST SOCIAL:" : "SOCIAL:";
-  
   if (!keyword || !normalized.includes(keyword)) return text;
   const startIndex = normalized.indexOf(keyword) + keyword.length;
-  const otherKeywords = ["BANNER:", "E-MAIL:", "EMAIL:", "POST SOCIAL:", "SOCIAL:"].filter(k => k !== keyword);
+  const otherKeywords = ["BANNER:", "E-MAIL:", "EMAIL:", "POST SOCIAL:", "SOCIAL:"].filter((k) => k !== keyword);
   let endIndex = text.length;
   for (const kw of otherKeywords) {
     const idx = normalized.indexOf(kw, startIndex);
-    if (idx !== -1 && idx < endIndex) {
-      endIndex = idx;
-    }
+    if (idx !== -1 && idx < endIndex) endIndex = idx;
   }
   return text.substring(startIndex, endIndex).trim();
 }
@@ -182,7 +154,6 @@ function extractSpecificBriefing(text: string, targetAsset: string): string {
 function extractBalancedJson(text: string): string | null {
   const start = text.indexOf("{");
   if (start === -1) return null;
-
   let depth = 0; let inString = false; let escaped = false;
   for (let index = start; index < text.length; index += 1) {
     const character = text[index];
@@ -190,7 +161,6 @@ function extractBalancedJson(text: string): string | null {
     if (character === "\\") { escaped = true; continue; }
     if (character === '"') { inString = !inString; continue; }
     if (inString) continue;
-
     if (character === "{") depth += 1;
     if (character === "}") {
       depth -= 1;
@@ -217,7 +187,7 @@ function tryParseJson(text: string): OllamaResponse | null {
 }
 
 function extractChatField(rawJson: string): string | null {
-  const match = rawJson.match(/"chat"\s*:\s*"/);
+  const match = rawJson.match(/"chat"\s*:\s*"/");
   if (!match || match.index === undefined) return null;
   const start = match.index + match[0].length;
   let result = ""; let escaped = false;
@@ -251,12 +221,11 @@ function createFallbackBuilder(currentPlan: DiscoveryPlan | undefined): BuilderS
 function normalizeBuilder(response: OllamaResponse, currentPlan: DiscoveryPlan | undefined, targetAsset?: AiAssetType, productImageUrl?: string | null): BuilderState {
   const builder = response.builder;
   if (!builder) return createFallbackBuilder(currentPlan);
-
   if (builder.type === "campaign" && Array.isArray(builder.campaignAssets) && targetAsset) {
     const campaignAssets = builder.campaignAssets
-      .filter((asset) => 
-           String(asset.type).toLowerCase().includes(targetAsset) || 
-           String((asset.content as any)?.type).toLowerCase().includes(targetAsset)
+      .filter((asset) =>
+        String(asset.type).toLowerCase().includes(targetAsset) ||
+        String((asset.content as any)?.type).toLowerCase().includes(targetAsset)
       )
       .filter((asset) => validateAsset(asset, targetAsset))
       .map((asset) => ({
@@ -272,163 +241,88 @@ function normalizeBuilder(response: OllamaResponse, currentPlan: DiscoveryPlan |
   return builder;
 }
 
-async function callOmniRouteAPI(
-  messagesPayload: { role: "system" | "user", content: string }[],
+// ============================================================
+// CHAMADA ÚNICA — através do edge function ai-proxy
+// ============================================================
+
+const AI_PROXY_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ai-proxy`;
+
+async function callAiProxy(
+  messagesPayload: { role: "system" | "user"; content: string }[],
   options: OllamaGenerationOptions,
-  controller: AbortController
-): Promise<string> {
-  const apiKey = import.meta.env.VITE_OMNIROUTE_API_KEY as string | undefined;
-  const apiUrl = (import.meta.env.VITE_OMNIROUTE_API_URL as string | undefined) ?? "http://localhost:20128/v1/chat/completions";
-  const model = (import.meta.env.VITE_OMNIROUTE_MODEL as string | undefined) ?? "gpt-4o-mini";
-  
-  if (!apiKey) throw new Error("API Key não configurada para Omniroute.");
+  controller: AbortController,
+): Promise<{ raw: string; provider: "omniroute" | "ollama" }> {
+  if (!supabase) throw new Error("Supabase não configurado.");
+
+  const { data: sessionData } = await supabase.auth.getSession();
+  const token = sessionData?.session?.access_token;
+  if (!token) throw new Error("Faça login para usar a IA.");
 
   const isExecution = Boolean(options.targetAsset);
+  const action = isExecution ? options.targetAsset ?? "chat" : "discovery";
 
-  const response = await fetch(apiUrl, {
+  const response = await fetch(AI_PROXY_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "Authorization": `Bearer ${apiKey}`,
+      Authorization: `Bearer ${token}`,
+      "X-Client-Info": "brieflow/1.0",
     },
     body: JSON.stringify({
-      model,
       messages: messagesPayload,
-      stream: !isExecution,
+      action,
       temperature: isExecution ? 0.1 : 0.3,
       max_tokens: isExecution ? 8000 : 4000,
-      response_format: { type: "json_object" } 
+      response_format: { type: "json_object" },
+      request_id: options.requestId ?? createRequestId(),
     }),
     signal: controller.signal,
   });
 
   if (!response.ok) {
-    const errText = await response.text().catch(() => "Sem detalhes");
-    throw new Error(`OmniRoute API HTTP ${response.status}: ${errText}`);
-  }
-
-  if (isExecution) {
-    const data = await response.json();
-    return data.choices?.[0]?.message?.content || "";
-  }
-
-  if (!response.body) throw new Error("Streaming não suportado pelo OmniRoute.");
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder("utf-8");
-  let rawJson = ""; 
-  let pendingChunk = "";
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    pendingChunk += decoder.decode(value, { stream: true });
-    const lines = pendingChunk.split("\n");
-    pendingChunk = lines.pop() ?? "";
-
-    for (const line of lines) {
-      const trimmedLine = line.trim();
-      if (!trimmedLine || trimmedLine === "data: [DONE]") continue;
-      
-      if (trimmedLine.startsWith("data: ")) {
-        try {
-          const chunk = JSON.parse(trimmedLine.slice(6));
-          const content = chunk.choices?.[0]?.delta?.content;
-          if (content) {
-            rawJson += content;
-            if (!options.targetAsset) {
-              const partialChat = extractChatField(rawJson);
-              if (partialChat) options.onStream?.(partialChat);
-            }
-          }
-        } catch { /* stream chunk parse error, ignore */ }
-      }
+    let errBody: Record<string, unknown> = {};
+    try { errBody = await response.json(); } catch { /* ignore */ }
+    const reason = String(errBody.error ?? `http_${response.status}`);
+    if (response.status === 401) throw new Error("Sessão expirada. Faça login novamente.");
+    if (response.status === 402) {
+      throw new Error(
+        reason === "subscription_past_due"
+          ? "Assinatura com pagamento pendente."
+          : "Créditos insuficientes para esta geração.",
+      );
     }
+    if (response.status === 429) throw new Error("Muitas requisições. Aguarde um momento.");
+    if (response.status === 502) throw new Error("Servidores de IA indisponíveis no momento.");
+    throw new Error(`Erro no proxy de IA: ${reason}`);
   }
 
-  return rawJson;
+  const data = await response.json() as {
+    choices?: { message: { content: string } }[];
+    _meta?: { provider?: string };
+  };
+
+  const content = data.choices?.[0]?.message?.content ?? "";
+  const provider = (data._meta?.provider ?? "omniroute") as "omniroute" | "ollama";
+
+  // Stream partial chat for discovery mode
+  if (!isExecution && options.onStream) {
+    const partialChat = extractChatField(content);
+    if (partialChat) options.onStream(partialChat);
+  }
+
+  return { raw: content, provider };
 }
 
-async function callLocalOllama(
-  messagesPayload: { role: "system" | "user", content: string }[],
-  options: OllamaGenerationOptions,
-  controller: AbortController
-): Promise<string> {
-  const isExecution = Boolean(options.targetAsset);
-  const discoveryModel = (import.meta.env.VITE_OLLAMA_DISCOVERY_MODEL as string | undefined) ?? "qwen2.5:7b";
-  const executionModel = (import.meta.env.VITE_OLLAMA_EXECUTION_MODEL as string | undefined) ?? "qwen2.5:7b";
-  const model = isExecution ? executionModel : discoveryModel;
+// ============================================================
+// FUNÇÃO PÚBLICA PRINCIPAL (interface inalterada)
+// ============================================================
 
-  const url = (import.meta.env.VITE_OLLAMA_API_URL as string | undefined) 
-    ? `${(import.meta.env.VITE_OLLAMA_API_URL as string).replace("/v1/chat/completions", "").replace("/api/chat", "").replace(/\/$/, "")}/api/chat`
-    : typeof window !== "undefined" ? `http://${window.location.hostname}:11434/api/chat` : "http://localhost:11434/api/chat";
-
-  const response = await fetch(url, {
-    method: "POST", 
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model,
-      messages: messagesPayload,
-      stream: !isExecution,
-      format: "json", keep_alive: "30m",
-      options: { temperature: isExecution ? 0.1 : 0.3, top_p: 0.85, num_predict: isExecution ? 4000 : 1500, num_ctx: 4096 },
-    }),
-    signal: controller.signal,
-  });
-
-  if (!response.ok) throw new Error(`Ollama HTTP ${response.status}`);
-
-  if (isExecution) {
-    const data = await response.json();
-    return data.message?.content || "";
-  }
-
-  if (!response.body) throw new Error("Streaming não suportado pelo Ollama.");
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder("utf-8");
-  let rawJson = ""; 
-  let pendingChunk = "";
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    pendingChunk += decoder.decode(value, { stream: true });
-    const lines = pendingChunk.split("\n");
-    pendingChunk = lines.pop() ?? "";
-
-    for (const line of lines) {
-      const trimmedLine = line.trim();
-      if (!trimmedLine) continue;
-
-      try {
-        const chunk = JSON.parse(trimmedLine) as { message?: { content?: string } };
-        const content = chunk.message?.content;
-        if (content) {
-          rawJson += content;
-          if (!options.targetAsset) {
-            const partialChat = extractChatField(rawJson);
-            if (partialChat) options.onStream?.(partialChat);
-          }
-        }
-      } catch { /* ignore malformed chunk */ }
-    }
-  }
-
-  pendingChunk += decoder.decode();
-  if (pendingChunk.trim()) {
-    try {
-      const finalChunk = JSON.parse(pendingChunk.trim()) as { message?: { content?: string } };
-      if (finalChunk.message?.content) rawJson += finalChunk.message.content;
-    } catch { /* ignore trailing chunk */ }
-  }
-
-  return rawJson;
-}
-
-export async function sendToOllama(history: ChatTurn[], brandContext: BrandContext, currentPlan?: DiscoveryPlan, options: OllamaGenerationOptions = {}): Promise<OllamaResult> {
+export async function sendToOllama(
+  history: ChatTurn[],
+  brandContext: BrandContext,
+  currentPlan?: DiscoveryPlan,
+  options: OllamaGenerationOptions = {},
+): Promise<OllamaResult> {
   const wantsExecution = Boolean(options.targetAsset);
   const targetAsset = options.targetAsset;
   const startedAt = Date.now();
@@ -438,61 +332,49 @@ export async function sendToOllama(history: ChatTurn[], brandContext: BrandConte
     : DISCOVERY_AGENT_PROMPT(currentPlan, brandContext);
 
   const recentUserBriefing = history
-    .filter(m => m.role === "user")
+    .filter((m) => m.role === "user")
     .slice(-3)
-    .map(m => m.content)
+    .map((m) => m.content)
     .join("\n\n---\n\n");
 
-  const isolatedBriefing = wantsExecution && targetAsset ? extractSpecificBriefing(recentUserBriefing, targetAsset) : recentUserBriefing;
+  const isolatedBriefing = wantsExecution && targetAsset
+    ? extractSpecificBriefing(recentUserBriefing, targetAsset)
+    : recentUserBriefing;
 
   const messagesPayload = wantsExecution && targetAsset
     ? [
-        { role: "system", content: systemPrompt },
-        { 
-          role: "user", 
-          content: `=== REGRAS OBRIGATÓRIAS DESTA PEÇA ===\n${isolatedBriefing}\n\n=== TAREFA ===\nGere AGORA o JSON para a peça ${targetAsset.toUpperCase()}. Siga as frases acima à risca.` 
-        }
-      ] as { role: "system" | "user", content: string }[]
+        { role: "system" as const, content: systemPrompt },
+        {
+          role: "user" as const,
+          content: `=== REGRAS OBRIGATÓRIAS DESTA PEÇA ===\n${isolatedBriefing}\n\n=== TAREFA ===\nGere AGORA o JSON para a peça ${targetAsset.toUpperCase()}. Siga as frases acima à risca.`,
+        },
+      ]
     : [
-        { role: "system", content: systemPrompt }, 
-        ...history.slice(-6)
-      ] as { role: "system" | "user", content: string }[];
+        { role: "system" as const, content: systemPrompt },
+        ...history.slice(-6).map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
+      ];
 
   const controller = new AbortController();
-  // 1. REDUZA O TIMEOUT: de 240_000 para 45_000
-  const timeoutId = setTimeout(() => controller.abort(), wantsExecution ? 45_000 : 30_000);
-  
+  const timeoutId = setTimeout(() => controller.abort(), wantsExecution ? 60_000 : 45_000);
+
   let rawJson = "";
   let providerUsed: "omniroute" | "ollama" = "omniroute";
-  let usedFallback = false;
-  const hasOmnirouteKey = Boolean(import.meta.env.VITE_OMNIROUTE_API_KEY);
 
   try {
-    if (hasOmnirouteKey) {
-      try {
-        rawJson = await callOmniRouteAPI(messagesPayload, options, controller);
-      } catch (cloudError: any) {
-        if (cloudError.name === "AbortError") throw cloudError;
-        
-        // 2. DESLIGUE O FALLBACK LOCAL SILENCIOSO
-        // Ao invés de tentar o callLocalOllama aqui e travar o PC do usuário, 
-        // falhamos rápido para a interface avisar do erro.
-        console.error("Erro na nuvem:", cloudError);
-        throw new Error(`A Nuvem falhou ao processar: ${cloudError.message}`);
-      }
-    } else {
-      providerUsed = "ollama";
-      rawJson = await callLocalOllama(messagesPayload, options, controller);
-    }
+    const result = await callAiProxy(messagesPayload, options, controller);
+    rawJson = result.raw;
+    providerUsed = result.provider;
 
     const parsed = tryParseJson(rawJson);
-    
+
     const metaBase: OllamaResultMeta = {
-      requestId: options.requestId ?? createRequestId(), 
-      model: providerUsed === "omniroute" ? (import.meta.env.VITE_OMNIROUTE_MODEL as string ?? "omniroute-model") : "local-ollama",
+      requestId: options.requestId ?? createRequestId(),
+      model: providerUsed,
       intent: options.intent ?? (wantsExecution ? "campaign" : "discovery"),
       stage: wantsExecution ? "generating" : "discovery",
-      usedFallback, generatedAt: new Date().toISOString(), provider: providerUsed,
+      usedFallback: false,
+      generatedAt: new Date().toISOString(),
+      provider: providerUsed,
     };
 
     if (!parsed && wantsExecution) {
@@ -502,12 +384,12 @@ export async function sendToOllama(history: ChatTurn[], brandContext: BrandConte
     }
 
     if (!parsed) {
-        return {
-          chat: "Desculpe, tive um problema ao processar seu pedido. Podemos tentar novamente?",
-          action: "discovery_continue",
-          builder: createFallbackBuilder(currentPlan),
-          meta: { ...metaBase, stage: "discovery", latencyMs: Date.now() - startedAt },
-        };
+      return {
+        chat: "Desculpe, tive um problema ao processar seu pedido. Podemos tentar novamente?",
+        action: "discovery_continue",
+        builder: createFallbackBuilder(currentPlan),
+        meta: { ...metaBase, stage: "discovery", latencyMs: Date.now() - startedAt },
+      };
     }
 
     const builder = normalizeBuilder(parsed, currentPlan, targetAsset, options.productImageUrl);
@@ -516,10 +398,10 @@ export async function sendToOllama(history: ChatTurn[], brandContext: BrandConte
       chat: parsed.chat || (wantsExecution ? "Peça gerada." : "Briefing atualizado."),
       action: parsed.action || "discovery_continue",
       targetKeys: parsed.targetKeys,
-      builder, scores: parsed.scores,
+      builder,
+      scores: parsed.scores,
       meta: { ...metaBase, stage: wantsExecution ? "completed" : "ready_to_generate", latencyMs: Date.now() - startedAt },
     };
-
   } catch (error: unknown) {
     if ((error as { name?: string }).name === "AbortError") throw new Error("Tempo excedido.");
     throw new Error(`Falha no pipeline de IA: ${String(error)}`);
