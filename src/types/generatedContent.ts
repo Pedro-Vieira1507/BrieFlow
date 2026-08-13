@@ -1,4 +1,3 @@
-// src/types/generatedContent.ts
 import { z } from "zod";
 import type { BuilderState, CtaVariant } from "./builder";
 import type { MaterialType } from "./brief";
@@ -10,6 +9,15 @@ const looseString = z.preprocess((value) => {
     .replace(/\*\*/g, "")
     .replace(/\r/g, "")
     .replace(/\s+/g, " ")
+    .trim();
+}, z.string());
+
+const looseText = z.preprocess((value) => {
+  if (value === null || value === undefined) return "";
+  const raw = typeof value === "string" ? value : String(value);
+  return raw
+    .replace(/\*\*/g, "")
+    .replace(/\r/g, "")
     .trim();
 }, z.string());
 
@@ -73,11 +81,18 @@ export const EmailCopySchema = designSchema.extend({
   subject: looseString,
   preheader: looseString.default(""),
   headline: looseString.default(""),
-  body: looseString,
+  subtitle: looseString.default(""),
+  body: looseText,
   ctaText: looseString,
   ctaVariant: ctaVariantSchema,
   keyBenefits: looseList.default([]),
   objectionsHandled: looseList.default([]),
+  heroBadge: looseString.default(""),
+  benefitTitle: looseString.default(""),
+  secondaryCta: looseString.default(""),
+  urgencyText: looseString.default(""),
+  testimonial: looseString.default(""),
+  footerInfo: looseString.default(""),
 });
 
 export type LandingCopy = z.infer<typeof LandingCopySchema>;
@@ -99,39 +114,23 @@ export const MATERIAL_SCHEMAS = {
 } as const;
 
 export const SCHEMA_HINTS: Record<MaterialType, string> = {
-  banner: `{
-  "headline": "Benefício principal... (SE HOUVER OFERTA NO BRIEFING, ELA DEVE OBRIGATORIAMENTE APARECER AQUI OU NO SUBHEADLINE)",
-  "subheadline": "1 frase explicando a proposta de valor e para quem",
-  "ctaText": "CTA curto começando por verbo de ação",
-  "ctaVariant": "primary | secondary | urgent | soft",
-  "keyBenefits": ["3 a 4 benefícios em linguagem de resultado, não de feature"],
-  "objectionsHandled": ["2 a 3 objeções reais do público já respondidas em 1 frase cada"],
-  "layoutStyle": "diagonal | split | minimalist | centered",
-  "imagePrompt": "Detailed photography prompt in ENGLISH, no text, no logos",
-  "themeColor": "#HEX vibrante da marca",
-  "secondaryColor": "#HEX de contraste"
-}`,
-  social: `{
-  "hook": "Primeira linha que para o scroll (SE HOUVER OFERTA NO BRIEFING, DEVE APARECER AQUI)",
-  "body": "2 a 4 frases curtas com benefício e prova. Use \\n para quebrar linha",
-  "cta": "Chamada final direta, com verbo de ação",
-  "hashtags": ["#hashtags", "#relevantes", "#obrigatorias"],
-  "imagePrompt": "Detailed photography prompt in ENGLISH, no text, no logos",
-  "themeColor": "#HEX vibrante da marca",
-  "secondaryColor": "#HEX de contraste"
-}`,
-  email: `{
-  "subject": "Assunto de até 45 caracteres (SE HOUVER OFERTA, INCLUA NO ASSUNTO)",
-  "preheader": "Complemento do assunto, sem repetir as mesmas palavras",
-  "headline": "Título dentro do e-mail (SE HOUVER OFERTA, INCLUA AQUI)",
+  banner: `{\n  "headline": "Benefício principal... (SE HOUVER OFERTA NO BRIEFING, ELA DEVE OBRIGATORIAMENTE APARECER AQUI OU NO SUBHEADLINE)",\n  "subheadline": "1 frase explicando a proposta de valor e para quem",\n  "ctaText": "CTA curto começando por verbo de ação",\n  "ctaVariant": "primary | secondary | urgent | soft",\n  "keyBenefits": ["3 a 4 benefícios em linguagem de resultado, não de feature"],\n  "objectionsHandled": ["2 a 3 objeções reais do público já respondidas em 1 frase cada"],\n  "layoutStyle": "diagonal | split | minimalist | centered",\n  "imagePrompt": "Detailed photography prompt in ENGLISH, no text, no logos",\n  "themeColor": "#HEX vibrante da marca",\n  "secondaryColor": "#HEX de contraste"\n}`,
+  social: `{\n  "hook": "Primeira linha que para o scroll (SE HOUVER OFERTA NO BRIEFING, DEVE APARECER AQUI)",\n  "body": "2 a 4 frases curtas com benefício e prova. Use \\n para quebrar linha",\n  "cta": "Chamada final direta, com verbo de ação",\n  "hashtags": ["#hashtags", "#relevantes", "#obrigatorias"],\n  "imagePrompt": "Detailed photography prompt in ENGLISH, no text, no logos",\n  "themeColor": "#HEX vibrante da marca",\n  "secondaryColor": "#HEX de contraste"\n}`,
+  email: `{\n  "subject": "Assunto de até 45 caracteres (SE HOUVER OFERTA, INCLUA NO ASSUNTO)",\n  "preheader": "Complemento do assunto, sem repetir as mesmas palavras",\n  "headline": "Título dentro do e-mail (SE HOUVER OFERTA, INCLUA AQUI)",\n  "subtitle": "1 frase de apoio que reforça o benefício principal",
   "body": "2 a 3 parágrafos persuasivos. Use \\n\\n entre parágrafos",
+  "heroBadge": "Texto curto para badge sobre a imagem (ex: OFERTA RELÂMPAGO, NOVIDADE) ou string vazia",
+  "benefitTitle": "Título da seção de benefícios (ex: Por que você vai amar)",
+  "keyBenefits": ["3 a 4 benefícios em formato de bullet, linguagem de resultado"],
+  "objectionsHandled": ["1 a 2 objeções respondidas em 1 frase"],
+  "urgencyText": "Texto de urgência/escassez curto (ex: Últimas 24 horas) ou string vazia se não houver gatilho real",
+  "testimonial": "Depoimento curto com nome do cliente ou string vazia se não houver prova real",
   "ctaText": "Texto do botão, começando por verbo",
   "ctaVariant": "primary | secondary | urgent | soft",
-  "keyBenefits": ["3 benefícios em formato de bullet"],
-  "objectionsHandled": ["1 a 2 objeções respondidas"],
+  "secondaryCta": "Repetição do CTA no final do e-mail (pode ser igual ao ctaText)",
+  "footerInfo": "Texto adicional do rodapé (ex: Frete grátis, troca em 30 dias) ou string vazia",
   "imagePrompt": "Detailed photography prompt in ENGLISH, no text, no logos",
   "themeColor": "#HEX vibrante da marca",
-  "secondaryColor": "#HEX de contraste"
+  "secondaryColor": "#HEX de contraste"\n}`,
 }`,
 };
 
@@ -188,7 +187,13 @@ export function toBuilderContent<T extends MaterialType>(
       keyBenefits: email.keyBenefits,
       objectionsHandled: email.objectionsHandled,
       emailHeroImagePrompt: copy.imagePrompt,
-    };
+      heroBadge: email.heroBadge,
+      benefitTitle: email.benefitTitle,
+      secondaryCta: email.secondaryCta,
+      urgencyText: email.urgencyText,
+      testimonial: email.testimonial,
+      footerInfo: email.footerInfo,
+    } as BuilderState;
   }
 
   const social = copy as SocialCopy;

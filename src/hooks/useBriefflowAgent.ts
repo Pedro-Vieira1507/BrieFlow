@@ -62,39 +62,31 @@ export function useBriefflowAgent() {
       if (urls.length === 0) return null;
       const targetUrl = urls[0];
       const existing = brandContextRef.current.site;
-      if (existing && targetUrl.length > existing.url.length + 20) return null;
+      if (existing && targetUrl === existing.url) return existing;
+
       setScraping(true);
       try {
         const site = await scrapeWebsite(targetUrl);
-        mergeSiteIntoContext(site);
-        toast.success("Site analisado com sucesso");
-        return site;
+        if (site) {
+          mergeSiteIntoContext(site);
+          return site;
+        }
       } catch {
-        toast.warning("Site protegido contra leituras automáticas");
-        return null;
+        // silent
       } finally {
         setScraping(false);
       }
+      return null;
     },
     [mergeSiteIntoContext, setScraping],
   );
 
   const buildErrorAsset = useCallback(
-    (channel: CampaignChannel, uniqueImages: string[]): CampaignAsset => {
-      const plan = discoveryPlanRef.current;
-      const brand =
-        plan?.brandName ||
-        brandContextRef.current.site?.brandName ||
-        brandContextRef.current.brandName ||
-        "Sua marca";
-      const errorContent: any = {
+    (channel: CampaignChannel, productImages: string[]): CampaignAsset => {
+      const errorContent: BuilderState = {
         type: channel,
-        brandName: brand,
-        themeColor: "#0f172a",
-        secondaryColor: "#475569",
-        productImageUrl: uniqueImages[0] || null,
-        productImages: uniqueImages,
-      };
+        productImages,
+      } as BuilderState;
 
       if (channel === "banner") {
         errorContent.title = "Não consegui gerar este banner";
@@ -102,7 +94,7 @@ export function useBriefflowAgent() {
         errorContent.cta = "Tentar novamente";
       } else if (channel === "email") {
         errorContent.title = "Não consegui gerar este e-mail";
-        errorContent.body = "A requisição excedeu o tempo limite. Você pode pedir para regenerar apenas o e-mail, sem afetar as outras peças.";
+        errorContent.body = "A requisição excedeu o tempo limite. Você pode pedir para regerar apenas o e-mail, sem afetar as outras peças.";
         errorContent.cta = "Tentar novamente";
       } else {
         errorContent.caption = "Não consegui gerar este post. Peça para regenerar somente o social e o restante da campanha permanece intacto.";
@@ -161,7 +153,7 @@ export function useBriefflowAgent() {
           const isAll = safeTargetKeys.length === 0 || safeTargetKeys.some(k =>
               ["all", "tudo", "todos", "geral", "completo"].includes(String(k).toLowerCase())
           );
-          
+
           const allowedKeys = new Set<string>();
           if (!isAll) {
             const normalizedStr = safeTargetKeys.join(" ").toLowerCase();
@@ -173,7 +165,12 @@ export function useBriefflowAgent() {
               caption: ["caption", "legenda", "post", "texto do post"],
               hashtags: ["hashtags", "tags", "marcadores", "palavras", "hashtag"],
               imagePrompt: ["imagePrompt", "imagem", "foto", "arte", "fundo", "background", "ilustração", "visual", "prompt"],
-              themeColor: ["themeColor", "secondaryColor", "color", "cores", "cor", "paleta", "tom", "visual"]
+              themeColor: ["themeColor", "secondaryColor", "color", "cores", "cor", "paleta", "tom", "visual"],
+              heroBadge: ["heroBadge", "badge", "selo", "tag"],
+              benefitTitle: ["benefitTitle", "benefícios", "beneficio", "vantagens"],
+              urgencyText: ["urgencyText", "urgência", "urgencia", "prazo", "escassez"],
+              testimonial: ["testimonial", "depoimento", "prova", "review"],
+              footerInfo: ["footerInfo", "rodapé", "rodape", "frete", "garantia"],
             };
 
             for (const [canonicalKey, synonyms] of Object.entries(schemaMap)) {
@@ -185,7 +182,7 @@ export function useBriefflowAgent() {
             if (allowedKeys.size === 0) {
               toast.error(`Falha ao identificar o campo solicitado. Tente usar termos mais comuns como "título", "botão" ou "cor".`);
               hasErrors = true;
-              continue; 
+              continue;
             }
           }
 
@@ -217,12 +214,19 @@ export function useBriefflowAgent() {
                 hashtags: c.hashtags,
                 imagePrompt: c.imagePrompt,
                 themeColor: c.themeColor,
-                secondaryColor: c.secondaryColor
+                secondaryColor: c.secondaryColor,
+                heroBadge: c.heroBadge,
+                benefitTitle: c.benefitTitle,
+                keyBenefits: c.keyBenefits,
+                secondaryCta: c.secondaryCta,
+                urgencyText: c.urgencyText,
+                testimonial: c.testimonial,
+                footerInfo: c.footerInfo,
               };
-              
+
               Object.keys(safeContext).forEach(key => safeContext[key] === undefined && delete safeContext[key]);
               currentContentContext = `\n\n=== CONTEÚDO ATUAL DA PEÇA ===\nATENÇÃO: Preserve o texto abaixo exatamente como está para todos os campos que o usuário NÃO pediu para alterar:\n${JSON.stringify(safeContext, null, 2)}`;
-            } catch (e) { 
+            } catch (e) {
               console.warn("Falha ao serializar contexto seguro para a IA", e);
             }
           }
@@ -234,7 +238,7 @@ export function useBriefflowAgent() {
             material: channel,
             rawBriefing: rawBriefing,
             images: uniqueImages,
-            provider
+            provider,
           });
 
           updateCampaignAsset(channel, (prevAsset) => {
@@ -247,6 +251,7 @@ export function useBriefflowAgent() {
               if (allowedKeys.has("cta")) {
                 if (content.cta !== undefined) mergedContent.cta = content.cta;
                 if (content.ctaVariant !== undefined) mergedContent.ctaVariant = content.ctaVariant;
+                if (content.secondaryCta !== undefined) mergedContent.secondaryCta = content.secondaryCta;
               }
               if (allowedKeys.has("title")) {
                 if (content.title !== undefined) mergedContent.title = content.title;
@@ -271,6 +276,22 @@ export function useBriefflowAgent() {
                 if (content.themeColor !== undefined) mergedContent.themeColor = content.themeColor;
                 if (content.secondaryColor !== undefined) mergedContent.secondaryColor = content.secondaryColor;
               }
+              if (allowedKeys.has("heroBadge")) {
+                if (content.heroBadge !== undefined) mergedContent.heroBadge = content.heroBadge;
+              }
+              if (allowedKeys.has("benefitTitle")) {
+                if (content.benefitTitle !== undefined) mergedContent.benefitTitle = content.benefitTitle;
+                if (content.keyBenefits !== undefined) mergedContent.keyBenefits = content.keyBenefits;
+              }
+              if (allowedKeys.has("urgencyText")) {
+                if (content.urgencyText !== undefined) mergedContent.urgencyText = content.urgencyText;
+              }
+              if (allowedKeys.has("testimonial")) {
+                if (content.testimonial !== undefined) mergedContent.testimonial = content.testimonial;
+              }
+              if (allowedKeys.has("footerInfo")) {
+                if (content.footerInfo !== undefined) mergedContent.footerInfo = content.footerInfo;
+              }
             }
 
             return {
@@ -281,7 +302,7 @@ export function useBriefflowAgent() {
                 ...mergedContent,
                 type: channel,
                 brandName: content.brandName || plan?.brandName || (prevAsset?.content as any)?.brandName,
-                productImages: uniqueImages, 
+                productImages: uniqueImages,
               },
             };
           });
@@ -322,10 +343,9 @@ export function useBriefflowAgent() {
 
   const handleSend = useCallback(
     async (text: string, isHiddenAction = false) => {
-      // 1. DEDUZ OS PLANOS E O PROVEDOR DE IA
-      const currentPlan = useCreditsStore.getState().plan?.plan || 'free';
-      const isPro = currentPlan === 'pro' || currentPlan === 'agency';
-      const provider = isPro ? 'omniroute' : 'ollama';
+      const currentPlan = useCreditsStore.getState().plan?.plan || "free";
+      const isPro = currentPlan === "pro" || currentPlan === "agency";
+      const provider = isPro ? "omniroute" : "ollama";
 
       const tryScrapeProduct = async (
         skuOrUrl: string,
@@ -458,7 +478,6 @@ export function useBriefflowAgent() {
 
       setLoading(true);
 
-      // 2. CONTROLE DA FILA COM TICKET ÚNICO
       const ticketId = uid();
       if (!isPro) {
         await enqueueOllama(ticketId);
@@ -533,7 +552,7 @@ export function useBriefflowAgent() {
         }
       } finally {
         if (!isPro) {
-          await dequeueOllama(ticketId); // Libera a máquina Local
+          await dequeueOllama(ticketId);
         }
         setLoading(false);
       }
@@ -548,7 +567,7 @@ export function useBriefflowAgent() {
       setMessages,
       updateMessage,
       enqueueOllama,
-      dequeueOllama
+      dequeueOllama,
     ],
   );
 

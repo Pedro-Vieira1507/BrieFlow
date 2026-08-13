@@ -1,4 +1,3 @@
-// src/types/builder.ts
 export type BuilderType =
   | "email"
   | "social"
@@ -19,20 +18,9 @@ export interface DiscoveryPlan {
   websiteUrl?: string;
   productSku?: string | null;
 
-  // --- Contexto de produto (opcional) -------------------------------------
-  // Preenchido hoje pelo scraping e, no futuro, por:
-  //  (a) um serviço de "link preview" (og:image / og:title / og:description)
-  //      a partir de `productUrl`;
-  //  (b) upload manual de imagem pelo usuário -> `productImageUrl`.
-  // Quando presentes, `marketingPrompts.ts` injeta uma seção dedicada no
-  // prompt para que a copy fique coerente com a imagem/produto.
-  /** URL da página do produto (entrada do futuro link preview). */
   productUrl?: string | null;
-  /** URL da imagem principal do produto. */
   productImageUrl?: string | null;
-  /** Título do produto. */
   productTitle?: string | null;
-  /** Descrição curta do produto. */
   productDescription?: string | null;
 }
 
@@ -47,7 +35,6 @@ export interface BannerContent {
   imageSeed?: number;
   productImageUrl?: string | null;
   productSku?: string | null;
-  // Campos de Design Dinâmico
   themeColor?: string;
   secondaryColor?: string;
   layoutStyle?: "diagonal" | "split" | "minimalist" | "centered";
@@ -66,9 +53,14 @@ export interface EmailContent {
   imageSeed?: number;
   productImageUrl?: string | null;
   productSku?: string | null;
-  // Campos de Design Dinâmico
   themeColor?: string;
   secondaryColor?: string;
+  heroBadge?: string;
+  benefitTitle?: string;
+  secondaryCta?: string;
+  urgencyText?: string;
+  testimonial?: string;
+  footerInfo?: string;
 }
 
 export interface SocialContent {
@@ -80,14 +72,12 @@ export interface SocialContent {
   imageSeed?: number;
   productImageUrl?: string | null;
   productSku?: string | null;
-  // Campos de Design Dinâmico
   themeColor?: string;
   secondaryColor?: string;
 }
 
 export type AssetContent = BannerContent | EmailContent | SocialContent;
 
-/** Intenção visual/semântica do CTA — usada pelos componentes de preview. */
 export type CtaVariant = "primary" | "secondary" | "urgent" | "soft";
 
 
@@ -103,8 +93,6 @@ export interface BuilderState {
   imageSeed?: number;
   campaignAssets?: CampaignAsset[];
   discoveryPlan?: DiscoveryPlan;
-  // Copy estruturada (ver src/types/generatedContent.ts). Permite que os
-  // componentes montem layouts premium apenas plugando o JSON da IA.
   hook?: string;
   ctaVariant?: CtaVariant;
   keyBenefits?: string[];
@@ -123,6 +111,14 @@ export interface BuilderState {
   imagePosX?: number;
   imagePosY?: number;
   imageScale?: number;
+
+  // Rich email fields (iFood-level composition)
+  heroBadge?: string;
+  benefitTitle?: string;
+  secondaryCta?: string;
+  urgencyText?: string;
+  testimonial?: string;
+  footerInfo?: string;
 }
 
 export interface SiteBrandData {
@@ -134,7 +130,7 @@ export interface SiteBrandData {
   bodySnippet: string;
   ogImage?: string;
   keywords?: string;
-  colors?: string[]; // Cores extraídas do site
+  colors?: string[];
 }
 
 export interface BrandContext {

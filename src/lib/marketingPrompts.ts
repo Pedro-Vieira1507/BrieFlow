@@ -1,4 +1,3 @@
-// src/lib/marketingPrompts.ts
 import { formatSiteContextForAgent } from "@/lib/scrape-site";
 import { SCHEMA_HINTS } from "@/types/generatedContent";
 import {
@@ -32,9 +31,7 @@ export const COPY_QUALITY_RULES = `PADRÃO DE QUALIDADE (checklist de conversão
 
 const OUTPUT_CONTRACT = `FORMATO DE SAÍDA:
 - Responda EXCLUSIVAMENTE com um objeto JSON válido, sem texto ao redor.
-- Sem markdown, sem crases, sem comentários.
-- Nunca use Enter dentro de strings: escreva os caracteres \\n quando precisar quebrar linha.
-- Preencha TODOS os campos do schema. Se faltar dado, escreva algo verdadeiro e genérico o suficiente – nunca copie a instrução do schema como valor.`;
+- Sem markdown, sem crases, sem comentários. Apenas o JSON.`;
 
 export const CHANNEL_PLAYBOOKS: Record<MarketingChannel, string> = {
   landing: `CANAL – LANDING PAGE / BANNER:
@@ -52,10 +49,23 @@ export const CHANNEL_PLAYBOOKS: Record<MarketingChannel, string> = {
   facebook: `CANAL – FACEBOOK:
 - Linguagem coloquial e concreta, foco em benefício imediato e prova.
 - Texto médio, com CTA explícito no final. 2 a 4 hashtags no máximo.`,
-  email: `CANAL – E-MAIL:
-- Assunto curto (até 45 caracteres) com benefício; preheader complementa (não repete).
-- Primeiro parágrafo entrega o valor; os seguintes sustentam com prova e detalhe.
-- Um único botão de CTA, repetido no máximo duas vezes.`,
+  email: `CANAL – E-MAIL MARKETING (padrão iFood/Amazon):
+- O e-mail é uma CARTA DE VENDAS em miniatura, não um aviso genérico.
+- ASSUNTO: até 45 caracteres, com o benefício ou oferta. Preheader complementa sem repetir.
+- HERO BADGE: se houver oferta, preencha com um selo curto (ex: "OFERTA RELÂMPAGO", "NOVIDADE", "ÚLTIMA CHANCE"). Se não houver, deixe vazio.
+- HEADLINE: título dentro do e-mail. Deve entregar o benefício principal ou a oferta.
+- SUBTITLE: 1 frase de apoio que reforça o benefício e cria conexão emocional.
+- BODY: 2 a 3 parágrafos persuasivos. Primeiro parágrafo entrega o valor. Segundo sustenta com prova ou detalhe. Terceiro prepara o CTA.
+- BENEFIT TITLE: título curto para a seção de benefícios (ex: "Por que você vai amar", "O que muda pra você").
+- KEY BENEFITS: 3 a 4 benefícios em bullets, cada um em linguagem de resultado (não de feature).
+- OBJECTIONS: 1 a 2 objeções reais respondidas em 1 frase cada.
+- URGENCY TEXT: se houver gatilho real (prazo, estoque limitado), preencha (ex: "Últimas 24 horas", "Restam poucas unidades"). Se não houver, deixe vazio.
+- TESTIMONIAL: se houver depoimento real no briefing, use. Se não houver, deixe vazio — NUNCA invente.
+- CTA TEXT: verbo de ação + benefício (ex: "Quero meu desconto", "Garantir agora").
+- SECONDARY CTA: repita o CTA no final do e-mail para reforçar a ação.
+- FOOTER INFO: informações práticas que reduzem atrito (ex: "Frete grátis", "Troca em 30 dias", "Pagamento seguro"). Se não houver, deixe vazio.
+- ESTRUTURA VISUAL: o e-mail deve ter ritmo — hero impactante, headline, body, benefícios em cards, oferta destacada, CTA, prova/urgência, CTA secundário, footer.
+- PROIBIDO: e-mail de parágrafo único sem hierarquia. O e-mail precisa respirar com seções distintas.`,
   whatsapp: `CANAL – WHATSAPP:
 - Mensagem curta, pessoal, tratamento direto. Uma pergunta ou um CTA, nunca os dois.`,
   generic: `CANAL – MULTICANAL:
@@ -94,9 +104,8 @@ function offerSection(brief: MarketingBrief): string {
 function productSection(brief: MarketingBrief): string {
   if (!hasProductContext(brief)) return "";
 
-  // BLINDAGEM: Identifica se a URL é um código Base64 gigante e oculta da IA!
-  const safeImgUrl = brief.productImageUrl?.startsWith("data:image") 
-    ? "[Imagem salva pelo usuário - Ignore o link e gere os textos perfeitamente]" 
+  const safeImgUrl = brief.productImageUrl?.startsWith("data:image")
+    ? "[Imagem salva pelo usuário - Ignore o link e gere os textos perfeitamente]"
     : brief.productImageUrl;
 
   const lines = [
@@ -108,58 +117,19 @@ function productSection(brief: MarketingBrief): string {
       : null,
   ].filter((line): line is string => line !== null);
 
-  return `
-=== PRODUTO EM DESTAQUE ===
-${lines.join("\n")}
-
-Instruções:
-- A copy deve ser COERENTE com este produto e com a imagem que aparecerá na peça.
-- Descreva benefícios plausíveis para ESTE produto; não fale de outra categoria.
-- Não descreva a imagem em palavras ("veja a foto"); a copy complementa o visual.
-- No campo "imagePrompt", crie uma cena que CONVIVA com a foto do produto (fundo, ambiente, iluminação) em vez de disputar o mesmo espaço.`;
+  return `\n=== PRODUTO EM DESTAQUE ===\n${lines.join("\n")}\n\nInstruções:\n- A copy deve ser COERENTE com este produto e com a imagem que aparecerá na peça.\n- Descreva benefícios plausíveis para ESTE produto; não fale de outra categoria.\n- Não descreva a imagem em palavras ("veja a foto"); a copy complementa o visual.\n- No campo "imagePrompt", crie uma cena que CONVIVA com a foto do produto (fundo, ambiente, iluminação) em vez de disputar o mesmo espaço.`;
 }
 
 function literalRequirementsSection(brief: MarketingBrief): string {
   if (!brief.context) return "";
-  return `
-=== EXIGÊNCIAS LITERAIS DO CLIENTE (prioridade máxima) ===
-${brief.context}
-
-Se o cliente enviou textos exatos (títulos, legendas, hashtags), TRANSCREVA palavra por palavra. Não resuma, não reescreva, não "melhore".`;
+  return `\n=== EXIGÊNCIAS LITERAIS DO CLIENTE (prioridade máxima) ===\n${brief.context}\n\nSe o cliente enviou textos exatos (títulos, legendas, hashtags), TRANSCREVA palavra por palavra. Não resuma, não reescreva, não "melhore".`;
 }
 
 export function buildDiscoveryPrompt(
   brief: MarketingBrief,
   latestMessage: string,
 ): PromptPair {
-  const system = `Você é o BrieFlow Creative Director: diretor de criação e estrategista sênior de performance.
-Sua tarefa nesta fase é ENTENDER o briefing, não gerar peças finais.
-
-${BRAND_VOICE}
-
-${brandSection(brief)}
-
-${productSection(brief)}
-
-REGRAS:
-- "productSku" só é preenchido se o usuário enviar link DIRETO de UM produto.
-- Retenção literal: transcreva em "detectedContext" toda exigência exata de copy.
-- Confirme o que entendeu e pergunte se pode gerar as peças.
-
-${OUTPUT_CONTRACT}
-
-SCHEMA:
-{
-  "chat": "Resposta humana confirmando o que captou e perguntando se pode gerar.",
-  "discoveryPlan": {
-    "detectedContext": "Exigências literais do cliente ou resumo fiel do briefing",
-    "offer": "Oferta/cupom mencionado, ou null",
-    "missingInfo": "O que ainda falta descobrir",
-    "proposedStrategy": "Estratégia baseada apenas nos fatos do briefing",
-    "brandName": "Nome oficial da marca",
-    "productSku": "SKU ou URL direta de produto, ou null"
-  }
-}`;
+  const system = `Você é o BrieFlow Creative Director: diretor de criação e estrategista sênior de performance.\nSua tarefa nesta fase é ENTENDER o briefing, não gerar peças finais.\n\n${BRAND_VOICE}\n\n${brandSection(brief)}\n\n${productSection(brief)}\n\nREGRAS:\n- "productSku" só é preenchido se o usuário enviar link DIRETO de UM produto.\n- Retenção literal: transcreva em "detectedContext" toda exigência exata de copy.\n- Confirme o que entendeu e pergunte se pode gerar as peças.\n\n${OUTPUT_CONTRACT}\n\nSCHEMA:\n{\n  "chat": "Resposta humana confirmando o que captou e perguntando se pode gerar.",\n  "discoveryPlan": {\n    "detectedContext": "Exigências literais do cliente ou resumo fiel do briefing",\n    "offer": "Oferta/cupom mencionado, ou null",\n    "missingInfo": "O que ainda falta descobrir",\n    "proposedStrategy": "Estratégia baseada apenas nos fatos do briefing",\n    "brandName": "Nome oficial da marca",\n    "productSku": "SKU ou URL direta de produto, ou null"\n  }\n}`;
   return { system, user: latestMessage };
 }
 
@@ -175,27 +145,7 @@ export function buildMaterialPrompt(
 ): PromptPair {
   const channel = options.channel ?? MATERIAL_CHANNEL[material];
 
-  const system = `Você é o BrieFlow Art Director & Copywriter sênior, especialista em copy de alta conversão.
-Sua tarefa: produzir a peça ${material.toUpperCase()} para o canal ${channel.toUpperCase()}.
-
-${BRAND_VOICE}
-
-${COPY_QUALITY_RULES}
-
-${CHANNEL_PLAYBOOKS[channel]}
-
-${brandSection(brief)}
-
-${offerSection(brief)}
-
-${productSection(brief)}
-
-${literalRequirementsSection(brief)}
-
-${OUTPUT_CONTRACT}
-
-SCHEMA JSON OBRIGATÓRIO:
-${SCHEMA_HINTS[material]}`;
+  const system = `Você é o BrieFlow Art Director & Copywriter sênior, especialista em copy de alta conversão.\nSua tarefa: produzir a peça ${material.toUpperCase()} para o canal ${channel.toUpperCase()}.\n\n${BRAND_VOICE}\n\n${COPY_QUALITY_RULES}\n\n${CHANNEL_PLAYBOOKS[channel]}\n\n${brandSection(brief)}\n\n${offerSection(brief)}\n\n${productSection(brief)}\n\n${literalRequirementsSection(brief)}\n\n${OUTPUT_CONTRACT}\n\nSCHEMA JSON OBRIGATÓRIO:\n${SCHEMA_HINTS[material]}`;
 
   const briefing =
     options.channelBriefing?.trim() ||
@@ -203,12 +153,7 @@ ${SCHEMA_HINTS[material]}`;
     brief.strategy?.trim() ||
     "Sem briefing adicional: use os dados da marca acima.";
 
-  const user = `=== BRIEFING DESTA PEÇA ===
-${briefing}
-
-=== TAREFA ===
-Gere AGORA o JSON da peça ${material.toUpperCase()} para ${channel.toUpperCase()}.
-Cada campo deve conter copy final, pronta para publicar.`;
+  const user = `=== BRIEFING DESTA PEÇA ===\n${briefing}\n\n=== TAREFA ===\nGere AGORA o JSON da peça ${material.toUpperCase()} para ${channel.toUpperCase()}.\nCada campo deve conter copy final, pronta para publicar.`;
 
   return { system, user };
 }
