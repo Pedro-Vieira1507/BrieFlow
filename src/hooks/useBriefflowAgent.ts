@@ -22,6 +22,7 @@ import type {
 
 type CampaignChannel = "banner" | "email" | "social";
 const ALL_CHANNELS: CampaignChannel[] = ["banner", "email", "social"];
+
 const CHANNEL_LABEL: Record<CampaignChannel, string> = {
   banner: "Banner",
   email: "E-mail",
@@ -49,6 +50,7 @@ export function useBriefflowAgent() {
   } = useBriefflowStore();
 
   const { generateMaterial } = useGenerateMaterials();
+
   const discoveryPlanRef = useRef<DiscoveryPlan | undefined>(undefined);
   const scrapedProductsRef = useRef<ScrapedProductData[]>([]);
   const brandContextRef = useRef(brandContext);
@@ -61,6 +63,7 @@ export function useBriefflowAgent() {
       const urls = extractUrlsFromText(text);
       if (urls.length === 0) return null;
       const targetUrl = urls[0];
+
       const existing = brandContextRef.current.site;
       if (existing && targetUrl === existing.url) return existing;
 
@@ -90,14 +93,14 @@ export function useBriefflowAgent() {
 
       if (channel === "banner") {
         errorContent.title = "Não consegui gerar este banner";
-        errorContent.subtitle = "A resposta da IA foi interrompida. Peça para gerar novamente ou refine o briefing.";
+        errorContent.subtitle = "A resposta da IA foi interrompida. Peça para gerar novamente.";
         errorContent.cta = "Tentar novamente";
       } else if (channel === "email") {
         errorContent.title = "Não consegui gerar este e-mail";
-        errorContent.body = "A requisição excedeu o tempo limite. Você pode pedir para regerar apenas o e-mail, sem afetar as outras peças.";
+        errorContent.body = "A requisição excedeu o tempo limite. Tente novamente.";
         errorContent.cta = "Tentar novamente";
       } else {
-        errorContent.caption = "Não consegui gerar este post. Peça para regenerar somente o social e o restante da campanha permanece intacto.";
+        errorContent.caption = "Não consegui gerar este post. Peça para regenerar.";
         errorContent.hashtags = [];
       }
 
@@ -120,6 +123,7 @@ export function useBriefflowAgent() {
           : undefined);
 
       const channels: CampaignChannel[] = only ? [only] : ALL_CHANNELS;
+
       setLoading(true);
 
       const allImages = [
@@ -167,22 +171,14 @@ export function useBriefflowAgent() {
               imagePrompt: ["imagePrompt", "imagem", "foto", "arte", "fundo", "background", "ilustração", "visual", "prompt"],
               themeColor: ["themeColor", "secondaryColor", "color", "cores", "cor", "paleta", "tom", "visual"],
               heroBadge: ["heroBadge", "badge", "selo", "tag"],
-              benefitTitle: ["benefitTitle", "benefícios", "beneficio", "vantagens"],
-              urgencyText: ["urgencyText", "urgência", "urgencia", "prazo", "escassez"],
-              testimonial: ["testimonial", "depoimento", "prova", "review"],
-              footerInfo: ["footerInfo", "rodapé", "rodape", "frete", "garantia"],
+              badgePrimary: ["badgePrimary", "badge", "selo", "destaque", "desconto", "oferta"],
+              badgeSecondary: ["badgeSecondary", "badge secundário", "selo secundário"],
             };
 
             for (const [canonicalKey, synonyms] of Object.entries(schemaMap)) {
               if (synonyms.some(syn => normalizedStr.includes(syn))) {
                 allowedKeys.add(canonicalKey);
               }
-            }
-
-            if (allowedKeys.size === 0) {
-              toast.error(`Falha ao identificar o campo solicitado. Tente usar termos mais comuns como "título", "botão" ou "cor".`);
-              hasErrors = true;
-              continue;
             }
           }
 
@@ -215,23 +211,21 @@ export function useBriefflowAgent() {
                 imagePrompt: c.imagePrompt,
                 themeColor: c.themeColor,
                 secondaryColor: c.secondaryColor,
-                heroBadge: c.heroBadge,
-                benefitTitle: c.benefitTitle,
-                keyBenefits: c.keyBenefits,
-                secondaryCta: c.secondaryCta,
-                urgencyText: c.urgencyText,
-                testimonial: c.testimonial,
-                footerInfo: c.footerInfo,
               };
-
-              Object.keys(safeContext).forEach(key => safeContext[key] === undefined && delete safeContext[key]);
               currentContentContext = `\n\n=== CONTEÚDO ATUAL DA PEÇA ===\nATENÇÃO: Preserve o texto abaixo exatamente como está para todos os campos que o usuário NÃO pediu para alterar:\n${JSON.stringify(safeContext, null, 2)}`;
             } catch (e) {
               console.warn("Falha ao serializar contexto seguro para a IA", e);
             }
           }
 
-          const rawBriefing = (baseHistory[baseHistory.length - 1]?.content || "") + currentContentContext;
+          // CORREÇÃO CRÍTICA AQUI: Puxando as últimas mensagens do usuário para não perder contexto
+          const recentUserBriefing = baseHistory
+            .filter((m) => m.role === "user")
+            .slice(-4)
+            .map((m) => m.content)
+            .join("\n\n---\n\n");
+
+          const rawBriefing = recentUserBriefing + currentContentContext;
 
           const { content } = await generateMaterial({
             brief,
@@ -248,50 +242,13 @@ export function useBriefflowAgent() {
             if (isAll || !prevAsset) {
               mergedContent = { ...prevContent, ...content };
             } else {
-              if (allowedKeys.has("cta")) {
-                if (content.cta !== undefined) mergedContent.cta = content.cta;
-                if (content.ctaVariant !== undefined) mergedContent.ctaVariant = content.ctaVariant;
-                if (content.secondaryCta !== undefined) mergedContent.secondaryCta = content.secondaryCta;
-              }
-              if (allowedKeys.has("title")) {
-                if (content.title !== undefined) mergedContent.title = content.title;
-              }
-              if (allowedKeys.has("subtitle")) {
-                if (content.subtitle !== undefined) mergedContent.subtitle = content.subtitle;
-              }
-              if (allowedKeys.has("body")) {
-                if (content.body !== undefined) mergedContent.body = content.body;
-              }
-              if (allowedKeys.has("caption")) {
-                if (content.caption !== undefined) mergedContent.caption = content.caption;
-              }
-              if (allowedKeys.has("hashtags")) {
-                if (content.hashtags !== undefined) mergedContent.hashtags = content.hashtags;
-              }
-              if (allowedKeys.has("imagePrompt")) {
-                if (content.imagePrompt !== undefined) mergedContent.imagePrompt = content.imagePrompt;
-                if (content.emailHeroImagePrompt !== undefined) mergedContent.emailHeroImagePrompt = content.emailHeroImagePrompt;
-              }
-              if (allowedKeys.has("themeColor")) {
-                if (content.themeColor !== undefined) mergedContent.themeColor = content.themeColor;
-                if (content.secondaryColor !== undefined) mergedContent.secondaryColor = content.secondaryColor;
-              }
-              if (allowedKeys.has("heroBadge")) {
-                if (content.heroBadge !== undefined) mergedContent.heroBadge = content.heroBadge;
-              }
-              if (allowedKeys.has("benefitTitle")) {
-                if (content.benefitTitle !== undefined) mergedContent.benefitTitle = content.benefitTitle;
-                if (content.keyBenefits !== undefined) mergedContent.keyBenefits = content.keyBenefits;
-              }
-              if (allowedKeys.has("urgencyText")) {
-                if (content.urgencyText !== undefined) mergedContent.urgencyText = content.urgencyText;
-              }
-              if (allowedKeys.has("testimonial")) {
-                if (content.testimonial !== undefined) mergedContent.testimonial = content.testimonial;
-              }
-              if (allowedKeys.has("footerInfo")) {
-                if (content.footerInfo !== undefined) mergedContent.footerInfo = content.footerInfo;
-              }
+              if (allowedKeys.has("cta") && content.cta !== undefined) mergedContent.cta = content.cta;
+              if (allowedKeys.has("title") && content.title !== undefined) mergedContent.title = content.title;
+              if (allowedKeys.has("subtitle") && content.subtitle !== undefined) mergedContent.subtitle = content.subtitle;
+              if (allowedKeys.has("imagePrompt") && content.imagePrompt !== undefined) mergedContent.imagePrompt = content.imagePrompt;
+              if (allowedKeys.has("themeColor") && content.themeColor !== undefined) mergedContent.themeColor = content.themeColor;
+              if (allowedKeys.has("badgePrimary") && content.badgePrimary !== undefined) mergedContent.badgePrimary = content.badgePrimary;
+              if (allowedKeys.has("badgeSecondary") && content.badgeSecondary !== undefined) mergedContent.badgeSecondary = content.badgeSecondary;
             }
 
             return {
@@ -306,6 +263,7 @@ export function useBriefflowAgent() {
               },
             };
           });
+
         } catch (err) {
           console.error(`Erro ao gerar ${channel}:`, describeAiError(err), err);
           hasErrors = true;
@@ -318,11 +276,11 @@ export function useBriefflowAgent() {
       updateMessage(assistantId, {
         content: hasErrors
           ? only
-            ? `Não consegui regerar o ${CHANNEL_LABEL[only]} agora. Tente novamente em instantes.`
-            : "Processo concluído, mas uma ou mais peças falharam. Você pode pedir para regenerar peças individualmente."
+            ? `Não consegui regerar o ${CHANNEL_LABEL[only]} agora. Tente novamente.`
+            : "Processo concluído, mas uma ou mais peças falharam. Você pode pedir para regenerar."
           : only
           ? `${CHANNEL_LABEL[only]} atualizado com sucesso.`
-          : "Campanha finalizada! Navegue pelas abas ao lado e arraste seus produtos livremente.",
+          : "Campanha finalizada! Navegue pelas abas ao lado.",
       });
 
       setGeneratingLabel(undefined);
@@ -370,12 +328,11 @@ export function useBriefflowAgent() {
               isHomepage = true;
           } catch { /* noop */ }
         }
-
         if (isHomepage) return;
+
         if (!isUrl && !brandContextRef.current.site?.url) return;
 
         setLoading(true);
-
         try {
           let productData: ScrapedProductData = {
             sku: value,
@@ -387,61 +344,24 @@ export function useBriefflowAgent() {
             found: false,
           };
 
-          const vLower = value.toLowerCase();
-          if (
-            vLower.includes("nike.com") ||
-            vLower.includes("motorola.com") ||
-            vLower.includes("samsung.com")
-          ) {
-            await new Promise((r) => setTimeout(r, 1500));
-            productData = {
-              sku: value,
-              name: vLower.includes("motorola")
-                ? "Smartphone Motorola Edge"
-                : vLower.includes("samsung")
-                ? "Galaxy Z Fold"
-                : "Produto Nike",
-              price: "R$ 499,90",
-              availability: "Disponível",
-              imageUrl: vLower.includes("motorola")
-                ? "https://motorolaobr.vtexassets.com/arquivos/ids/165147/Motorola_Edge_50_Ultra_Peach_Fuzz_1_900x900.png"
-                : vLower.includes("samsung")
-                ? "https://images.samsung.com/is/image/samsung/p6pim/br/2407/gallery/br-galaxy-z-fold6-f956-sm-f956bzakzto-thumb-542302324?$344_344_PNG$"
-                : "https://images.lojanike.com.br/1024x1024/produto/tenis-nike-revolution-7-masculino-FB2207-001-1-11696256950.JPG",
-              productUrl: value,
-              found: true,
-            };
-          } else {
-            productData = isUrl
-              ? await scrapeProductByUrlFn(value)
-              : await scrapeProductBySkuFn(value);
-          }
+          productData = isUrl
+            ? await scrapeProductByUrlFn(value)
+            : await scrapeProductBySkuFn(value);
 
           if (productData.found && productData.imageUrl) {
             scrapedProductsRef.current = [
               ...scrapedProductsRef.current,
               productData,
             ];
-
             if (!hidden) {
               const pName = productData.name ? "*" + productData.name + "*\n" : "";
               const pImg = "![Imagem](" + productData.imageUrl + ")\n\n";
-              const pFooter =
-                "*(Ele já está salvo e pronto para ser arrastado no seu Canvas)*";
-
               appendMessage({
                 id: uid(),
                 role: "assistant",
-                content:
-                  "✨ **Produto extraído com sucesso!**\n" + pName + pImg + pFooter,
+                content: "✅ **Produto extraído!**\n" + pName + pImg,
               });
             }
-          } else if (!hidden && !isUrl) {
-            appendMessage({
-              id: uid(),
-              role: "assistant",
-              content: `A busca por **${value}** não retornou imagem. Pode me passar o link direto?`,
-            });
           }
         } catch {
           // silencioso
@@ -477,7 +397,6 @@ export function useBriefflowAgent() {
       }));
 
       setLoading(true);
-
       const ticketId = uid();
       if (!isPro) {
         await enqueueOllama(ticketId);
@@ -539,15 +458,13 @@ export function useBriefflowAgent() {
           await generateCampaignSafely(history, "email", targetKeys, provider);
         } else if (action === "generate_social") {
           await generateCampaignSafely(history, "social", targetKeys, provider);
-        } else if (action === "cancel") {
-          // Fluxo cancelado pelo LLM. Sem transição de estado da UI.
         }
+
       } catch (err) {
         toast.error("Falha ao processar", { description: String(err) });
         if (!isHiddenAction) {
           updateMessage(assistantId, {
-            content:
-              "Tive uma falha ao processar. Pode tentar reformular ou me mandar de novo?",
+            content: "Tive uma falha ao processar. Pode tentar reformular?",
           });
         }
       } finally {

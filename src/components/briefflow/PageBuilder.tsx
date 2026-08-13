@@ -7,12 +7,18 @@ import { useBriefflowStore } from "@/store/briefflow";
 import { isSupabaseConfigured, saveAssetToLibrary } from "@/lib/supabase";
 import { buildPollinationsUrl } from "@/lib/pollinations";
 import { cleanText, isEmptyLike } from "@/lib/sanitize";
+
 import { BuilderHeader } from "./builder/BuilderHeader";
 import { GeneratingBanner } from "./builder/GeneratingBanner";
-import { CampaignTabs } from "./builder/CampaignTabs";
+// Importamos o preview aqui
+import { BannerPreview } from "./BannerPreview";
+import { EmailPreview } from "./EmailPreview";
+import { SocialPreview } from "./SocialPreview";
+
 import { DiscoveryPlanView } from "./builder/DiscoveryPlanView";
 import { BuilderEmptyState } from "./builder/BuilderEmptyState";
 import type { BuilderState, CampaignAsset } from "@/types/builder";
+
 import {
   AlertDialog,
   AlertDialogAction,
@@ -26,7 +32,8 @@ import {
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
-import { Loader2 } from "lucide-react";
+import { Loader2, Monitor, Mail, Instagram } from "lucide-react";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 interface Props {
   onRefine: (prompt: string) => void;
@@ -42,15 +49,19 @@ export function PageBuilder({ onRefine, onOpenSettings }: Props) {
     patchBuilder,
     setBuilder,
   } = useBriefflowStore();
-  
+
   const [activeTab, setActiveTab] = useState<CampaignAsset["type"]>("banner");
   const [isSaving, setIsSaving] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  
+  // Controle de layout para injeção no BannerPreview na hora de exportar
+  const [exportConfig, setExportConfig] = useState<{ width: number; height: number; isMobile: boolean } | null>(null);
+
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [exportFormat, setExportFormat] = useState("png");
   const [exportW, setExportW] = useState("1200");
-  const [exportH, setExportH] = useState("300");
-  
+  const [exportH, setExportH] = useState("600");
+
   const isSavingRef = useRef(false);
   const isExportingRef = useRef(false);
 
@@ -75,12 +86,14 @@ export function PageBuilder({ onRefine, onOpenSettings }: Props) {
       toast.error("Acesso restrito", { description: "Faça login no perfil no topo da tela para salvar sua campanha." });
       return;
     }
+
     if (isSavingRef.current) return;
     
     isSavingRef.current = true;
     setIsSaving(true);
     await new Promise((resolve) => setTimeout(resolve, 150));
     const toastId = toast.loading("Salvando campanha na biblioteca...");
+
     try {
       await saveAssetToLibrary("Campanha AI", builder);
       toast.success("Salvo na biblioteca com sucesso!", { id: toastId });
@@ -95,7 +108,7 @@ export function PageBuilder({ onRefine, onOpenSettings }: Props) {
   const handleExportClick = () => {
     if (activeTab === "banner") {
       setExportW("1200");
-      setExportH("300");
+      setExportH("600");
       setExportDialogOpen(true);
     } else {
       executeExport();
@@ -124,49 +137,61 @@ export function PageBuilder({ onRefine, onOpenSettings }: Props) {
 
     try {
       if (activeTab === "banner") {
-        toastId = toast.loading("Processando responsividade e capturando...");
-        const bannerElement = document.getElementById("banner-export-node");
-        const innerElement = document.getElementById("banner-inner-wrapper");
+        toastId = toast.loading("Aplicando inteligência de layout...");
+        const targetWidth = parseInt(exportW) || 1200;
+        const targetHeight = parseInt(exportH) || 600;
         
-        if (!bannerElement || !innerElement) {
+        // CÁLCULO BOOTSTRAP:
+        // Se a largura pedida for menor que a altura (retrato), forçamos o React
+        // a empilhar os elementos e crescer a fonte adicionando a classe "force-mobile".
+        const isMobileExport = targetWidth <= targetHeight;
+        
+        // Ajustamos a base do DOM para o HTML2Canvas não amassar os paddings em telas hiperestreitas.
+        let domWidth = 1200;
+        if (isMobileExport) {
+           domWidth = 450; 
+        } else if (targetWidth / targetHeight <= 1.2) {
+           domWidth = 800; // Quadrados / Feeds
+        } else {
+           domWidth = 1200; // Paisagem / Capas
+        }
+        
+        const domHeight = domWidth / (targetWidth / targetHeight);
+        
+        setExportConfig({ width: domWidth, height: domHeight, isMobile: isMobileExport });
+
+        // Dá tempo do React adicionar a classe .force-mobile no BannerPreview e o Tailwind calcular
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        
+        const bannerElement = document.getElementById("banner-export-node");
+        
+        if (!bannerElement) {
           toast.error("Erro: Banner não encontrado na tela.", { id: toastId });
-          setIsExportingRef.current = false;
+          isExportingRef.current = false;
           setIsExporting(false);
           setExportDialogOpen(false);
+          setExportConfig(null);
           return;
         }
 
-        const targetWidth = parseInt(exportW) || 1200;
-        const targetHeight = parseInt(exportH) || 300;
-        const originalBannerStyle = bannerElement.getAttribute('style') || '';
-        const originalInnerStyle = innerElement.getAttribute('style') || '';
-        
-        bannerElement.setAttribute(
-          'style',
-          `${originalBannerStyle}; width: ${targetWidth}px !important; height: ${targetHeight}px !important; max-width: none !important; max-height: none !important;`
-        );
-        innerElement.setAttribute(
-          'style',
-          `${originalInnerStyle}; border-radius: 0px !important; min-height: 0px !important; height: ${targetHeight}px !important;`
-        );
-        
-        await new Promise((resolve) => setTimeout(resolve, 300));
         try {
           const canvas = await toCanvas(bannerElement, {
-            pixelRatio: 2,
+            pixelRatio: targetWidth / domWidth, // Multiplicador para atingir a resolução final desejada
             backgroundColor: exportFormat === 'jpeg' ? '#000000' : null,
             skipFonts: true,
             fontEmbedCSS: '',
           });
+
           const finalData = canvas.toDataURL(`image/${exportFormat}`, 1.0);
           const a = document.createElement("a");
           a.href = finalData;
           a.download = `banner_${brandName.replace(/\s+/g, '_').toLowerCase()}_${targetWidth}x${targetHeight}.${exportFormat}`;
           a.click();
+          
           toast.success("Banner exportado com sucesso!", { id: toastId });
         } finally {
-          bannerElement.setAttribute('style', originalBannerStyle);
-          innerElement.setAttribute('style', originalInnerStyle);
+          // Desliga a trava e volta a ser um preview lindo imediatamente
+          setExportConfig(null);
         }
       }
       else if (activeTab === "email") {
@@ -198,27 +223,9 @@ export function PageBuilder({ onRefine, onOpenSettings }: Props) {
             const head = parts[0]?.trim() || "";
             const txt = parts[1]?.trim() || test;
             
-            let cardStyle = "";
-            let titleStyle = "";
-            let textStyle = "";
-
-            if (layoutStyle === "minimalist") {
-              cardStyle = `border-left: 4px solid ${themeColor}; padding: 10px 0 10px 16px; margin-bottom: 16px;`;
-              titleStyle = `margin: 0 0 4px 0; font-weight: bold; font-size: 15px; color: #0f172a;`;
-              textStyle = `margin: 0; font-size: 14px; color: #475569; font-style: italic; line-height: 1.5;`;
-            } else if (layoutStyle === "split") {
-              cardStyle = `background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; margin-bottom: 16px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); text-align: left;`;
-              titleStyle = `margin: 0 0 6px 0; font-weight: bold; font-size: 15px; color: #0f172a;`;
-              textStyle = `margin: 0; font-size: 14px; color: #475569; font-style: italic; line-height: 1.5;`;
-            } else if (layoutStyle === "diagonal") {
-               cardStyle = `background-color: #ffffff; border-left: 4px solid ${themeColor}; border-radius: 8px; padding: 16px; margin-bottom: 16px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); text-align: left;`;
-               titleStyle = `margin: 0 0 4px 0; font-weight: bold; font-size: 15px; color: #0f172a;`;
-               textStyle = `margin: 0; font-size: 14px; color: #475569; font-style: italic; line-height: 1.5;`;
-            } else { 
-               cardStyle = `background-color: #ffffff; border: 2px solid ${themeColor}; border-radius: 12px; padding: 20px; margin-bottom: 16px; text-align: left;`;
-               titleStyle = `margin: 0 0 6px 0; font-weight: bold; font-size: 15px; color: #0f172a;`;
-               textStyle = `margin: 0; font-size: 14px; color: #475569; font-style: italic; line-height: 1.5;`;
-            }
+            let cardStyle = `background-color: #ffffff; border: 2px solid ${themeColor}; border-radius: 12px; padding: 20px; margin-bottom: 16px; text-align: left;`;
+            let titleStyle = `margin: 0 0 6px 0; font-weight: bold; font-size: 15px; color: #0f172a;`;
+            let textStyle = `margin: 0; font-size: 14px; color: #475569; font-style: italic; line-height: 1.5;`;
 
             testimonialsHtml += `
                 <tr>
@@ -234,113 +241,32 @@ export function PageBuilder({ onRefine, onOpenSettings }: Props) {
           testimonialsHtml += `</table>`;
         }
 
-        // MONTAGEM DOS 4 TEMPLATES DISTINTOS DE E-MAIL EM HTML
-        let htmlContent = "";
-
-        if (layoutStyle === "minimalist") {
-          htmlContent = `
-            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width: 600px; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; font-family: Arial, sans-serif;">
-              <tr>
-                <td align="left" style="padding: 24px 32px;">
-                  <h1 style="color: #0f172a; margin: 0; font-size: 24px; font-weight: 900; text-transform: uppercase;">${brandName}</h1>
-                </td>
-              </tr>
-              ${heroUrl ? `<tr><td align="center"><img src="${heroUrl}" width="100%" style="display: block; width: 100%; border-radius: 0;" alt="Hero"></td></tr>` : ''}
-              <tr>
-                <td align="left" style="padding: 32px;">
-                  ${heroBadge ? `<div style="display: inline-block; background-color: #f1f5f9; color: #64748b; padding: 4px 12px; border-radius: 4px; border: 1px solid #e2e8f0; font-size: 10px; font-weight: bold; text-transform: uppercase; margin-bottom: 16px;">${heroBadge}</div>` : ''}
-                  <h2 style="color: #0f172a; font-size: 32px; font-weight: 900; margin: 0 0 24px 0; line-height: 1.2;">${title}</h2>
-                  ${paragraphs.map((p: string) => `<p style="color: #475569; font-size: 16px; line-height: 1.6; margin: 0 0 16px 0;">${p}</p>`).join('')}
-                  ${testimonialsHtml}
-                  ${hasOffer ? `<div style="background-color: #f8fafc; border: 1px solid #f1f5f9; color: ${themeColor}; border-radius: 8px; padding: 16px; margin: 24px 0; font-weight: bold; font-size: 18px; text-align: center;">${offerRaw}</div>` : ''}
-                  ${cta ? `<div style="margin-top: 24px;"><a href="#" style="display: inline-block; background-color: ${themeColor}; color: #ffffff; padding: 14px 32px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 14px;">${cta}</a></div>` : ''}
-                  ${footerInfo ? `<p style="margin-top: 32px; padding-top: 24px; border-top: 1px solid #f1f5f9; font-size: 12px; color: #94a3b8;">${footerInfo}</p>` : ''}
-                </td>
-              </tr>
-            </table>
-          `;
-        } 
-        else if (layoutStyle === "split") {
-          htmlContent = `
-            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width: 600px; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.1); font-family: Arial, sans-serif;">
-              ${heroUrl ? `<tr><td align="center"><img src="${heroUrl}" width="100%" style="display: block; width: 100%; height: 300px; object-fit: cover;" alt="Hero"></td></tr>` : ''}
-              <tr>
-                <td align="center" style="padding: 40px 30px; background-color: ${themeColor};">
-                  <h1 style="color: rgba(255,255,255,0.8); margin: 0 0 15px 0; font-size: 14px; text-transform: uppercase; letter-spacing: 2px;">${brandName}</h1>
-                  ${heroBadge ? `<div style="display: inline-block; background-color: rgba(255,255,255,0.2); color: #ffffff; padding: 4px 16px; border-radius: 20px; font-size: 10px; font-weight: bold; text-transform: uppercase; margin-bottom: 15px;">${heroBadge}</div>` : ''}
-                  <h2 style="color: #ffffff; font-size: 32px; font-weight: 900; margin: 0 0 24px 0; line-height: 1.1;">${title}</h2>
-                  ${cta ? `<a href="#" style="display: inline-block; background-color: #ffffff; color: ${themeColor}; padding: 14px 32px; text-decoration: none; border-radius: 30px; font-weight: bold; font-size: 14px;">${cta}</a>` : ''}
-                </td>
-              </tr>
-              <tr>
-                <td align="left" style="background-color: #f8fafc; padding: 40px 30px;">
-                  ${paragraphs.map((p: string) => `<p style="color: #475569; font-size: 16px; line-height: 1.6; margin: 0 0 16px 0;">${p}</p>`).join('')}
-                  ${testimonialsHtml}
-                  ${hasOffer ? `<div style="border: 2px solid #e2e8f0; background-color: #ffffff; border-radius: 12px; padding: 20px; margin-top: 24px; font-weight: bold; text-align: center; font-size: 18px; color: ${themeColor};">${offerRaw}</div>` : ''}
-                  ${footerInfo ? `<p style="margin-top: 32px; font-size: 12px; color: #64748b; text-align: center;">${footerInfo}</p>` : ''}
-                </td>
-              </tr>
-            </table>
-          `;
-        }
-        else if (layoutStyle === "diagonal") {
-          htmlContent = `
-            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width: 600px; background-color: #f1f5f9; border-radius: 12px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.1); font-family: Arial, sans-serif;">
-              <tr>
-                <td align="center" style="padding: 40px 30px 60px 30px; background-color: ${themeColor};">
-                  <h1 style="color: #ffffff; margin: 0 0 30px 0; font-size: 24px; font-weight: 900; letter-spacing: -0.5px;">${brandName}</h1>
-                  <h2 style="color: #ffffff; font-size: 34px; font-weight: 900; margin: 0; line-height: 1.15;">${title}</h2>
-                </td>
-              </tr>
-              ${heroUrl ? `<tr><td align="center" style="padding: 0 30px;"><div style="margin-top: -30px; border: 4px solid #ffffff; border-radius: 12px; overflow: hidden; background-color: #e2e8f0;"><img src="${heroUrl}" width="100%" style="display: block; width: 100%; height: 200px; object-fit: cover;" alt="Hero"></div></td></tr>` : ''}
-              <tr>
-                <td align="center" style="padding: 30px 30px 40px 30px;">
-                  ${heroBadge ? `<div style="display: inline-block; background-color: #ffffff; color: ${themeColor}; padding: 6px 16px; border-radius: 4px; font-size: 11px; font-weight: bold; text-transform: uppercase; margin-bottom: 24px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">${heroBadge}</div><br>` : ''}
-                  ${paragraphs.map((p: string) => `<p style="color: #475569; font-size: 16px; line-height: 1.6; margin: 0 0 16px 0; text-align: left;">${p}</p>`).join('')}
-                  ${testimonialsHtml}
-                  ${hasOffer ? `<div style="background-color: #e2e8f0; color: #0f172a; border-radius: 8px; padding: 16px; margin: 24px 0; font-weight: bold; text-align: center; font-size: 18px;">${offerRaw}</div>` : ''}
-                  ${cta ? `<div style="margin-top: 24px;"><a href="#" style="display: block; width: 100%; max-width: 280px; margin: 0 auto; background-color: ${themeColor}; color: #ffffff; padding: 16px 0; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 15px; text-align: center;">${cta}</a></div>` : ''}
-                  ${footerInfo ? `<p style="margin-top: 32px; font-size: 12px; color: #94a3b8;">${footerInfo}</p>` : ''}
-                </td>
-              </tr>
-            </table>
-          `;
-        }
-        else {
-          // CLÁSSICO CENTERED
-          htmlContent = `
-            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width: 600px; background-color: ${themeColor}; border-radius: 12px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.1); font-family: Arial, sans-serif;">
-              <tr>
-                <td align="center" style="padding: 30px 20px 20px 20px;">
-                  <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-style: italic; letter-spacing: 1px; font-weight: 900;">${brandName}</h1>
-                </td>
-              </tr>
-              <tr>
-                <td align="center" style="padding: 10px 30px 40px 30px;">
-                  ${heroBadge ? `<div style="display: inline-block; background-color: rgba(255,255,255,0.15); color: #ffffff; padding: 4px 16px; border-radius: 20px; font-size: 10px; font-weight: bold; text-transform: uppercase; margin-bottom: 20px;">${heroBadge}</div>` : ''}
-                  <h2 style="color: #ffffff; font-size: 34px; font-weight: 900; margin: 0 0 24px 0; line-height: 1.1;">${title}</h2>
-                  ${cta ? `<a href="#" style="display: inline-block; background-color: #86efac; color: ${themeColor}; padding: 14px 32px; text-decoration: none; border-radius: 30px; font-weight: bold; font-size: 14px;">${cta}</a>` : ''}
-                  ${heroUrl ? `<div style="margin-top: 32px;"><img src="${heroUrl}" width="100%" style="display: block; width: 100%; max-width: 100%; border-radius: 12px; border: 2px solid rgba(255,255,255,0.2); object-fit: cover; height: 220px;" alt="Hero"></div>` : ''}
-                </td>
-              </tr>
-              <tr>
-                <td align="center" style="background-color: #fffbf5; border-radius: 32px 32px 0 0; padding: 40px 30px;">
-                  ${paragraphs.map((p: string, i: number) => `<p style="color: ${i === 0 ? '#0f172a' : '#475569'}; font-size: ${i === 0 ? '20px' : '16px'}; font-weight: ${i === 0 ? 'bold' : 'normal'}; line-height: 1.6; margin: 0 0 20px 0; text-align: center;">${p}</p>`).join('')}
-                  ${testimonialsHtml}
-                  ${hasOffer ? `<div style="background-color: #86efac; color: ${themeColor}; border-radius: 12px; padding: 16px; margin-top: 32px; font-weight: bold; text-align: center; font-size: 18px;">${offerRaw}</div>` : ''}
-                  ${cta ? `<div style="margin-top: 32px; text-align: center;"><a href="#" style="display: inline-block; background-color: #86efac; color: ${themeColor}; padding: 16px 36px; text-decoration: none; border-radius: 30px; font-weight: bold; font-size: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">${cta}</a></div>` : ''}
-                  ${footerInfo ? `<p style="text-align: center; margin-top: 24px; font-size: 12px; color: #64748b; text-decoration: underline;">${footerInfo}</p>` : ''}
-                </td>
-              </tr>
-              <tr>
-                <td align="center" style="background-color: ${themeColor}; padding: 30px 20px;">
-                  <h3 style="color: #ffffff; margin: 0 0 10px 0; font-size: 16px; font-style: italic; opacity: 0.9; font-weight: 900;">${brandName}</h3>
-                  <p style="color: rgba(255,255,255,0.7); font-size: 11px; margin: 0; line-height: 1.5;">Siga o ${brandName} nas redes e saiba todas as ofertas e novidades em primeira mão.</p>
-                </td>
-              </tr>
-            </table>
-          `;
-        }
+        let htmlContent = `
+          <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width: 600px; background-color: ${themeColor}; border-radius: 12px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.1); font-family: Arial, sans-serif;">
+            <tr>
+              <td align="center" style="padding: 30px 20px 20px 20px;">
+                <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-style: italic; letter-spacing: 1px; font-weight: 900;">${brandName}</h1>
+              </td>
+            </tr>
+            <tr>
+              <td align="center" style="padding: 10px 30px 40px 30px;">
+                ${heroBadge ? `<div style="display: inline-block; background-color: rgba(255,255,255,0.15); color: #ffffff; padding: 4px 16px; border-radius: 20px; font-size: 10px; font-weight: bold; text-transform: uppercase; margin-bottom: 20px;">${heroBadge}</div>` : ''}
+                <h2 style="color: #ffffff; font-size: 34px; font-weight: 900; margin: 0 0 24px 0; line-height: 1.1;">${title}</h2>
+                ${cta ? `<a href="#" style="display: inline-block; background-color: #86efac; color: ${themeColor}; padding: 14px 32px; text-decoration: none; border-radius: 30px; font-weight: bold; font-size: 14px;">${cta}</a>` : ''}
+                ${heroUrl ? `<div style="margin-top: 32px;"><img src="${heroUrl}" width="100%" style="display: block; width: 100%; max-width: 100%; border-radius: 12px; border: 2px solid rgba(255,255,255,0.2); object-fit: cover; height: 220px;" alt="Hero"></div>` : ''}
+              </td>
+            </tr>
+            <tr>
+              <td align="center" style="background-color: #fffbf5; border-radius: 32px 32px 0 0; padding: 40px 30px;">
+                ${paragraphs.map((p: string, i: number) => `<p style="color: ${i === 0 ? '#0f172a' : '#475569'}; font-size: ${i === 0 ? '20px' : '16px'}; font-weight: ${i === 0 ? 'bold' : 'normal'}; line-height: 1.6; margin: 0 0 20px 0; text-align: center;">${p}</p>`).join('')}
+                ${testimonialsHtml}
+                ${hasOffer ? `<div style="background-color: #86efac; color: ${themeColor}; border-radius: 12px; padding: 16px; margin-top: 32px; font-weight: bold; text-align: center; font-size: 18px;">${offerRaw}</div>` : ''}
+                ${cta ? `<div style="margin-top: 32px; text-align: center;"><a href="#" style="display: inline-block; background-color: #86efac; color: ${themeColor}; padding: 16px 36px; text-decoration: none; border-radius: 30px; font-weight: bold; font-size: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">${cta}</a></div>` : ''}
+                ${footerInfo ? `<p style="text-align: center; margin-top: 24px; font-size: 12px; color: #64748b; text-decoration: underline;">${footerInfo}</p>` : ''}
+              </td>
+            </tr>
+          </table>
+        `;
 
         const fullHtml = `<!DOCTYPE html>
 <html lang="pt-BR">
@@ -392,7 +318,6 @@ export function PageBuilder({ onRefine, onOpenSettings }: Props) {
         if (!imgUrl && c.imagePrompt) {
           imgUrl = buildPollinationsUrl(c.imagePrompt, { width: 1080, height: 1350, seed: c.imageSeed });
         }
-
         if (imgUrl) {
           try {
             const res = await fetch(imgUrl);
@@ -428,6 +353,7 @@ export function PageBuilder({ onRefine, onOpenSettings }: Props) {
         
         toast.success("Post social exportado com sucesso!", { id: toastId });
       }
+
     } catch (e: any) {
       toast.error(e.message || "Erro ao exportar arquivos.", { id: toastId });
       console.error(e);
@@ -435,6 +361,7 @@ export function PageBuilder({ onRefine, onOpenSettings }: Props) {
       isExportingRef.current = false;
       setIsExporting(false);
       setExportDialogOpen(false);
+      setExportConfig(null);
     }
   };
 
@@ -457,7 +384,6 @@ export function PageBuilder({ onRefine, onOpenSettings }: Props) {
         onSave={handleSave}
         onOpenSettings={onOpenSettings}
       />
-
       <div
         className={cn(
           "relative flex-1 overflow-y-auto p-6 lg:p-12",
@@ -471,19 +397,48 @@ export function PageBuilder({ onRefine, onOpenSettings }: Props) {
           className="pointer-events-none absolute inset-0 opacity-60"
           style={{ background: "var(--gradient-radial-brand)" }}
         />
-        <div className="relative mx-auto max-w-5xl space-y-10 pb-40">
+        <div className={cn("relative mx-auto space-y-10 pb-40", exportConfig ? "w-fit" : "max-w-5xl")}>
           {loading && generatingLabel && builder.type === "campaign" && (
             <GeneratingBanner label={generatingLabel} />
           )}
 
           {builder.type === "campaign" && builder.campaignAssets && (
             <div className="fade-in-up">
-              <CampaignTabs
-                assets={builder.campaignAssets}
-                onAssetChange={handleAssetPatch}
-                activeTab={activeTab}
-                onTabChange={setActiveTab}
-              />
+              <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as CampaignAsset["type"])} className="w-full">
+                 {!exportConfig && (
+                   <div className="flex justify-center mb-8">
+                     <TabsList className="bg-surface-2 border border-border-subtle p-1 h-12 w-full max-w-[400px]">
+                       <TabsTrigger value="banner" className="flex-1 text-[11px] font-bold uppercase tracking-widest data-[state=active]:bg-brand data-[state=active]:text-white">
+                         <Monitor className="size-3.5 mr-2" /> Banner
+                       </TabsTrigger>
+                       <TabsTrigger value="email" className="flex-1 text-[11px] font-bold uppercase tracking-widest data-[state=active]:bg-brand data-[state=active]:text-white">
+                         <Mail className="size-3.5 mr-2" /> E-mail
+                       </TabsTrigger>
+                       <TabsTrigger value="social" className="flex-1 text-[11px] font-bold uppercase tracking-widest data-[state=active]:bg-brand data-[state=active]:text-white">
+                         <Instagram className="size-3.5 mr-2" /> Social
+                       </TabsTrigger>
+                     </TabsList>
+                   </div>
+                 )}
+                 {builder.campaignAssets.map((asset) => (
+                   <TabsContent key={asset.id} value={asset.type} className="mt-0 outline-none">
+                     {asset.type === "banner" && (
+                       <BannerPreview 
+                          state={asset.content} 
+                          onChange={(patch) => handleAssetPatch(asset.id, patch)} 
+                          exportWrapperClass={exportConfig?.isMobile ? "force-mobile" : ""} 
+                          exportWrapperStyle={exportConfig ? { width: `${exportConfig.width}px`, height: `${exportConfig.height}px`, aspectRatio: "unset", borderRadius: "0px" } : undefined}
+                       />
+                     )}
+                     {asset.type === "email" && (
+                       <EmailPreview state={asset.content} onChange={(patch) => handleAssetPatch(asset.id, patch)} />
+                     )}
+                     {asset.type === "social" && (
+                       <SocialPreview state={asset.content} onChange={(patch) => handleAssetPatch(asset.id, patch)} />
+                     )}
+                   </TabsContent>
+                 ))}
+              </Tabs>
             </div>
           )}
 

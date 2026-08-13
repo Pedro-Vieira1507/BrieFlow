@@ -37,6 +37,9 @@ export interface BannerContent {
   themeColor?: string;
   secondaryColor?: string;
   layoutStyle?: "diagonal" | "split" | "minimalist" | "centered";
+  badgePrimary?: string;
+  badgeSecondary?: string;
+  backgroundShape?: "diagonal" | "curve" | "split" | "minimalist";
 }
 
 export interface EmailContent {
@@ -58,7 +61,7 @@ export interface EmailContent {
   benefitTitle?: string;
   secondaryCta?: string;
   urgencyText?: string;
-  testimonials?: string[]; 
+  testimonials?: string[];
   footerInfo?: string;
   layoutStyle?: "diagonal" | "split" | "minimalist" | "centered";
 }
@@ -106,6 +109,9 @@ export interface BuilderState {
   themeColor?: string;
   secondaryColor?: string;
   layoutStyle?: "diagonal" | "split" | "minimalist" | "centered";
+  badgePrimary?: string;
+  badgeSecondary?: string;
+  backgroundShape?: "diagonal" | "curve" | "split" | "minimalist";
   imagePosX?: number;
   imagePosY?: number;
   imageScale?: number;
@@ -113,7 +119,7 @@ export interface BuilderState {
   benefitTitle?: string;
   secondaryCta?: string;
   urgencyText?: string;
-  testimonials?: string[]; 
+  testimonials?: string[];
   footerInfo?: string;
 }
 

@@ -23,7 +23,11 @@ const OUTPUT_CONTRACT = `FORMATO DE SAÍDA:
 - Sem markdown ao redor, sem crases, apenas o JSON bruto.`;
 
 export const CHANNEL_PLAYBOOKS: Record<MarketingChannel, string> = {
-  landing: `CANAL - BANNER: Foco em CTA único, benefício claro e visual.`,
+  landing: `CANAL - BANNER: Foco em CTA único, benefício claro e visual. Como Diretor de Arte, você define a composição visual e a densidade de conteúdo.
+- LAYOUT (CRÍTICO): Você DEVE variar o campo "layoutStyle". Escolha entre: "split" (texto à esquerda), "reverse" (texto à direita), "centered" (texto centralizado).
+- CONTEÚDO RICO: Não faça banners vazios. Use o campo "body" para adicionar parágrafos descritivos. Use "keyBenefits" para listas e "footerInfo" para cupons ou regras.
+- FORMAS: Use o campo 'backgroundShape' para definir a geometria ('curve' ou 'diagonal').
+- BADGES: Se houver oferta, preencha 'badgePrimary' (ex: 15% OFF) e 'badgeSecondary' (ex: FRETE GRÁTIS).`,
   linkedin: `CANAL - LINKEDIN: Tom consultivo, abertura forte com dados do mercado.`,
   instagram: `CANAL - INSTAGRAM: Hook forte para parar o scroll, texto fluido.`,
   facebook: `CANAL - FACEBOOK: Foco em prova social e benefício imediato.`,
@@ -51,12 +55,13 @@ function brandSection(brief: MarketingBrief): string {
     brief.audience ? `Público: ${brief.audience}` : null,
     brief.tone ? `Tom: ${brief.tone}` : null,
   ].filter((l): l is string => l !== null);
+
   const site = brief.site ? formatSiteContextForAgent(brief.site) : null;
   return [`=== MARCA ===`, ...lines, site ?? "Nenhum site analisado."].join("\n");
 }
 
 function offerSection(brief: MarketingBrief): string {
-  return brief.offer ? `=== OFERTA ===\nOFERTA OBRIGATÓRIA: [${brief.offer}]. Inclua no texto.` : `=== OFERTA ===\nNÃO HÁ OFERTA/CUPOM. Não invente descontos.`;
+  return brief.offer ? `=== OFERTA ===\nOFERTA OBRIGATÓRIA: [${brief.offer}]. Inclua no texto e nos badges se apropriado.` : `=== OFERTA ===\nNÃO HÁ OFERTA/CUPOM. Não invente descontos.`;
 }
 
 function productSection(brief: MarketingBrief): string {
@@ -78,15 +83,36 @@ export interface MaterialPromptOptions { channel?: MarketingChannel; channelBrie
 export function buildMaterialPrompt(brief: MarketingBrief, material: MaterialType, options: MaterialPromptOptions = {}): PromptPair {
   const channel = options.channel ?? MATERIAL_CHANNEL[material];
   
-  // FORÇAR A IA A VARIAR O LAYOUT ESTILÍSTICO ALEATORIAMENTE
   let layoutEnforcement = "";
   if (material === "email") {
     const layouts = ["centered", "minimalist", "split", "diagonal"];
     const randomLayout = layouts[Math.floor(Math.random() * layouts.length)];
     layoutEnforcement = `\n\nREGRA CRÍTICA DE DESIGN: Para esta geração específica, você DEVE OBRIGATORIAMENTE definir o campo "layoutStyle" exato como "${randomLayout}". Isso é essencial para gerar layouts dinâmicos e únicos. Nunca omita este campo.`;
+  } else if (material === "banner") {
+    const layouts = ["split", "reverse", "centered"];
+    const randomLayout = layouts[Math.floor(Math.random() * layouts.length)];
+    layoutEnforcement = `\n\nREGRA CRÍTICA DE DESIGN: Para o BANNER, você DEVE OBRIGATORIAMENTE definir o campo "layoutStyle" exato como "${randomLayout}". Utilize "body", "keyBenefits" e "footerInfo" para deixar o banner rico de conteúdo, com mais textos explicativos (evite banners vazios). Abuse de "badgePrimary" e "badgeSecondary" se houver oferta.`;
   }
 
-  const system = `Você é o BrieFlow Art Director.\nSua tarefa: produzir a peça ${material.toUpperCase()} para ${channel.toUpperCase()}.\n\n${BRAND_VOICE}\n\n${COPY_QUALITY_RULES}\n\n${CHANNEL_PLAYBOOKS[channel]}\n\n${brandSection(brief)}\n\n${offerSection(brief)}\n\n${productSection(brief)}\n\n${OUTPUT_CONTRACT}\n\nSCHEMA JSON OBRIGATÓRIO:\n${SCHEMA_HINTS[material]}${layoutEnforcement}`;
+  // --- SORTEIO DE CORES PARA QUEBRAR O PADRÃO AZUL ---
+  const PALETTES = [
+    { t: "#7c3aed", s: "#2e1065" }, // Roxo
+    { t: "#059669", s: "#022c22" }, // Verde
+    { t: "#ea580c", s: "#431407" }, // Laranja
+    { t: "#db2777", s: "#500724" }, // Rosa
+    { t: "#111827", s: "#020617" }, // Preto/Dark
+    { t: "#b91c1c", s: "#450a0a" }, // Vermelho
+    { t: "#0d9488", s: "#083344" }, // Cyan
+    { t: "#2563eb", s: "#0f172a" }, // Azul Clássico
+  ];
+  const randColor = PALETTES[Math.floor(Math.random() * PALETTES.length)];
+  
+  const colorEnforcement = `\n\nREGRA CRÍTICA DE CORES: 
+1. Se o usuário pediu uma cor específica no briefing (ex: "roxo", "vermelho e branco"), você DEVE OBRIGATORIAMENTE usar essa cor. Converta a cor para HEX (ex: #8B5CF6) e preencha "themeColor" e "secondaryColor".
+2. Se o usuário NÃO pediu nenhuma cor específica, PARE DE USAR AZUL O TEMPO TODO! Utilize esta paleta sorteada aleatoriamente para dar variedade: Theme Color = "${randColor.t}" e Secondary Color = "${randColor.s}".
+Atenção: Os campos "themeColor" e "secondaryColor" DEVEM sempre ser strings Hexadecimais válidas (iniciando com #).`;
+
+  const system = `Você é o BrieFlow Art Director.\nSua tarefa: produzir a peça ${material.toUpperCase()} para ${channel.toUpperCase()}.\n\n${BRAND_VOICE}\n\n${COPY_QUALITY_RULES}\n\n${CHANNEL_PLAYBOOKS[channel]}\n\n${brandSection(brief)}\n\n${offerSection(brief)}\n\n${productSection(brief)}\n\n${OUTPUT_CONTRACT}\n\nSCHEMA JSON OBRIGATÓRIO:\n${SCHEMA_HINTS[material]}${layoutEnforcement}${colorEnforcement}`;
   
   const briefing = options.channelBriefing?.trim() || brief.context?.trim() || brief.strategy?.trim() || "Sem briefing adicional: use os dados da marca.";
   const user = `=== BRIEFING ===\n${briefing}\n\nGere AGORA o JSON da peça.`;
@@ -95,5 +121,5 @@ export function buildMaterialPrompt(brief: MarketingBrief, material: MaterialTyp
 }
 
 export function extractChannelBriefing(text: string, material: MaterialType): string {
-  return text; 
+  return text;
 }
