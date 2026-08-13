@@ -1,3 +1,4 @@
+// src/types/generatedContent.ts
 import { z } from "zod";
 import type { BuilderState, CtaVariant } from "./builder";
 import type { MaterialType } from "./brief";
@@ -5,20 +6,13 @@ import type { MaterialType } from "./brief";
 const looseString = z.preprocess((value) => {
   if (value === null || value === undefined) return "";
   const raw = typeof value === "string" ? value : String(value);
-  return raw
-    .replace(/\*\*/g, "")
-    .replace(/\r/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
+  return raw.replace(/\*\*/g, "").replace(/\r/g, "").replace(/\s+/g, " ").trim();
 }, z.string());
 
 const looseText = z.preprocess((value) => {
   if (value === null || value === undefined) return "";
   const raw = typeof value === "string" ? value : String(value);
-  return raw
-    .replace(/\*\*/g, "")
-    .replace(/\r/g, "")
-    .trim();
+  return raw.replace(/\*\*/g, "").replace(/\r/g, "").trim();
 }, z.string());
 
 const looseList = z.preprocess((value) => {
@@ -38,7 +32,7 @@ const hexColor = z.preprocess((value) => {
 const ctaVariantSchema = z.preprocess((value) => {
   const raw = typeof value === "string" ? value.toLowerCase().trim() : "";
   return ["primary", "secondary", "urgent", "soft"].includes(raw)
-    ? raw
+    ? (raw as CtaVariant)
     : "primary";
 }, z.enum(["primary", "secondary", "urgent", "soft"]));
 
@@ -57,9 +51,7 @@ export const LandingCopySchema = designSchema.extend({
   objectionsHandled: looseList.default([]),
   layoutStyle: z.preprocess((value) => {
     const raw = typeof value === "string" ? value.toLowerCase().trim() : "";
-    return ["diagonal", "split", "minimalist", "centered"].includes(raw)
-      ? raw
-      : "split";
+    return ["diagonal", "split", "minimalist", "centered"].includes(raw) ? raw : "split";
   }, z.enum(["diagonal", "split", "minimalist", "centered"])),
 });
 
@@ -91,8 +83,12 @@ export const EmailCopySchema = designSchema.extend({
   benefitTitle: looseString.default(""),
   secondaryCta: looseString.default(""),
   urgencyText: looseString.default(""),
-  testimonial: looseString.default(""),
+  testimonials: looseList.default([]), 
   footerInfo: looseString.default(""),
+  layoutStyle: z.preprocess((value) => {
+    const raw = typeof value === "string" ? value.toLowerCase().trim() : "";
+    return ["diagonal", "split", "minimalist", "centered"].includes(raw) ? raw : "centered";
+  }, z.enum(["diagonal", "split", "minimalist", "centered"])).default("centered"),
 });
 
 export type LandingCopy = z.infer<typeof LandingCopySchema>;
@@ -114,24 +110,9 @@ export const MATERIAL_SCHEMAS = {
 } as const;
 
 export const SCHEMA_HINTS: Record<MaterialType, string> = {
-  banner: `{\n  "headline": "Benefício principal... (SE HOUVER OFERTA NO BRIEFING, ELA DEVE OBRIGATORIAMENTE APARECER AQUI OU NO SUBHEADLINE)",\n  "subheadline": "1 frase explicando a proposta de valor e para quem",\n  "ctaText": "CTA curto começando por verbo de ação",\n  "ctaVariant": "primary | secondary | urgent | soft",\n  "keyBenefits": ["3 a 4 benefícios em linguagem de resultado, não de feature"],\n  "objectionsHandled": ["2 a 3 objeções reais do público já respondidas em 1 frase cada"],\n  "layoutStyle": "diagonal | split | minimalist | centered",\n  "imagePrompt": "Detailed photography prompt in ENGLISH, no text, no logos",\n  "themeColor": "#HEX vibrante da marca",\n  "secondaryColor": "#HEX de contraste"\n}`,
-  social: `{\n  "hook": "Primeira linha que para o scroll (SE HOUVER OFERTA NO BRIEFING, DEVE APARECER AQUI)",\n  "body": "2 a 4 frases curtas com benefício e prova. Use \\n para quebrar linha",\n  "cta": "Chamada final direta, com verbo de ação",\n  "hashtags": ["#hashtags", "#relevantes", "#obrigatorias"],\n  "imagePrompt": "Detailed photography prompt in ENGLISH, no text, no logos",\n  "themeColor": "#HEX vibrante da marca",\n  "secondaryColor": "#HEX de contraste"\n}`,
-  email: `{\n  "subject": "Assunto de até 45 caracteres (SE HOUVER OFERTA, INCLUA NO ASSUNTO)",\n  "preheader": "Complemento do assunto, sem repetir as mesmas palavras",\n  "headline": "Título dentro do e-mail (SE HOUVER OFERTA, INCLUA AQUI)",\n  "subtitle": "1 frase de apoio que reforça o benefício principal",
-  "body": "2 a 3 parágrafos persuasivos. Use \\n\\n entre parágrafos",
-  "heroBadge": "Texto curto para badge sobre a imagem (ex: OFERTA RELÂMPAGO, NOVIDADE) ou string vazia",
-  "benefitTitle": "Título da seção de benefícios (ex: Por que você vai amar)",
-  "keyBenefits": ["3 a 4 benefícios em formato de bullet, linguagem de resultado"],
-  "objectionsHandled": ["1 a 2 objeções respondidas em 1 frase"],
-  "urgencyText": "Texto de urgência/escassez curto (ex: Últimas 24 horas) ou string vazia se não houver gatilho real",
-  "testimonial": "Depoimento curto com nome do cliente ou string vazia se não houver prova real",
-  "ctaText": "Texto do botão, começando por verbo",
-  "ctaVariant": "primary | secondary | urgent | soft",
-  "secondaryCta": "Repetição do CTA no final do e-mail (pode ser igual ao ctaText)",
-  "footerInfo": "Texto adicional do rodapé (ex: Frete grátis, troca em 30 dias) ou string vazia",
-  "imagePrompt": "Detailed photography prompt in ENGLISH, no text, no logos",
-  "themeColor": "#HEX vibrante da marca",
-  "secondaryColor": "#HEX de contraste"\n}`,
-}`,
+  banner: `{\n  "headline": "Benefício principal...",\n  "subheadline": "1 frase explicando",\n  "ctaText": "CTA",\n  "ctaVariant": "primary",\n  "keyBenefits": ["Benefício 1"],\n  "objectionsHandled": ["Objeção 1"],\n  "layoutStyle": "split",\n  "imagePrompt": "Prompt",\n  "themeColor": "#HEX",\n  "secondaryColor": "#HEX"\n}`,
+  social: `{\n  "hook": "Gancho",\n  "body": "Corpo",\n  "cta": "CTA",\n  "hashtags": ["#tag"],\n  "imagePrompt": "Prompt",\n  "themeColor": "#HEX",\n  "secondaryColor": "#HEX"\n}`,
+  email: `{\n  "subject": "Assunto",\n  "preheader": "Preheader",\n  "headline": "Título dinâmico",\n  "subtitle": "Subtítulo de apoio",\n  "body": "Corpo persuasivo em 2-3 parágrafos",\n  "heroBadge": "Badge (ex: NOVIDADE)",\n  "benefitTitle": "Por que escolher?",\n  "keyBenefits": ["Benefício forte 1", "Benefício 2"],\n  "objectionsHandled": ["Objeção 1"],\n  "urgencyText": "Apenas hoje",\n  "testimonials": ["Nome do Cliente - R$ Resultado Alcançado | 'Citação do cliente aqui'"],\n  "ctaText": "Comprar Agora",\n  "ctaVariant": "primary",\n  "secondaryCta": "Comprar Agora",\n  "footerInfo": "*Regras, validade ou termos legais (NÃO use 'Frete grátis' se não for produto físico)",\n  "imagePrompt": "Prompt em inglês",\n  "layoutStyle": "minimalist | split | diagonal | centered",\n  "themeColor": "#HEX",\n  "secondaryColor": "#HEX"\n}`
 };
 
 export interface MaterialRenderContext {
@@ -162,18 +143,8 @@ export function toBuilderContent<T extends MaterialType>(
 
   if (type === "banner") {
     const landing = copy as LandingCopy;
-    return {
-      ...base,
-      title: landing.headline,
-      subtitle: landing.subheadline,
-      cta: landing.ctaText,
-      ctaVariant: landing.ctaVariant satisfies CtaVariant,
-      keyBenefits: landing.keyBenefits,
-      objectionsHandled: landing.objectionsHandled,
-      layoutStyle: landing.layoutStyle,
-    };
+    return { ...base, title: landing.headline, subtitle: landing.subheadline, cta: landing.ctaText, ctaVariant: landing.ctaVariant satisfies CtaVariant, keyBenefits: landing.keyBenefits, objectionsHandled: landing.objectionsHandled, layoutStyle: landing.layoutStyle };
   }
-
   if (type === "email") {
     const email = copy as EmailCopy;
     return {
@@ -191,24 +162,15 @@ export function toBuilderContent<T extends MaterialType>(
       benefitTitle: email.benefitTitle,
       secondaryCta: email.secondaryCta,
       urgencyText: email.urgencyText,
-      testimonial: email.testimonial,
+      testimonials: email.testimonials, 
       footerInfo: email.footerInfo,
+      layoutStyle: email.layoutStyle,
     } as BuilderState;
   }
-
+  
   const social = copy as SocialCopy;
-  const caption = [social.hook, social.body, social.cta]
-    .filter((part) => part.length > 0)
-    .join("\n\n");
-
-  return {
-    ...base,
-    hook: social.hook,
-    caption,
-    body: social.body,
-    cta: social.cta,
-    hashtags: social.hashtags,
-  };
+  const caption = [social.hook, social.body, social.cta].filter((p) => p.length > 0).join("\n\n");
+  return { ...base, hook: social.hook, caption, body: social.body, cta: social.cta, hashtags: social.hashtags };
 }
 
 export type { MaterialType };

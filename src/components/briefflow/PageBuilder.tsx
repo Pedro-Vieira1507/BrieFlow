@@ -42,14 +42,15 @@ export function PageBuilder({ onRefine, onOpenSettings }: Props) {
     patchBuilder,
     setBuilder,
   } = useBriefflowStore();
+  
   const [activeTab, setActiveTab] = useState<CampaignAsset["type"]>("banner");
   const [isSaving, setIsSaving] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
-
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [exportFormat, setExportFormat] = useState("png");
   const [exportW, setExportW] = useState("1200");
   const [exportH, setExportH] = useState("300");
+  
   const isSavingRef = useRef(false);
   const isExportingRef = useRef(false);
 
@@ -78,10 +79,8 @@ export function PageBuilder({ onRefine, onOpenSettings }: Props) {
     
     isSavingRef.current = true;
     setIsSaving(true);
-    
     await new Promise((resolve) => setTimeout(resolve, 150));
     const toastId = toast.loading("Salvando campanha na biblioteca...");
-    
     try {
       await saveAssetToLibrary("Campanha AI", builder);
       toast.success("Salvo na biblioteca com sucesso!", { id: toastId });
@@ -107,8 +106,10 @@ export function PageBuilder({ onRefine, onOpenSettings }: Props) {
     if (builder.type !== "campaign" || !builder.campaignAssets || isExportingRef.current) return;
     const asset = builder.campaignAssets.find((a) => a.type === activeTab);
     if (!asset) return;
+
     isExportingRef.current = true;
     setIsExporting(true);
+    
     const c = asset.content as any;
     const brandName = cleanText(c.brandName, "Marca");
     const themeColor = c.themeColor || "#2563EB";
@@ -118,139 +119,249 @@ export function PageBuilder({ onRefine, onOpenSettings }: Props) {
         ...(c.productImages || []),
       ]),
     );
+
     let toastId;
+
     try {
       if (activeTab === "banner") {
         toastId = toast.loading("Processando responsividade e capturando...");
-        
         const bannerElement = document.getElementById("banner-export-node");
         const innerElement = document.getElementById("banner-inner-wrapper");
         
         if (!bannerElement || !innerElement) {
-            toast.error("Erro: Banner não encontrado na tela.", { id: toastId });
-            setIsExportingRef.current = false;
-            setIsExporting(false);
-            setExportDialogOpen(false);
-            return;
+          toast.error("Erro: Banner não encontrado na tela.", { id: toastId });
+          setIsExportingRef.current = false;
+          setIsExporting(false);
+          setExportDialogOpen(false);
+          return;
         }
 
         const targetWidth = parseInt(exportW) || 1200;
         const targetHeight = parseInt(exportH) || 300;
-
         const originalBannerStyle = bannerElement.getAttribute('style') || '';
         const originalInnerStyle = innerElement.getAttribute('style') || '';
-
+        
         bannerElement.setAttribute(
-          'style', 
+          'style',
           `${originalBannerStyle}; width: ${targetWidth}px !important; height: ${targetHeight}px !important; max-width: none !important; max-height: none !important;`
         );
-        
         innerElement.setAttribute(
           'style',
           `${originalInnerStyle}; border-radius: 0px !important; min-height: 0px !important; height: ${targetHeight}px !important;`
         );
-
+        
         await new Promise((resolve) => setTimeout(resolve, 300));
-
         try {
           const canvas = await toCanvas(bannerElement, {
-              pixelRatio: 2, 
-              backgroundColor: exportFormat === 'jpeg' ? '#000000' : null,
-              skipFonts: true, 
-              fontEmbedCSS: '', 
-            });
-            
+            pixelRatio: 2,
+            backgroundColor: exportFormat === 'jpeg' ? '#000000' : null,
+            skipFonts: true,
+            fontEmbedCSS: '',
+          });
           const finalData = canvas.toDataURL(`image/${exportFormat}`, 1.0);
-          
           const a = document.createElement("a");
           a.href = finalData;
           a.download = `banner_${brandName.replace(/\s+/g, '_').toLowerCase()}_${targetWidth}x${targetHeight}.${exportFormat}`;
           a.click();
-          
           toast.success("Banner exportado com sucesso!", { id: toastId });
         } finally {
           bannerElement.setAttribute('style', originalBannerStyle);
           innerElement.setAttribute('style', originalInnerStyle);
         }
-      } 
+      }
       else if (activeTab === "email") {
         toastId = toast.loading("Gerando HTML do e-mail...");
-        const title = cleanText(c.title, "Título do e-mail");
-        const cta = cleanText(c.cta, "");
-        const hasCta = cta.trim().length > 0;
         
+        const layoutStyle = c.layoutStyle || "centered";
+        const title = cleanText(c.subtitle || c.title, "Headline do e-mail");
+        const heroBadge = cleanText(c.heroBadge, "");
+        const cta = cleanText(c.cta, "");
+        const footerInfo = cleanText(c.footerInfo, "");
         const offerRaw = builder.discoveryPlan?.offer;
         const hasOffer = !isEmptyLike(offerRaw);
-        const couponCode = c.footerText || "LAB70";
-        
+        const testimonials = c.testimonials || [];
         const paragraphs = cleanText(c.body || "")
           .split(/\n+/)
           .map((p: string) => cleanText(p))
-          .filter((p: string) => p.length > 0)
-          .filter((p: string) => {
-            const lp = p.toLowerCase();
-            const lc = cta.toLowerCase();
-            if (!lc) return true;
-            if (lp === lc) return false;
-            if (lp.includes(lc) && lp.length <= lc.length + 10) return false;
-            return true;
-          });
-
+          .filter((p: string) => p.length > 0);
+          
         let heroUrl = images[0] || null;
         if (!heroUrl && c.emailHeroImagePrompt) {
-            heroUrl = buildPollinationsUrl(c.emailHeroImagePrompt, { width: 1200, height: 600, seed: c.imageSeed });
+          heroUrl = buildPollinationsUrl(c.emailHeroImagePrompt, { width: 1200, height: 600, seed: c.imageSeed });
         }
 
-        const html = `<!DOCTYPE html>
+        let testimonialsHtml = "";
+        if (testimonials.length > 0) {
+          testimonialsHtml = `<table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top: 24px; margin-bottom: 24px;">`;
+          testimonials.forEach((test: string) => {
+            const parts = test.split(/\||\n/);
+            const head = parts[0]?.trim() || "";
+            const txt = parts[1]?.trim() || test;
+            
+            let cardStyle = "";
+            let titleStyle = "";
+            let textStyle = "";
+
+            if (layoutStyle === "minimalist") {
+              cardStyle = `border-left: 4px solid ${themeColor}; padding: 10px 0 10px 16px; margin-bottom: 16px;`;
+              titleStyle = `margin: 0 0 4px 0; font-weight: bold; font-size: 15px; color: #0f172a;`;
+              textStyle = `margin: 0; font-size: 14px; color: #475569; font-style: italic; line-height: 1.5;`;
+            } else if (layoutStyle === "split") {
+              cardStyle = `background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; margin-bottom: 16px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); text-align: left;`;
+              titleStyle = `margin: 0 0 6px 0; font-weight: bold; font-size: 15px; color: #0f172a;`;
+              textStyle = `margin: 0; font-size: 14px; color: #475569; font-style: italic; line-height: 1.5;`;
+            } else if (layoutStyle === "diagonal") {
+               cardStyle = `background-color: #ffffff; border-left: 4px solid ${themeColor}; border-radius: 8px; padding: 16px; margin-bottom: 16px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); text-align: left;`;
+               titleStyle = `margin: 0 0 4px 0; font-weight: bold; font-size: 15px; color: #0f172a;`;
+               textStyle = `margin: 0; font-size: 14px; color: #475569; font-style: italic; line-height: 1.5;`;
+            } else { 
+               cardStyle = `background-color: #ffffff; border: 2px solid ${themeColor}; border-radius: 12px; padding: 20px; margin-bottom: 16px; text-align: left;`;
+               titleStyle = `margin: 0 0 6px 0; font-weight: bold; font-size: 15px; color: #0f172a;`;
+               textStyle = `margin: 0; font-size: 14px; color: #475569; font-style: italic; line-height: 1.5;`;
+            }
+
+            testimonialsHtml += `
+                <tr>
+                  <td>
+                    <div style="${cardStyle}">
+                      <p style="${titleStyle}">${head}</p>
+                      <p style="${textStyle}">${txt.replace(/["']/g, '')}</p>
+                    </div>
+                  </td>
+                </tr>
+              `;
+          });
+          testimonialsHtml += `</table>`;
+        }
+
+        // MONTAGEM DOS 4 TEMPLATES DISTINTOS DE E-MAIL EM HTML
+        let htmlContent = "";
+
+        if (layoutStyle === "minimalist") {
+          htmlContent = `
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width: 600px; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; font-family: Arial, sans-serif;">
+              <tr>
+                <td align="left" style="padding: 24px 32px;">
+                  <h1 style="color: #0f172a; margin: 0; font-size: 24px; font-weight: 900; text-transform: uppercase;">${brandName}</h1>
+                </td>
+              </tr>
+              ${heroUrl ? `<tr><td align="center"><img src="${heroUrl}" width="100%" style="display: block; width: 100%; border-radius: 0;" alt="Hero"></td></tr>` : ''}
+              <tr>
+                <td align="left" style="padding: 32px;">
+                  ${heroBadge ? `<div style="display: inline-block; background-color: #f1f5f9; color: #64748b; padding: 4px 12px; border-radius: 4px; border: 1px solid #e2e8f0; font-size: 10px; font-weight: bold; text-transform: uppercase; margin-bottom: 16px;">${heroBadge}</div>` : ''}
+                  <h2 style="color: #0f172a; font-size: 32px; font-weight: 900; margin: 0 0 24px 0; line-height: 1.2;">${title}</h2>
+                  ${paragraphs.map((p: string) => `<p style="color: #475569; font-size: 16px; line-height: 1.6; margin: 0 0 16px 0;">${p}</p>`).join('')}
+                  ${testimonialsHtml}
+                  ${hasOffer ? `<div style="background-color: #f8fafc; border: 1px solid #f1f5f9; color: ${themeColor}; border-radius: 8px; padding: 16px; margin: 24px 0; font-weight: bold; font-size: 18px; text-align: center;">${offerRaw}</div>` : ''}
+                  ${cta ? `<div style="margin-top: 24px;"><a href="#" style="display: inline-block; background-color: ${themeColor}; color: #ffffff; padding: 14px 32px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 14px;">${cta}</a></div>` : ''}
+                  ${footerInfo ? `<p style="margin-top: 32px; padding-top: 24px; border-top: 1px solid #f1f5f9; font-size: 12px; color: #94a3b8;">${footerInfo}</p>` : ''}
+                </td>
+              </tr>
+            </table>
+          `;
+        } 
+        else if (layoutStyle === "split") {
+          htmlContent = `
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width: 600px; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.1); font-family: Arial, sans-serif;">
+              ${heroUrl ? `<tr><td align="center"><img src="${heroUrl}" width="100%" style="display: block; width: 100%; height: 300px; object-fit: cover;" alt="Hero"></td></tr>` : ''}
+              <tr>
+                <td align="center" style="padding: 40px 30px; background-color: ${themeColor};">
+                  <h1 style="color: rgba(255,255,255,0.8); margin: 0 0 15px 0; font-size: 14px; text-transform: uppercase; letter-spacing: 2px;">${brandName}</h1>
+                  ${heroBadge ? `<div style="display: inline-block; background-color: rgba(255,255,255,0.2); color: #ffffff; padding: 4px 16px; border-radius: 20px; font-size: 10px; font-weight: bold; text-transform: uppercase; margin-bottom: 15px;">${heroBadge}</div>` : ''}
+                  <h2 style="color: #ffffff; font-size: 32px; font-weight: 900; margin: 0 0 24px 0; line-height: 1.1;">${title}</h2>
+                  ${cta ? `<a href="#" style="display: inline-block; background-color: #ffffff; color: ${themeColor}; padding: 14px 32px; text-decoration: none; border-radius: 30px; font-weight: bold; font-size: 14px;">${cta}</a>` : ''}
+                </td>
+              </tr>
+              <tr>
+                <td align="left" style="background-color: #f8fafc; padding: 40px 30px;">
+                  ${paragraphs.map((p: string) => `<p style="color: #475569; font-size: 16px; line-height: 1.6; margin: 0 0 16px 0;">${p}</p>`).join('')}
+                  ${testimonialsHtml}
+                  ${hasOffer ? `<div style="border: 2px solid #e2e8f0; background-color: #ffffff; border-radius: 12px; padding: 20px; margin-top: 24px; font-weight: bold; text-align: center; font-size: 18px; color: ${themeColor};">${offerRaw}</div>` : ''}
+                  ${footerInfo ? `<p style="margin-top: 32px; font-size: 12px; color: #64748b; text-align: center;">${footerInfo}</p>` : ''}
+                </td>
+              </tr>
+            </table>
+          `;
+        }
+        else if (layoutStyle === "diagonal") {
+          htmlContent = `
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width: 600px; background-color: #f1f5f9; border-radius: 12px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.1); font-family: Arial, sans-serif;">
+              <tr>
+                <td align="center" style="padding: 40px 30px 60px 30px; background-color: ${themeColor};">
+                  <h1 style="color: #ffffff; margin: 0 0 30px 0; font-size: 24px; font-weight: 900; letter-spacing: -0.5px;">${brandName}</h1>
+                  <h2 style="color: #ffffff; font-size: 34px; font-weight: 900; margin: 0; line-height: 1.15;">${title}</h2>
+                </td>
+              </tr>
+              ${heroUrl ? `<tr><td align="center" style="padding: 0 30px;"><div style="margin-top: -30px; border: 4px solid #ffffff; border-radius: 12px; overflow: hidden; background-color: #e2e8f0;"><img src="${heroUrl}" width="100%" style="display: block; width: 100%; height: 200px; object-fit: cover;" alt="Hero"></div></td></tr>` : ''}
+              <tr>
+                <td align="center" style="padding: 30px 30px 40px 30px;">
+                  ${heroBadge ? `<div style="display: inline-block; background-color: #ffffff; color: ${themeColor}; padding: 6px 16px; border-radius: 4px; font-size: 11px; font-weight: bold; text-transform: uppercase; margin-bottom: 24px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">${heroBadge}</div><br>` : ''}
+                  ${paragraphs.map((p: string) => `<p style="color: #475569; font-size: 16px; line-height: 1.6; margin: 0 0 16px 0; text-align: left;">${p}</p>`).join('')}
+                  ${testimonialsHtml}
+                  ${hasOffer ? `<div style="background-color: #e2e8f0; color: #0f172a; border-radius: 8px; padding: 16px; margin: 24px 0; font-weight: bold; text-align: center; font-size: 18px;">${offerRaw}</div>` : ''}
+                  ${cta ? `<div style="margin-top: 24px;"><a href="#" style="display: block; width: 100%; max-width: 280px; margin: 0 auto; background-color: ${themeColor}; color: #ffffff; padding: 16px 0; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 15px; text-align: center;">${cta}</a></div>` : ''}
+                  ${footerInfo ? `<p style="margin-top: 32px; font-size: 12px; color: #94a3b8;">${footerInfo}</p>` : ''}
+                </td>
+              </tr>
+            </table>
+          `;
+        }
+        else {
+          // CLÁSSICO CENTERED
+          htmlContent = `
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width: 600px; background-color: ${themeColor}; border-radius: 12px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.1); font-family: Arial, sans-serif;">
+              <tr>
+                <td align="center" style="padding: 30px 20px 20px 20px;">
+                  <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-style: italic; letter-spacing: 1px; font-weight: 900;">${brandName}</h1>
+                </td>
+              </tr>
+              <tr>
+                <td align="center" style="padding: 10px 30px 40px 30px;">
+                  ${heroBadge ? `<div style="display: inline-block; background-color: rgba(255,255,255,0.15); color: #ffffff; padding: 4px 16px; border-radius: 20px; font-size: 10px; font-weight: bold; text-transform: uppercase; margin-bottom: 20px;">${heroBadge}</div>` : ''}
+                  <h2 style="color: #ffffff; font-size: 34px; font-weight: 900; margin: 0 0 24px 0; line-height: 1.1;">${title}</h2>
+                  ${cta ? `<a href="#" style="display: inline-block; background-color: #86efac; color: ${themeColor}; padding: 14px 32px; text-decoration: none; border-radius: 30px; font-weight: bold; font-size: 14px;">${cta}</a>` : ''}
+                  ${heroUrl ? `<div style="margin-top: 32px;"><img src="${heroUrl}" width="100%" style="display: block; width: 100%; max-width: 100%; border-radius: 12px; border: 2px solid rgba(255,255,255,0.2); object-fit: cover; height: 220px;" alt="Hero"></div>` : ''}
+                </td>
+              </tr>
+              <tr>
+                <td align="center" style="background-color: #fffbf5; border-radius: 32px 32px 0 0; padding: 40px 30px;">
+                  ${paragraphs.map((p: string, i: number) => `<p style="color: ${i === 0 ? '#0f172a' : '#475569'}; font-size: ${i === 0 ? '20px' : '16px'}; font-weight: ${i === 0 ? 'bold' : 'normal'}; line-height: 1.6; margin: 0 0 20px 0; text-align: center;">${p}</p>`).join('')}
+                  ${testimonialsHtml}
+                  ${hasOffer ? `<div style="background-color: #86efac; color: ${themeColor}; border-radius: 12px; padding: 16px; margin-top: 32px; font-weight: bold; text-align: center; font-size: 18px;">${offerRaw}</div>` : ''}
+                  ${cta ? `<div style="margin-top: 32px; text-align: center;"><a href="#" style="display: inline-block; background-color: #86efac; color: ${themeColor}; padding: 16px 36px; text-decoration: none; border-radius: 30px; font-weight: bold; font-size: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">${cta}</a></div>` : ''}
+                  ${footerInfo ? `<p style="text-align: center; margin-top: 24px; font-size: 12px; color: #64748b; text-decoration: underline;">${footerInfo}</p>` : ''}
+                </td>
+              </tr>
+              <tr>
+                <td align="center" style="background-color: ${themeColor}; padding: 30px 20px;">
+                  <h3 style="color: #ffffff; margin: 0 0 10px 0; font-size: 16px; font-style: italic; opacity: 0.9; font-weight: 900;">${brandName}</h3>
+                  <p style="color: rgba(255,255,255,0.7); font-size: 11px; margin: 0; line-height: 1.5;">Siga o ${brandName} nas redes e saiba todas as ofertas e novidades em primeira mão.</p>
+                </td>
+              </tr>
+            </table>
+          `;
+        }
+
+        const fullHtml = `<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${title}</title>
 </head>
-<body style="margin: 0; padding: 40px 20px; background-color: #f4f4f5; font-family: Arial, sans-serif;">
-  <table width="100%" max-width="600" align="center" style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; border-spacing: 0; box-shadow: 0 4px 20px rgba(0,0,0,0.05);">
+<body style="margin: 0; padding: 0; background-color: #f4f4f5; font-family: Arial, sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="padding: 40px 20px;">
     <tr>
-      <td style="background-color: ${themeColor}; padding: 30px; text-align: center;">
-        <h1 style="color: #ffffff; margin: 0; font-size: 24px; letter-spacing: 2px; text-transform: uppercase;">${brandName}</h1>
-      </td>
-    </tr>
-    ${heroUrl ? `<tr><td><img src="${heroUrl}" width="100%" style="display: block; max-width: 100%; height: auto;" alt="Capa"></td></tr>` : ''}
-    <tr>
-      <td style="padding: 40px 30px; text-align: center;">
-        <h2 style="color: #1e293b; font-size: 24px; margin-top: 0; margin-bottom: 20px;">${title}</h2>
-        
-        ${paragraphs.map((p: string) => `<p style="color: #475569; font-size: 16px; line-height: 1.6; margin-bottom: 16px;">${p}</p>`).join('')}
-
-        ${hasOffer ? `
-          <div style="background-color: ${themeColor}05; border: 2px dashed #cbd5e1; border-radius: 16px; padding: 30px 20px; margin: 40px 0; text-align: center; position: relative;">
-            <p style="margin: 0 0 20px 0; color: #334155; font-size: 16px; font-weight: bold; line-height: 1.5;">${cleanText(offerRaw)}</p>
-            <div style="display: inline-block; background-color: #ffffff; border: 2px dashed ${themeColor}; border-radius: 12px; padding: 15px 30px;">
-                <h3 style="margin: 0; color: #1e293b; font-size: 26px; letter-spacing: 4px; text-transform: uppercase;">${couponCode}</h3>
-            </div>
-            <p style="margin: 15px 0 0 0; color: #94a3b8; font-size: 12px;">Use o código acima ao finalizar a compra</p>
-          </div>
-        ` : ''}
-
-        ${hasCta ? `
-          <div style="margin-top: 30px;">
-            <a href="#" style="display: inline-block; background-color: ${themeColor}; color: #ffffff; padding: 16px 32px; text-decoration: none; border-radius: 8px; font-weight: bold; text-transform: uppercase; font-size: 14px;">${cta}</a>
-          </div>
-        ` : ''}
-      </td>
-    </tr>
-    <tr>
-      <td style="background-color: #f8fafc; border-top: 1px solid #e2e8f0; padding: 20px; text-align: center;">
-        <p style="color: #94a3b8; font-size: 12px; margin: 0;">Você está recebendo este e-mail pois se cadastrou em ${brandName}.</p>
+      <td align="center">
+        ${htmlContent}
       </td>
     </tr>
   </table>
 </body>
 </html>`;
 
-        const blobHtml = new Blob([html], { type: "text/html;charset=utf-8" });
+        const blobHtml = new Blob([fullHtml], { type: "text/html;charset=utf-8" });
         const htmlUrl = URL.createObjectURL(blobHtml);
-        
         const aHtml = document.createElement("a");
         aHtml.href = htmlUrl;
         aHtml.download = `email_${brandName.replace(/\s+/g, "_").toLowerCase()}.html`;
@@ -259,15 +370,13 @@ export function PageBuilder({ onRefine, onOpenSettings }: Props) {
         document.body.removeChild(aHtml);
         URL.revokeObjectURL(htmlUrl);
         
-        toast.success("E-mail HTML exportado com sucesso!", { id: toastId });
-      } 
+        toast.success("E-mail adaptável exportado com sucesso!", { id: toastId });
+      }
       else if (activeTab === "social") {
         toastId = toast.loading("Preparando arquivos para download...");
-        
-        // Texto
         const caption = cleanText(c.caption, "");
         const captionParts = caption.split(/(#\w+)/g);
-        const textContent = `${brandName}\n\n${caption}\n\n${captionParts.filter((p:string) => p.startsWith("#")).join(" ")}`;
+        const textContent = `${brandName}\n\n${caption}\n\n${captionParts.filter((p: string) => p.startsWith("#")).join(" ")}`;
         
         const textBlob = new Blob([textContent], { type: "text/plain;charset=utf-8" });
         const textUrl = URL.createObjectURL(textBlob);
@@ -279,10 +388,9 @@ export function PageBuilder({ onRefine, onOpenSettings }: Props) {
         document.body.removeChild(aText);
         URL.revokeObjectURL(textUrl);
 
-        // Imagem
         let imgUrl = images[0] || null;
         if (!imgUrl && c.imagePrompt) {
-            imgUrl = buildPollinationsUrl(c.imagePrompt, { width: 1080, height: 1350, seed: c.imageSeed });
+          imgUrl = buildPollinationsUrl(c.imagePrompt, { width: 1080, height: 1350, seed: c.imageSeed });
         }
 
         if (imgUrl) {
@@ -317,6 +425,7 @@ export function PageBuilder({ onRefine, onOpenSettings }: Props) {
             window.open(imgUrl, "_blank");
           }
         }
+        
         toast.success("Post social exportado com sucesso!", { id: toastId });
       }
     } catch (e: any) {
@@ -348,6 +457,7 @@ export function PageBuilder({ onRefine, onOpenSettings }: Props) {
         onSave={handleSave}
         onOpenSettings={onOpenSettings}
       />
+
       <div
         className={cn(
           "relative flex-1 overflow-y-auto p-6 lg:p-12",
@@ -361,11 +471,11 @@ export function PageBuilder({ onRefine, onOpenSettings }: Props) {
           className="pointer-events-none absolute inset-0 opacity-60"
           style={{ background: "var(--gradient-radial-brand)" }}
         />
-        
         <div className="relative mx-auto max-w-5xl space-y-10 pb-40">
           {loading && generatingLabel && builder.type === "campaign" && (
             <GeneratingBanner label={generatingLabel} />
           )}
+
           {builder.type === "campaign" && builder.campaignAssets && (
             <div className="fade-in-up">
               <CampaignTabs
@@ -376,6 +486,7 @@ export function PageBuilder({ onRefine, onOpenSettings }: Props) {
               />
             </div>
           )}
+
           {builder.type === "discovery_plan" && builder.discoveryPlan && (
             <DiscoveryPlanView
               plan={builder.discoveryPlan}
@@ -388,6 +499,7 @@ export function PageBuilder({ onRefine, onOpenSettings }: Props) {
               }
             />
           )}
+
           {builder.type === "none" && <BuilderEmptyState />}
         </div>
       </div>
@@ -402,7 +514,6 @@ export function PageBuilder({ onRefine, onOpenSettings }: Props) {
               Gere a arte final renderizada em alta qualidade para sua campanha.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          
           <div className="grid gap-5 py-4">
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="format" className="text-right text-fg-secondary">Formato</Label>
@@ -417,7 +528,6 @@ export function PageBuilder({ onRefine, onOpenSettings }: Props) {
                 </SelectContent>
               </Select>
             </div>
-            
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="width" className="text-right text-fg-secondary">Largura (px)</Label>
               <Input id="width" type="number" min="1" value={exportW} onChange={(e) => setExportW(e.target.value)} className="col-span-3 bg-surface-2 border-border-subtle text-fg-primary" />

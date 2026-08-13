@@ -1,3 +1,4 @@
+// src/types/builder.ts
 export type BuilderType =
   | "email"
   | "social"
@@ -17,13 +18,11 @@ export interface DiscoveryPlan {
   channels?: string[];
   websiteUrl?: string;
   productSku?: string | null;
-
   productUrl?: string | null;
   productImageUrl?: string | null;
   productTitle?: string | null;
   productDescription?: string | null;
 }
-
 
 export interface BannerContent {
   type: "banner";
@@ -59,8 +58,9 @@ export interface EmailContent {
   benefitTitle?: string;
   secondaryCta?: string;
   urgencyText?: string;
-  testimonial?: string;
+  testimonials?: string[]; 
   footerInfo?: string;
+  layoutStyle?: "diagonal" | "split" | "minimalist" | "centered";
 }
 
 export interface SocialContent {
@@ -80,7 +80,6 @@ export type AssetContent = BannerContent | EmailContent | SocialContent;
 
 export type CtaVariant = "primary" | "secondary" | "urgent" | "soft";
 
-
 export interface BuilderState {
   type: BuilderType;
   title?: string;
@@ -97,7 +96,6 @@ export interface BuilderState {
   ctaVariant?: CtaVariant;
   keyBenefits?: string[];
   objectionsHandled?: string[];
-
   brandName?: string;
   preheader?: string;
   emailHeroImagePrompt?: string;
@@ -111,13 +109,11 @@ export interface BuilderState {
   imagePosX?: number;
   imagePosY?: number;
   imageScale?: number;
-
-  // Rich email fields (iFood-level composition)
   heroBadge?: string;
   benefitTitle?: string;
   secondaryCta?: string;
   urgencyText?: string;
-  testimonial?: string;
+  testimonials?: string[]; 
   footerInfo?: string;
 }
 

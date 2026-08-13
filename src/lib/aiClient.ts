@@ -54,7 +54,7 @@ export async function generateCompletion<T = string>(
     schema, 
     temperature, 
     maxTokens, 
-    timeoutMs = 90_000, 
+    timeoutMs = 500_000, 
     requestId = (typeof crypto !== "undefined" && "randomUUID" in crypto) ? crypto.randomUUID() : `req_${Date.now()}`, 
     signal,
     provider = "omniroute" 

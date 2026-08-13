@@ -1,0 +1,14 @@
+Opção 1: Testando o cenário "Indique e Ganhe" (Idêntico à referência do iFood)
+Copie e cole este prompt para forçar a IA a usar os cartões de depoimento e a badge de destaque:
+
+"Quero criar um e-mail marketing para a marca 'Zapp Delivery'. O objetivo é lançar nossa nova campanha de indicação. A oferta principal é 'Ganhe R$ 50 na carteira por cada amigo indicado'. O tom de voz deve ser premium, direto e empolgante. Quero que o e-mail tenha um selo de 'NOVIDADE' no topo. Crie textos curtos explicando que o processo é rápido e sem burocracia. O mais importante: crie 3 depoimentos de clientes que já lucraram com a indicação para usarmos como prova social. O botão deve ser 'Quero Indicar Agora'."
+
+Opção 2: Testando o cenário "E-commerce / Recuperação com Cupom"
+Use este para testar como o novo design renderiza o bloco de cupom destacado no final do e-mail:
+
+"Preciso de um e-mail de recuperação de clientes inativos para a loja 'UrbanKicks' (marca de tênis premium). Eles não compram há 6 meses. O tom deve ser exclusivo e focado em fazer o cliente se sentir especial. Ofereça um cupom de 20% de desconto chamado 'VOLTA20' para a próxima compra. Use a badge 'SAUDADES' no topo do e-mail. Crie um parágrafo de introdução forte e depois coloque 2 depoimentos curtos de clientes elogiando o conforto e a durabilidade dos nossos tênis. O CTA deve ser 'Garantir meu desconto'."
+
+Opção 3: Testando um Lançamento VIP (SaaS / Infoproduto)
+Para testar a hierarquia de textos e a capacidade da IA de gerar bons bullet points de benefícios misturados com a nova estrutura:
+
+"Faça um e-mail de lançamento para o 'Método Produtividade 10x'. O tom deve ser de urgência, autoridade e exclusividade. Coloque o selo 'VAGAS LIMITADAS'. A headline deve focar em como dobrar o tempo livre na semana. O corpo do e-mail deve ter parágrafos curtos, apresentar a dor da falta de tempo e listar os principais benefícios do método. Adicione 2 depoimentos de alunos que transformaram suas rotinas. A oferta é '50% de desconto apenas nas primeiras 24 horas'. O botão deve ser 'Quero minha vaga com desconto'."

@@ -419,7 +419,7 @@ export async function sendToOllama(
       ];
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), wantsExecution ? 60_000 : 45_000);
+  const timeoutId = setTimeout(() => controller.abort(), wantsExecution ? 500_000 : 320_000);
 
   let rawJson = "";
   let providerUsed: "omniroute" | "ollama" = "omniroute";
