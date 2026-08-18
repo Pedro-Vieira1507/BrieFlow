@@ -1,13 +1,5 @@
 // src/lib/scrape-site.ts
-//
-// Scraping seguro: todas as chamadas de rede passam pelo edge function scrape-proxy.
-// O proxy valida URLs contra SSRF, aplica cache de 4h, e exige autenticação.
-// O código do browser não faz fetch direto para sites de terceiros.
-
 import type { SiteBrandData } from "@/types/builder";
-import { supabase } from "@/lib/supabase";
-
-const SCRAPE_PROXY_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/scrape-proxy`;
 
 const URL_REGEX =
   /https?:\/\/[^\s<>"')\]]+|www\.[^\s<>"')\]]+|(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:com|com\.br|io|net|org|app|ai|co|dev|store|shop|me|info|biz)(?:\/[^\s<>"')\]]*)?/gi;
@@ -33,46 +25,48 @@ export function normalizeUrl(raw: string): string | null {
   }
 }
 
-async function getAuthToken(): Promise<string | null> {
-  if (!supabase) return null;
-  const { data } = await supabase.auth.getSession();
-  return data?.session?.access_token ?? null;
-}
-
 export async function scrapeWebsite(url: string): Promise<SiteBrandData> {
-  const token = await getAuthToken();
-  if (!token) {
-    throw new Error("Faça login para analisar sites.");
-  }
-
-  const response = await fetch(SCRAPE_PROXY_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-      "X-Client-Info": "brieflow/1.0",
-    },
-    body: JSON.stringify({ url }),
-  });
-
-  if (!response.ok) {
-    let errBody: Record<string, unknown> = {};
-    try { errBody = await response.json(); } catch { /* ignore */ }
-    const reason = String(errBody.error ?? `http_${response.status}`);
-    if (reason === "blocked_host" || reason === "private_ip" || reason === "invalid_protocol") {
-      throw new Error("URL inválida ou não permitida.");
+  // Substituindo a Edge Function bloqueada por um CORS proxy simples para contornar problemas locais
+  const corsProxy = "https://api.allorigins.win/get?url=";
+  
+  try {
+    const response = await fetch(`${corsProxy}${encodeURIComponent(url)}`);
+    if (!response.ok) {
+        throw new Error("Falha ao acessar o site fornecido.");
     }
-    if (reason === "unauthorized") {
-      throw new Error("Sessão expirada. Faça login novamente.");
-    }
-    throw new Error(`Não foi possível analisar o site (${reason}).`);
-  }
+    const data = await response.json();
+    const html = data.contents;
 
-  const data = await response.json() as SiteBrandData & { _cached?: boolean };
-  return data;
+    if (!html) throw new Error("Conteúdo vazio retornado.");
+
+    // Extração básica via Regex (rodando puramente no cliente/servidor Node local)
+    const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+    const descMatch = html.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']+)["']/i);
+    const ogImageMatch = html.match(/<meta[^>]*property=["']og:image["'][^>]*content=["']([^"']+)["']/i);
+
+    const title = titleMatch ? titleMatch[1].trim() : "";
+    const description = descMatch ? descMatch[1].trim() : "";
+    
+    // Tentar deduzir o nome da marca a partir do title (Pega a primeira parte antes de - ou |)
+    const brandName = title.split(/[-|]/)[0].trim() || "Sua Marca";
+
+    return {
+        url,
+        title,
+        description,
+        brandName,
+        headings: [], // Simplificado
+        bodySnippet: description, // Simplificado
+        ogImage: ogImageMatch ? ogImageMatch[1].trim() : undefined,
+        keywords: "",
+        colors: [], // Simplificado
+    };
+
+  } catch (error) {
+     throw new Error(`Não foi possível analisar o site: ${String(error)}`);
+  }
 }
 
-// Kept for backward compatibility with useBriefflowAgent — delegates to scrapeWebsite
 export async function scrapeProductByUrlFn(url: string): Promise<SiteBrandData> {
   return scrapeWebsite(url);
 }
@@ -86,7 +80,6 @@ export type ScrapedProductData = {
 };
 
 export async function scrapeProductBySkuFn(sku: string): Promise<ScrapedProductData | null> {
-  // SKU scraping delegates to general URL scraping if sku looks like a URL
   const normalized = normalizeUrl(sku);
   if (!normalized) return null;
   try {
@@ -95,7 +88,7 @@ export async function scrapeProductBySkuFn(sku: string): Promise<ScrapedProductD
       url: normalized,
       brandName: data.brandName ?? "",
       description: data.description ?? "",
-      logo: data.logo ?? null,
+      logo: data.ogImage ?? null,
       colors: data.colors ?? [],
     };
   } catch {
@@ -103,7 +96,6 @@ export async function scrapeProductBySkuFn(sku: string): Promise<ScrapedProductD
   }
 }
 
-// Re-export formatSiteContextForAgent so ollama.ts imports still work
 export function formatSiteContextForAgent(site: SiteBrandData | null | undefined): string {
   if (!site) return "";
   const parts: string[] = [];

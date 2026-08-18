@@ -10,6 +10,7 @@ import { supabase } from "@/lib/supabase";
 // ============================================================
 // PROMPTS
 // ============================================================
+
 const DISCOVERY_AGENT_PROMPT = (
   currentPlan: DiscoveryPlan | undefined,
   brandContext: BrandContext,
@@ -17,7 +18,7 @@ const DISCOVERY_AGENT_PROMPT = (
 
 === REGRAS ABSOLUTAS ===
 1. IDIOMA: TODAS as suas respostas devem ser EXCLUSIVAMENTE em Português do Brasil (PT-BR).
-2. O campo "productSku" deve ser null a não ser que o usuário envie um link DIRETO para a página de UM produto.
+2. EXTRAÇÃO DE PRODUTO: Se o usuário mencionar o nome de um produto, equipamento ou modelo (ex: "Parafilm M PM996"), preencha o campo "productSku" com esse termo exato. Se ele enviar um link, use o link.
 3. RETENÇÃO LITERAL: Se o usuário fornecer textos EXATOS para as peças (como "Título:", "Legenda:", "Hashtags"), você ESTÁ PROIBIDO de resumir. Transcreva essas regras PALAVRA POR PALAVRA para o "detectedContext".
 4. AÇÃO DE ROTEAMENTO (CRÍTICO): Você DEVE decidir o próximo passo da máquina de estados preenchendo o campo "action":
    - "discovery_continue": O usuário está apenas conversando, respondendo perguntas, adicionando contexto ou recusando algo sem pedir para gerar/cancelar tudo.
@@ -60,8 +61,7 @@ function EXECUTION_AGENT_PROMPT(
   targetAsset: AiAssetType,
   options: { productImageUrl?: string | null },
 ): string {
-  return `Você é o BrieFlow Creative Director, modo EXECUÇÃO.
-Gere AGORA o JSON para a peça ${targetAsset.toUpperCase()}.
+  return `Você é o BrieFlow Creative Director, modo EXECUÇÃO. Gere AGORA o JSON para a peça ${targetAsset.toUpperCase()}.
 
 === CONTEXTO DA MARCA ===
 ${formatSiteContextForAgent(brandContext.site)}
@@ -92,6 +92,7 @@ Responda em JSON válido:
 // ============================================================
 // TIPOS
 // ============================================================
+
 export type ChatTurn = { role: "user" | "assistant"; content: string };
 
 export interface OllamaGenerationOptions {
@@ -111,6 +112,7 @@ export interface OllamaResponse {
   chat: string;
   action?: "discovery_continue" | "generate_all" | "generate_banner" | "generate_email" | "generate_social" | "cancel";
   targetKeys?: string[];
+  detectedContext?: Record<string, string | null>; // <-- ADICIONADO PARA RETER O SKU
   builder: BuilderState;
   scores?: { persuasion: number; clarity: number; seo: number };
 }
@@ -120,6 +122,7 @@ export type OllamaResult = OllamaResponse & { meta: OllamaResultMeta };
 // ============================================================
 // HELPERS
 // ============================================================
+
 function createRequestId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
   return `bf_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
@@ -168,6 +171,7 @@ function extractBalancedJson(text: string): string | null {
       if (depth === 0) return text.slice(start, index + 1);
     }
   }
+
   if (depth > 0) return text.slice(start) + "}".repeat(depth);
   return null;
 }
@@ -216,6 +220,7 @@ function extractChatField(rawJson: string): string | null {
 function validateAsset(asset: CampaignAsset, targetAsset: AiAssetType): boolean {
   const content = asset.content as any;
   if (!content || typeof content !== "object") return false;
+
   if (targetAsset === "banner") return Boolean(content.title);
   if (targetAsset === "email") return Boolean(content.body || content.title);
   if (targetAsset === "social") return Boolean(content.caption);
@@ -247,13 +252,13 @@ function normalizeBuilder(response: OllamaResponse, currentPlan: DiscoveryPlan |
       }));
     return { type: "campaign", campaignAssets };
   }
-
   return builder;
 }
 
 // ============================================================
 // CHAMADA DIRETA – Roteia entre Ollama e Omniroute
 // ============================================================
+
 async function callDirectAi(
   messagesPayload: { role: "system" | "user"; content: string }[],
   options: OllamaGenerationOptions,
@@ -263,7 +268,6 @@ async function callDirectAi(
   const wantsStream = false;
   const provider = options.provider || "omniroute";
 
-  // 1. DEDUZ CRÉDITO NO SUPABASE (Para qualquer provedor)
   if (supabase) {
     const { data: session } = await supabase.auth.getSession();
     if (session?.session) {
@@ -272,11 +276,8 @@ async function callDirectAi(
     }
   }
 
-  // 2. ROTEAMENTO OLLAMA LOCAL
   if (provider === "ollama") {
     const ollamaUrl = import.meta.env.VITE_OLLAMA_URL || "http://localhost:11434/api/chat";
-    
-    // DETECÇÃO DINÂMICA DO MODELO (Discovery vs Execution)
     const model = isExecution
       ? (import.meta.env.VITE_OLLAMA_EXECUTION_MODEL || import.meta.env.VITE_OLLAMA_MODEL || "qwen2.5:7b")
       : (import.meta.env.VITE_OLLAMA_DISCOVERY_MODEL || import.meta.env.VITE_OLLAMA_MODEL || "qwen2.5:7b");
@@ -285,7 +286,7 @@ async function callDirectAi(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        model, // <-- Modelo dinâmico do seu .env
+        model,
         messages: messagesPayload,
         stream: wantsStream,
         format: "json",
@@ -304,10 +305,7 @@ async function callDirectAi(
 
     const data = await response.json();
     return { raw: data.message?.content ?? "", provider: "ollama" };
-  } 
-  
-  // 3. ROTEAMENTO OMNIROUTE
-  else {
+  } else {
     const apiKey = import.meta.env.VITE_OMNIROUTE_API_KEY;
     const apiUrl = import.meta.env.VITE_OMNIROUTE_API_URL || "https://api.openai.com/v1/chat/completions";
     const model = import.meta.env.VITE_OMNIROUTE_MODEL || "gpt-4o-mini";
@@ -365,7 +363,7 @@ async function callDirectAi(
                   if (partialChat) options.onStream(partialChat);
                 }
               }
-            } catch { /* Ignora falhas de parse de pedaços incompletos */ }
+            } catch { /* Ignora */ }
           }
         }
       }
@@ -381,6 +379,7 @@ async function callDirectAi(
 // ============================================================
 // FUNÇÃO PÚBLICA PRINCIPAL
 // ============================================================
+
 export async function sendToOllama(
   history: ChatTurn[],
   brandContext: BrandContext,
@@ -430,6 +429,7 @@ export async function sendToOllama(
     providerUsed = result.provider as "omniroute" | "ollama";
 
     const parsed = tryParseJson(rawJson);
+
     const metaBase: OllamaResultMeta = {
       requestId: options.requestId ?? createRequestId(),
       model: providerUsed,
@@ -461,10 +461,12 @@ export async function sendToOllama(
       chat: (parsed as OllamaResponse).chat || (wantsExecution ? "Peça gerada." : "Briefing atualizado."),
       action: (parsed as OllamaResponse).action || "discovery_continue",
       targetKeys: (parsed as OllamaResponse).targetKeys,
+      detectedContext: (parsed as OllamaResponse).detectedContext, // <-- REPASSA O CONTEXTO PARA O FRONTEND
       builder,
       scores: (parsed as OllamaResponse).scores,
       meta: { ...metaBase, stage: wantsExecution ? "completed" : "ready_to_generate", latencyMs: Date.now() - startedAt },
     };
+
   } catch (error: unknown) {
     if ((error as { name?: string }).name === "AbortError") throw new Error("Tempo excedido.");
     throw new Error(`Falha no pipeline de IA: ${String(error)}`);

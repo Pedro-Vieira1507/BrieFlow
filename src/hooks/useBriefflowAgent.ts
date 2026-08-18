@@ -13,6 +13,7 @@ import {
   scrapeWebsite,
   type ScrapedProductData,
 } from "@/lib/scrape-site";
+import { visualSearchFn } from "@/lib/visual-search";
 import type {
   CampaignAsset,
   DiscoveryPlan,
@@ -22,7 +23,6 @@ import type {
 
 type CampaignChannel = "banner" | "email" | "social";
 const ALL_CHANNELS: CampaignChannel[] = ["banner", "email", "social"];
-
 const CHANNEL_LABEL: Record<CampaignChannel, string> = {
   banner: "Banner",
   email: "E-mail",
@@ -53,8 +53,10 @@ export function useBriefflowAgent() {
 
   const discoveryPlanRef = useRef<DiscoveryPlan | undefined>(undefined);
   const scrapedProductsRef = useRef<ScrapedProductData[]>([]);
+
   const brandContextRef = useRef(brandContext);
   brandContextRef.current = brandContext;
+
   const builderRef = useRef(builder);
   builderRef.current = builder;
 
@@ -62,8 +64,8 @@ export function useBriefflowAgent() {
     async (text: string): Promise<SiteBrandData | null> => {
       const urls = extractUrlsFromText(text);
       if (urls.length === 0) return null;
-      const targetUrl = urls[0];
 
+      const targetUrl = urls[0];
       const existing = brandContextRef.current.site;
       if (existing && targetUrl === existing.url) return existing;
 
@@ -130,6 +132,7 @@ export function useBriefflowAgent() {
         ...(uploadedImage ? [uploadedImage] : []),
         ...scrapedProductsRef.current.map((p) => p.imageUrl).filter(Boolean),
       ] as string[];
+
       const uniqueImages = Array.from(new Set(allImages));
 
       if (!only) {
@@ -159,6 +162,7 @@ export function useBriefflowAgent() {
           );
 
           const allowedKeys = new Set<string>();
+
           if (!isAll) {
             const normalizedStr = safeTargetKeys.join(" ").toLowerCase();
             const schemaMap: Record<string, string[]> = {
@@ -198,6 +202,7 @@ export function useBriefflowAgent() {
               : undefined;
 
           let currentContentContext = "";
+
           if (existingAsset?.content) {
             try {
               const c = existingAsset.content as any;
@@ -218,7 +223,6 @@ export function useBriefflowAgent() {
             }
           }
 
-          // CORREÇÃO CRÍTICA AQUI: Puxando as últimas mensagens do usuário para não perder contexto
           const recentUserBriefing = baseHistory
             .filter((m) => m.role === "user")
             .slice(-4)
@@ -328,11 +332,11 @@ export function useBriefflowAgent() {
               isHomepage = true;
           } catch { /* noop */ }
         }
+
         if (isHomepage) return;
 
-        if (!isUrl && !brandContextRef.current.site?.url) return;
-
         setLoading(true);
+
         try {
           let productData: ScrapedProductData = {
             sku: value,
@@ -344,18 +348,50 @@ export function useBriefflowAgent() {
             found: false,
           };
 
-          productData = isUrl
-            ? await scrapeProductByUrlFn(value)
-            : await scrapeProductBySkuFn(value);
+          if (isUrl) {
+             const scraped = await scrapeProductByUrlFn(value).catch(() => null);
+             if (scraped) productData = { ...productData, ...scraped };
+          }
+
+          // --- BUSCA VISUAL BLINDADA NO SERVIDOR ---
+          if (!productData.imageUrl && !isUrl) {
+            setGeneratingLabel(`Buscando foto oficial para: ${value}...`);
+            
+            try {
+              // Passando com a embalagem { data: { query } } porque criamos a função de servidor com validadores de volta!
+              const visualResult = await visualSearchFn({ data: { query: value } });
+              
+              if (visualResult.found && visualResult.imageUrl) {
+                productData.imageUrl = visualResult.imageUrl;
+                productData.found = true;
+                productData.name = productData.name || value;
+              }
+              
+              if (visualResult.error) {
+                appendMessage({
+                  id: uid(),
+                  role: "assistant",
+                  content: `⚠️ **Aviso:** ${visualResult.error}`
+                });
+              }
+            } catch (visualErr) {
+               console.error("Erro fatal na busca visual:", visualErr);
+            }
+            
+            setGeneratingLabel(undefined);
+          }
+          // -------------------------------------------------------------
 
           if (productData.found && productData.imageUrl) {
             scrapedProductsRef.current = [
               ...scrapedProductsRef.current,
               productData,
             ];
+
             if (!hidden) {
               const pName = productData.name ? "*" + productData.name + "*\n" : "";
-              const pImg = "![Imagem](" + productData.imageUrl + ")\n\n";
+              const pImg = `<img src="${productData.imageUrl}" style="max-height: 120px; border-radius: 8px; margin-top: 8px;" />\n\n`;
+
               appendMessage({
                 id: uid(),
                 role: "assistant",
@@ -363,8 +399,8 @@ export function useBriefflowAgent() {
               });
             }
           }
-        } catch {
-          // silencioso
+        } catch (e) {
+           console.error("Scraping silenciado:", e);
         } finally {
           setLoading(false);
         }
@@ -376,10 +412,6 @@ export function useBriefflowAgent() {
       if (!isHiddenAction) {
         setMessages(nextMessages);
         await maybeScrapeUrls(text);
-        const urls = extractUrlsFromText(text);
-        for (const u of urls) {
-          await tryScrapeProduct(u, false);
-        }
       }
 
       const assistantId = uid();
@@ -398,6 +430,7 @@ export function useBriefflowAgent() {
 
       setLoading(true);
       const ticketId = uid();
+
       if (!isPro) {
         await enqueueOllama(ticketId);
       }
@@ -424,6 +457,18 @@ export function useBriefflowAgent() {
           updateMessage(assistantId, { content: response.chat });
         }
 
+        const extractedSku = response.detectedContext?.productSku || response.builder.discoveryPlan?.productSku;
+        
+        if (extractedSku && extractedSku !== discoveryPlanRef.current?.productSku) {
+          discoveryPlanRef.current = {
+            ...(discoveryPlanRef.current || { detectedContext: "", missingInfo: "", proposedStrategy: "" }),
+            ...response.detectedContext,
+            productSku: extractedSku,
+          } as DiscoveryPlan;
+          
+          await tryScrapeProduct(extractedSku, isHiddenAction);
+        }
+
         const currentPhase = builderRef.current.type;
         const inCampaignPhase = currentPhase === "campaign";
 
@@ -432,18 +477,10 @@ export function useBriefflowAgent() {
           response.builder.discoveryPlan
         ) {
           const discoveryPlan = response.builder.discoveryPlan;
-          const prevSku = discoveryPlanRef.current?.productSku;
-          discoveryPlanRef.current = discoveryPlan;
-
-          if (
-            discoveryPlan.productSku &&
-            discoveryPlan.productSku !== prevSku
-          ) {
-            await tryScrapeProduct(discoveryPlan.productSku, isHiddenAction);
-          }
+          discoveryPlanRef.current = { ...discoveryPlanRef.current, ...discoveryPlan };
 
           if (!inCampaignPhase) {
-            setBuilder({ type: "discovery_plan", discoveryPlan });
+            setBuilder({ type: "discovery_plan", discoveryPlan: discoveryPlanRef.current });
           }
         }
 
@@ -459,7 +496,6 @@ export function useBriefflowAgent() {
         } else if (action === "generate_social") {
           await generateCampaignSafely(history, "social", targetKeys, provider);
         }
-
       } catch (err) {
         toast.error("Falha ao processar", { description: String(err) });
         if (!isHiddenAction) {

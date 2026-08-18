@@ -1,0 +1,23 @@
+1. O Teste de Alto Impacto (Foco em Varejo e Agressividade)
+Este prompt deve forçar a IA a escolher o backgroundShape: "diagonal" (para passar a sensação de velocidade/impacto) e preencher os dois badges promocionais.
+
+Prompt:
+"Crie uma campanha de varejo agressiva para a loja 'TechStore'. O foco é um banner vendendo o novo 'Iphone 14' com 50% de desconto e entrega expressa gratuita. Quero um visual de alto impacto, sensação de urgência e velocidade. Direto ao ponto."
+
+2. O Teste Elegante e Amigável (Foco em Lançamento)
+Aqui, esperamos que a IA leia a palavra "amigável" e "suave" e opte pelo backgroundShape: "curve" (estilo Forlab original), usando talvez apenas o badgePrimary para marcar a novidade.
+
+Prompt:
+"Faça um banner para o lançamento da nova linha de dermocosméticos 'GlowSkin'. O tom deve ser elegante, suave, premium e muito amigável. Destaque que é uma 'Novidade Exclusiva', mas sem focar em descontos ou preço baixo. O layout precisa passar fluidez."
+
+3. O Teste Corporativo B2B (Foco em Minimalismo)
+Neste cenário, queremos ver se a IA tem o bom senso de não usar os badges promocionais (já que não há oferta) e se ela escolhe um backgroundShape mais sóbrio, como "split" ou "minimalist".
+
+Prompt:
+"Gere um banner institucional corporativo B2B para a marca 'DataCorp'. O foco é vender 'Soluções de Nuvem de Alta Performance'. Sem promoções, sem gritaria. Quero um visual extremamente limpo, corporativo, sério e direto ao ponto."
+
+4. O Teste de "Scraping" com Oferta Oculta
+Este é o teste de fogo para ver se a IA consegue juntar o contexto de uma URL real com as regras de design que acabamos de ensinar.
+
+Prompt:
+"Analise o site https://www.nike.com.br e crie um banner focado na venda de tênis de corrida. Eu quero que você aplique um cupom de '20% OFF' no PIX. O design deve ser esportivo, dinâmico e usar as cores da marca. Certifique-se de dar destaque visual ao cupom."
