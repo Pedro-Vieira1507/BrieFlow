@@ -1,6 +1,8 @@
+/* styles.css */
 @import "tailwindcss" source(none);
 @source "../src";
 @import "tw-animate-css";
+
 @custom-variant dark (&:is(.dark, .dark *));
 
 @theme inline {
@@ -29,6 +31,7 @@
   --color-brand: var(--brand);
   --color-brand-fg: var(--brand-fg);
   --color-brand-muted: var(--brand-muted);
+
   --color-accent-danger: var(--accent-danger);
   --color-accent-success: var(--accent-success);
 
@@ -40,40 +43,44 @@
 }
 
 :root, .dark {
-  --background: #050505;
-  --foreground: #fafafa;
-  
-  --surface-0: #050505;
-  --surface-1: #0a0a0b;
-  --surface-2: #101012;
-  --surface-3: #17171a;
+  /* Design: Tons de fundo mais profundos (Midnight em vez de Cinza Puro) */
+  --background: #030305;
+  --foreground: #ffffff;
 
-  --fg-primary: #fafafa;
-  --fg-secondary: rgba(250, 250, 250, 0.72);
-  --fg-tertiary: rgba(250, 250, 250, 0.50);
-  --fg-muted: rgba(250, 250, 250, 0.32);
+  --surface-0: #030305;
+  --surface-1: #09090b;
+  --surface-2: #121217;
+  --surface-3: #1a1a24;
 
-  --border: rgba(255, 255, 255, 0.06);
-  --border-subtle: rgba(255, 255, 255, 0.05);
-  --border-strong: rgba(255, 255, 255, 0.10);
+  --fg-primary: #ffffff;
+  --fg-secondary: rgba(255, 255, 255, 0.75);
+  --fg-tertiary: rgba(255, 255, 255, 0.55);
+  --fg-muted: rgba(255, 255, 255, 0.35);
+
+  --border: rgba(255, 255, 255, 0.08);
+  --border-subtle: rgba(255, 255, 255, 0.04);
+  --border-strong: rgba(255, 255, 255, 0.12);
+
   --input: rgba(255, 255, 255, 0.08);
-  --ring: rgba(129, 140, 248, 0.55);
+  --ring: rgba(99, 102, 241, 0.6);
 
+  /* Design: Brand mais vibrante */
   --brand: #6366f1;
   --brand-fg: #ffffff;
-  --brand-muted: rgba(99, 102, 241, 0.14);
-  --brand-glow: rgba(99, 102, 241, 0.35);
+  --brand-muted: rgba(99, 102, 241, 0.15);
+  --brand-glow: rgba(99, 102, 241, 0.4);
 
-  --accent-danger: #f43f5e;
-  --accent-success: #22c55e;
+  --accent-danger: #fb7185;
+  --accent-success: #34d399;
 
-  --gradient-brand: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
-  --gradient-radial-brand: radial-gradient(circle at 30% 20%, rgba(99, 102, 241, 0.15), transparent 60%);
+  --gradient-brand: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
+  --gradient-radial-brand: radial-gradient(circle at 50% 0%, rgba(99, 102, 241, 0.15), transparent 70%);
 
-  --shadow-elevated: 0 20px 50px -20px rgba(0, 0, 0, 0.7), 0 4px 12px -4px rgba(0, 0, 0, 0.5);
-  --shadow-glass: 0 4px 24px -8px rgba(0, 0, 0, 0.5), inset 0 1px 0 0 rgba(255, 255, 255, 0.05);
-  --shadow-brand: 0 10px 40px -12px rgba(99, 102, 241, 0.5);
-  --shadow-soft: 0 2px 8px -2px rgba(0, 0, 0, 0.4);
+  /* Design: Sombras mais ricas e cinematográficas */
+  --shadow-elevated: 0 24px 60px -12px rgba(0, 0, 0, 0.8), 0 8px 24px -4px rgba(0, 0, 0, 0.5);
+  --shadow-glass: 0 8px 32px -8px rgba(0, 0, 0, 0.6), inset 0 1px 0 0 rgba(255, 255, 255, 0.1);
+  --shadow-brand: 0 12px 30px -10px rgba(99, 102, 241, 0.6), inset 0 1px 0 0 rgba(255,255,255,0.2);
+  --shadow-soft: 0 4px 12px -2px rgba(0, 0, 0, 0.5);
 }
 
 @layer base {
@@ -86,23 +93,79 @@
     -moz-osx-font-smoothing: grayscale;
   }
   h1, h2, h3, h4, h5 { font-family: var(--font-display); letter-spacing: -0.02em; color: var(--fg-primary); }
-  ::selection { background-color: var(--brand-muted); color: var(--fg-primary); }
+  ::selection { background-color: var(--brand-muted); color: var(--brand); }
 
-  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
   ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.06); border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
-  ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.12); background-clip: padding-box; }
+  ::-webkit-scrollbar-thumb { 
+    background: rgba(255, 255, 255, 0.1); 
+    border-radius: 999px; 
+    border: 2px solid var(--surface-0); 
+  }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.2); }
 }
 
-@keyframes shimmer { 0% { background-position: -400px 0; } 100% { background-position: 400px 0; } }
-@keyframes fade-in-up { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-@keyframes scale-in { from { opacity: 0; transform: scale(0.96); } to { opacity: 1; transform: scale(1); } }
-@keyframes typing-bounce { 0%, 60%, 100% { transform: translateY(0); opacity: 0.4; } 30% { transform: translateY(-4px); opacity: 1; } }
+@keyframes shimmer {
+  0% { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
 
-@utility glass { background: color-mix(in oklab, var(--surface-2) 60%, transparent); backdrop-filter: blur(20px) saturate(160%); border: 1px solid var(--border-subtle); }
-@utility glass-strong { background: color-mix(in oklab, var(--surface-2) 80%, transparent); backdrop-filter: blur(28px) saturate(180%); border: 1px solid var(--border-strong); box-shadow: var(--shadow-glass); }
-@utility skeleton { background: linear-gradient(90deg, var(--surface-2) 0%, var(--surface-3) 50%, var(--surface-2) 100%); background-size: 800px 100%; animation: shimmer 1.6s infinite linear; }
-@utility fade-in-up { animation: fade-in-up 0.5s cubic-bezier(0.22, 1, 0.36, 1) both; }
-@utility scale-in { animation: scale-in 0.35s cubic-bezier(0.22, 1, 0.36, 1) both; }
-@utility gradient-brand-text { background: var(--gradient-brand); -webkit-background-clip: text; background-clip: text; color: transparent; }
-@utility editable-hover { cursor: text; transition: outline-color 0.15s ease, background-color 0.15s ease; outline: 2px dashed transparent; outline-offset: 4px; border-radius: 6px; &:hover { outline-color: rgba(250, 250, 250, 0.16); background-color: rgba(250, 250, 250, 0.03); } &:empty:before { content: attr(data-placeholder); color: var(--fg-muted); font-style: italic; } }
+@utility glass {
+  background: color-mix(in oklab, var(--surface-2) 65%, transparent);
+  backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid var(--border-subtle);
+}
+
+@utility glass-strong {
+  background: color-mix(in oklab, var(--surface-2) 85%, transparent);
+  backdrop-filter: blur(32px) saturate(200%);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-glass);
+}
+
+@utility skeleton {
+  background: linear-gradient(90deg, var(--surface-2) 0%, var(--surface-3) 50%, var(--surface-2) 100%);
+  background-size: 800px 100%;
+  animation: shimmer 2s infinite linear;
+}
+
+@utility fade-in-up {
+  animation: fade-in-up 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@utility scale-in {
+  animation: scale-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@utility gradient-brand-text {
+  background: var(--gradient-brand);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+@utility editable-hover {
+  cursor: text;
+  transition: outline-color 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease;
+  outline: 2px dashed transparent;
+  outline-offset: 4px;
+  border-radius: 8px;
+  &:hover {
+    outline-color: rgba(255, 255, 255, 0.2);
+    background-color: rgba(255, 255, 255, 0.05);
+  }
+  &:empty:before {
+    content: attr(data-placeholder);
+    color: var(--fg-muted);
+    font-style: italic;
+    opacity: 0.7;
+  }
+}

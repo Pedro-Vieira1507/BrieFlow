@@ -1,3 +1,4 @@
+// src/components/briefflow/AuthModal.tsx
 import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -46,7 +47,6 @@ export function AuthModal({ open, onOpenChange }: Props) {
     } catch (error: any) {
       let errorMsg = error.message || "Erro na autenticação.";
       
-      // Tradução dos erros mais comuns do Supabase
       if (errorMsg.includes("Invalid login credentials")) {
         errorMsg = "E-mail ou senha incorretos.";
       } else if (errorMsg.includes("Password should be at least")) {
@@ -54,7 +54,6 @@ export function AuthModal({ open, onOpenChange }: Props) {
       } else if (errorMsg.includes("User already registered")) {
         errorMsg = "Este e-mail já está cadastrado.";
       }
-
       toast.error(errorMsg);
     } finally {
       setLoading(false);
@@ -63,7 +62,7 @@ export function AuthModal({ open, onOpenChange }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[400px] bg-surface-1 border-border-strong text-fg-primary shadow-[var(--shadow-glass)]">
+      <DialogContent className="sm:max-w-[400px] bg-surface-1 border-border-strong text-fg-primary shadow-[var(--shadow-glass)] animate-in zoom-in-95 duration-200">
         <DialogHeader>
           <DialogTitle className="font-display text-xl">
             {isLogin ? "Acessar BrieFlow" : "Criar sua conta"}
@@ -75,7 +74,7 @@ export function AuthModal({ open, onOpenChange }: Props) {
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleAuth} className="space-y-4 mt-4">
+        <form onSubmit={handleAuth} className="space-y-5 mt-4">
           <div className="space-y-2">
             <Label htmlFor="email" className="text-fg-secondary">E-mail</Label>
             <Input
@@ -84,7 +83,7 @@ export function AuthModal({ open, onOpenChange }: Props) {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="bg-surface-2 border-border-subtle focus-visible:ring-brand text-fg-primary"
+              className="bg-surface-2 border-border-subtle focus-visible:ring-brand text-fg-primary transition-colors duration-200"
               placeholder="seu@email.com"
             />
           </div>
@@ -96,18 +95,20 @@ export function AuthModal({ open, onOpenChange }: Props) {
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="bg-surface-2 border-border-subtle focus-visible:ring-brand text-fg-primary"
+              className="bg-surface-2 border-border-subtle focus-visible:ring-brand text-fg-primary transition-colors duration-200"
               placeholder="••••••••"
             />
           </div>
-          <Button type="submit" disabled={loading} className="w-full bg-brand text-brand-fg hover:brightness-110 shadow-[var(--shadow-brand)]">
-            {loading ? <Loader2 className="size-4 animate-spin" /> : (isLogin ? "Entrar" : "Criar conta")}
+
+          <Button type="submit" disabled={loading} className="w-full bg-brand text-brand-fg hover:brightness-110 shadow-[var(--shadow-brand)] disabled:cursor-not-allowed disabled:opacity-70 transition-all duration-200">
+            {loading ? <Loader2 className="size-4 animate-spin mr-2" /> : null}
+            {loading ? "Processando..." : (isLogin ? "Entrar" : "Criar conta")}
           </Button>
         </form>
 
-        <div className="mt-4 text-center text-sm text-fg-tertiary">
+        <div className="mt-2 text-center text-sm text-fg-tertiary">
           {isLogin ? "Não tem uma conta?" : "Já tem uma conta?"}{" "}
-          <button type="button" onClick={() => setIsLogin(!isLogin)} className="text-brand hover:underline font-medium">
+          <button type="button" onClick={() => setIsLogin(!isLogin)} className="text-brand hover:underline font-medium transition-colors hover:text-brand-fg">
             {isLogin ? "Cadastre-se" : "Faça login"}
           </button>
         </div>

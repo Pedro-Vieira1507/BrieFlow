@@ -19,10 +19,12 @@ export function DraggableImage({ src }: { src: string }) {
     src.startsWith("http") &&
     !src.includes("wsrv.nl") &&
     !src.includes("picsum.photos");
-
+    
+  // Qualidade: Proxy com largura aumentada (1200px) e qualidade máxima (q=95)
   const proxy1 = isExternal
-    ? `https://wsrv.nl/?url=${encodeURIComponent(src)}&output=webp&w=600`
+    ? `https://wsrv.nl/?url=${encodeURIComponent(src)}&output=webp&w=1200&q=95`
     : src;
+    
   const proxy2 = isExternal
     ? `https://api.allorigins.win/raw?url=${encodeURIComponent(src)}`
     : "";
@@ -144,15 +146,14 @@ export function DraggableImage({ src }: { src: string }) {
         data-testid="draggable-image-fallback"
         className={cn(
           "absolute z-40 flex h-[180px] w-[180px] flex-col items-center justify-center gap-1.5 rounded-xl",
-          // CORREÇÃO OKLAB: bg-slate e borders substituídos por HEX e RGBA
           "border-2 border-dashed border-[#cbd5e1] bg-[rgba(241,245,249,0.8)] backdrop-blur-sm",
-          "text-[#94a3b8] shadow-lg",
+          "text-[#94a3b8] shadow-lg cursor-grab active:cursor-grabbing",
         )}
         style={{ transform: `translate(${pos.x}px, ${pos.y}px) scale(${scale})` }}
         onPointerDown={onPointerDown}
       >
         <ImageOff className="size-6" />
-        <span className="text-[10px] font-bold uppercase tracking-widest">
+        <span className="text-[10px] font-bold uppercase tracking-widest text-center">
           Imagem indisponível
         </span>
       </div>
@@ -164,9 +165,9 @@ export function DraggableImage({ src }: { src: string }) {
       ref={containerRef}
       data-testid="draggable-image"
       className={cn(
-        "absolute z-40 cursor-move transition-shadow",
+        "absolute z-40 cursor-grab active:cursor-grabbing transition-all duration-200",
         isActive
-          ? "ring-2 ring-dashed ring-brand shadow-2xl"
+          ? "ring-2 ring-dashed ring-brand shadow-[0_20px_50px_rgba(0,0,0,0.5)] scale-105"
           : "drop-shadow-2xl hover:ring-2 hover:ring-dashed hover:ring-white/50",
       )}
       style={{
@@ -178,30 +179,31 @@ export function DraggableImage({ src }: { src: string }) {
       <img
         src={imgSrc}
         alt="Produto"
-        crossOrigin="anonymous" 
+        crossOrigin="anonymous"
         loading="lazy"
         decoding="async"
         className="pointer-events-none max-h-[250px] w-auto select-none rounded-xl bg-transparent object-contain mix-blend-multiply"
         draggable={false}
         onError={handleImgError}
+        style={{ imageRendering: "high-quality" }} // Força o anti-aliasing do navegador
       />
       {isActive && (
         <>
           <div
             onPointerDown={onResizeDown}
-            className="absolute -left-2.5 -top-2.5 z-50 h-5 w-5 cursor-nwse-resize rounded-full border-[3px] border-brand bg-white shadow-md"
+            className="absolute -left-2.5 -top-2.5 z-50 h-5 w-5 cursor-nwse-resize rounded-full border-[3px] border-brand bg-white shadow-md hover:scale-125 transition-transform"
           />
           <div
             onPointerDown={onResizeDown}
-            className="absolute -right-2.5 -top-2.5 z-50 h-5 w-5 cursor-nesw-resize rounded-full border-[3px] border-brand bg-white shadow-md"
+            className="absolute -right-2.5 -top-2.5 z-50 h-5 w-5 cursor-nesw-resize rounded-full border-[3px] border-brand bg-white shadow-md hover:scale-125 transition-transform"
           />
           <div
             onPointerDown={onResizeDown}
-            className="absolute -bottom-2.5 -left-2.5 z-50 h-5 w-5 cursor-nesw-resize rounded-full border-[3px] border-brand bg-white shadow-md"
+            className="absolute -bottom-2.5 -left-2.5 z-50 h-5 w-5 cursor-nesw-resize rounded-full border-[3px] border-brand bg-white shadow-md hover:scale-125 transition-transform"
           />
           <div
             onPointerDown={onResizeDown}
-            className="absolute -bottom-2.5 -right-2.5 z-50 h-5 w-5 cursor-nwse-resize rounded-full border-[3px] border-brand bg-white shadow-md"
+            className="absolute -bottom-2.5 -right-2.5 z-50 h-5 w-5 cursor-nwse-resize rounded-full border-[3px] border-brand bg-white shadow-md hover:scale-125 transition-transform"
           />
         </>
       )}

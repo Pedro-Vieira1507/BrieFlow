@@ -75,7 +75,7 @@ export function LibraryModal() {
 
   return (
     <Dialog open={libraryOpen} onOpenChange={setLibraryOpen}>
-      <DialogContent className="sm:max-w-[1000px] w-[95vw] h-[88vh] bg-surface-1 border-border-strong text-fg-primary shadow-2xl p-0 flex flex-col overflow-hidden">
+      <DialogContent className="sm:max-w-[1000px] w-[95vw] h-[88vh] bg-surface-1 border-border-strong text-fg-primary shadow-2xl p-0 flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
         <DialogHeader className="p-6 pb-4 border-b border-border-subtle flex flex-row items-center justify-between">
           <div>
             <DialogTitle className="font-display text-xl flex items-center gap-2">
@@ -93,7 +93,7 @@ export function LibraryModal() {
             <p className="text-xs uppercase font-bold tracking-widest">Carregando conteúdos salvos...</p>
           </div>
         ) : items.length === 0 ? (
-          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
+          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center animate-in fade-in duration-500">
             <div className="size-16 rounded-2xl bg-surface-2 border border-border-subtle flex items-center justify-center mb-4 text-fg-muted">
               <Sparkles className="size-8" />
             </div>
@@ -126,8 +126,9 @@ export function LibraryModal() {
                   <div
                     key={item.id}
                     onClick={() => setSelectedIndex(idx)}
+                    // UX: Efeito tátil de clique (active:scale-[0.98])
                     className={cn(
-                      "group relative p-3 rounded-xl border transition-all cursor-pointer flex flex-col gap-1.5",
+                      "group relative p-3 rounded-xl border transition-all duration-200 cursor-pointer flex flex-col gap-1.5 active:scale-[0.98]",
                       isSelected
                         ? "bg-surface-3 border-brand shadow-md"
                         : "bg-surface-2/80 border-border-subtle hover:border-border-strong hover:bg-surface-3/50"
@@ -139,7 +140,7 @@ export function LibraryModal() {
                       </span>
                       <button
                         onClick={(e) => handleDelete(item.id, e)}
-                        className="text-fg-muted hover:text-rose-400 p-1 rounded-md hover:bg-rose-500/10 transition-colors opacity-0 group-hover:opacity-100"
+                        className="text-fg-muted hover:text-rose-400 p-1 rounded-md hover:bg-rose-500/10 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
                         title="Excluir da biblioteca"
                       >
                         <Trash2 className="size-3.5" />
@@ -157,7 +158,7 @@ export function LibraryModal() {
             {/* ÁREA DE VISUALIZAÇÃO COM ABAS */}
             <div className="flex-1 flex flex-col min-w-0 bg-surface-0 overflow-y-auto p-6 relative">
               {selectedState && campaignAssets && campaignAssets.length > 0 ? (
-                <div className="space-y-6 pb-20">
+                <div className="space-y-6 pb-20 animate-in fade-in slide-in-from-bottom-4 duration-300">
                   <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border-subtle pb-4">
                     <div>
                       <h4 className="font-display font-semibold text-lg text-fg-primary">
@@ -170,13 +171,13 @@ export function LibraryModal() {
                     <Button
                       size="sm"
                       onClick={() => handleApplyToCanvas(selectedState)}
-                      className="bg-brand text-brand-fg hover:brightness-110 shadow-[var(--shadow-brand)] text-xs font-semibold"
+                      className="bg-brand text-brand-fg hover:brightness-110 shadow-[var(--shadow-brand)] text-xs font-semibold transition-all duration-200 active:scale-95"
                     >
                       Carregar no Canvas <ArrowRight className="ml-1.5 size-4" />
                     </Button>
                   </div>
 
-                  {/* PREVIEW SEPARADO POR ABAS (BANNER, E-MAIL, SOCIAL) */}
+                  {/* PREVIEW SEPARADO POR ABAS */}
                   <CampaignTabs
                     assets={campaignAssets}
                     onAssetChange={handleAssetPatch}

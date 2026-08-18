@@ -8,7 +8,6 @@ import { toMarketingBrief } from "@/types/brief";
 import { useCreditsStore } from "@/hooks/useCredits";
 import {
   extractUrlsFromText,
-  scrapeProductBySkuFn,
   scrapeProductByUrlFn,
   scrapeWebsite,
   type ScrapedProductData,
@@ -20,6 +19,7 @@ import type {
   SiteBrandData,
   BuilderState,
 } from "@/types/builder";
+import { analyzeImageWithVisionFn } from "@/lib/vision-api";
 
 type CampaignChannel = "banner" | "email" | "social";
 const ALL_CHANNELS: CampaignChannel[] = ["banner", "email", "social"];
@@ -50,13 +50,10 @@ export function useBriefflowAgent() {
   } = useBriefflowStore();
 
   const { generateMaterial } = useGenerateMaterials();
-
   const discoveryPlanRef = useRef<DiscoveryPlan | undefined>(undefined);
   const scrapedProductsRef = useRef<ScrapedProductData[]>([]);
-
   const brandContextRef = useRef(brandContext);
   brandContextRef.current = brandContext;
-
   const builderRef = useRef(builder);
   builderRef.current = builder;
 
@@ -125,14 +122,12 @@ export function useBriefflowAgent() {
           : undefined);
 
       const channels: CampaignChannel[] = only ? [only] : ALL_CHANNELS;
-
       setLoading(true);
 
       const allImages = [
         ...(uploadedImage ? [uploadedImage] : []),
         ...scrapedProductsRef.current.map((p) => p.imageUrl).filter(Boolean),
       ] as string[];
-
       const uniqueImages = Array.from(new Set(allImages));
 
       if (!only) {
@@ -144,7 +139,7 @@ export function useBriefflowAgent() {
         id: assistantId,
         role: "assistant",
         content: only
-          ? `Ok! Vou regerar apenas o **${CHANNEL_LABEL[only]}** – as outras peças permanecem como estão.`
+          ? `Ok! Vou regerar apenas o **${CHANNEL_LABEL[only]}** — as outras peças permanecem como estão.`
           : `Mão na massa! Gerando ${channels.length} peças sequencialmente.`,
       });
 
@@ -158,11 +153,10 @@ export function useBriefflowAgent() {
         try {
           const safeTargetKeys = Array.isArray(targetKeys) ? targetKeys : ["all"];
           const isAll = safeTargetKeys.length === 0 || safeTargetKeys.some(k =>
-              ["all", "tudo", "todos", "geral", "completo"].includes(String(k).toLowerCase())
+            ["all", "tudo", "todos", "geral", "completo"].includes(String(k).toLowerCase())
           );
 
           const allowedKeys = new Set<string>();
-
           if (!isAll) {
             const normalizedStr = safeTargetKeys.join(" ").toLowerCase();
             const schemaMap: Record<string, string[]> = {
@@ -198,11 +192,10 @@ export function useBriefflowAgent() {
           });
 
           const existingAsset = builderRef.current.type === "campaign"
-              ? builderRef.current.campaignAssets?.find((a) => a.type === channel)
-              : undefined;
+            ? builderRef.current.campaignAssets?.find((a) => a.type === channel)
+            : undefined;
 
           let currentContentContext = "";
-
           if (existingAsset?.content) {
             try {
               const c = existingAsset.content as any;
@@ -267,7 +260,6 @@ export function useBriefflowAgent() {
               },
             };
           });
-
         } catch (err) {
           console.error(`Erro ao gerar ${channel}:`, describeAiError(err), err);
           hasErrors = true;
@@ -283,8 +275,8 @@ export function useBriefflowAgent() {
             ? `Não consegui regerar o ${CHANNEL_LABEL[only]} agora. Tente novamente.`
             : "Processo concluído, mas uma ou mais peças falharam. Você pode pedir para regenerar."
           : only
-          ? `${CHANNEL_LABEL[only]} atualizado com sucesso.`
-          : "Campanha finalizada! Navegue pelas abas ao lado.",
+            ? `${CHANNEL_LABEL[only]} atualizado com sucesso.`
+            : "Campanha finalizada! Navegue pelas abas ao lado.",
       });
 
       setGeneratingLabel(undefined);
@@ -334,7 +326,6 @@ export function useBriefflowAgent() {
         }
 
         if (isHomepage) return;
-
         setLoading(true);
 
         try {
@@ -349,24 +340,21 @@ export function useBriefflowAgent() {
           };
 
           if (isUrl) {
-             const scraped = await scrapeProductByUrlFn(value).catch(() => null);
-             if (scraped) productData = { ...productData, ...scraped };
+            const scraped = await scrapeProductByUrlFn(value).catch(() => null);
+            if (scraped) productData = { ...productData, ...scraped };
           }
 
-          // --- BUSCA VISUAL BLINDADA NO SERVIDOR ---
+          // --- BUSCA VISUAL NO SERVIDOR VIA GOOGLE ---
           if (!productData.imageUrl && !isUrl) {
             setGeneratingLabel(`Buscando foto oficial para: ${value}...`);
-            
             try {
-              // Passando com a embalagem { data: { query } } porque criamos a função de servidor com validadores de volta!
               const visualResult = await visualSearchFn({ data: { query: value } });
-              
               if (visualResult.found && visualResult.imageUrl) {
                 productData.imageUrl = visualResult.imageUrl;
                 productData.found = true;
                 productData.name = productData.name || value;
               }
-              
+
               if (visualResult.error) {
                 appendMessage({
                   id: uid(),
@@ -375,23 +363,55 @@ export function useBriefflowAgent() {
                 });
               }
             } catch (visualErr) {
-               console.error("Erro fatal na busca visual:", visualErr);
+              console.error("Erro fatal na busca visual:", visualErr);
             }
-            
             setGeneratingLabel(undefined);
           }
-          // -------------------------------------------------------------
 
+          // -------------------------------------------------------------
+          // INTEGRAÇÃO GOOGLE AI VISION: Extrai cores do produto automaticamente
           if (productData.found && productData.imageUrl) {
             scrapedProductsRef.current = [
               ...scrapedProductsRef.current,
               productData,
             ];
 
+            setGeneratingLabel(`Google Vision API analisando imagem do produto...`);
+            try {
+              const visionResult = await analyzeImageWithVisionFn({ data: { imageUrl: productData.imageUrl } });
+              
+              if (visionResult.primaryBrandColor) {
+                const themeColor = visionResult.primaryBrandColor;
+                const secondaryColor = visionResult.secondaryBrandColor || "#0f172a";
+
+                // Aplica a cor extraída da foto no canvas imediatamente
+                if (builderRef.current.type === "campaign" && builderRef.current.campaignAssets) {
+                  const updatedAssets = builderRef.current.campaignAssets.map(asset => ({
+                    ...asset,
+                    content: {
+                      ...asset.content,
+                      productImageUrl: productData.imageUrl,
+                      themeColor,
+                      secondaryColor
+                    }
+                  }));
+                  setBuilder({ ...builderRef.current, campaignAssets: updatedAssets });
+                }
+
+                if (discoveryPlanRef.current && visionResult.labels?.length) {
+                  discoveryPlanRef.current = {
+                    ...discoveryPlanRef.current,
+                    detectedContext: `${discoveryPlanRef.current.detectedContext}\nContexto do Produto: ${visionResult.labels.join(", ")}`
+                  };
+                }
+              }
+            } catch (visionErr) {
+              console.error("Falha ao analisar imagem com a Vision API:", visionErr);
+            }
+
             if (!hidden) {
               const pName = productData.name ? "*" + productData.name + "*\n" : "";
               const pImg = `<img src="${productData.imageUrl}" style="max-height: 120px; border-radius: 8px; margin-top: 8px;" />\n\n`;
-
               appendMessage({
                 id: uid(),
                 role: "assistant",
@@ -400,7 +420,7 @@ export function useBriefflowAgent() {
             }
           }
         } catch (e) {
-           console.error("Scraping silenciado:", e);
+          console.error("Scraping silenciado:", e);
         } finally {
           setLoading(false);
         }
@@ -430,7 +450,6 @@ export function useBriefflowAgent() {
 
       setLoading(true);
       const ticketId = uid();
-
       if (!isPro) {
         await enqueueOllama(ticketId);
       }
@@ -452,20 +471,18 @@ export function useBriefflowAgent() {
         );
 
         useCreditsStore.getState().refresh();
-
         if (!isHiddenAction) {
           updateMessage(assistantId, { content: response.chat });
         }
 
         const extractedSku = response.detectedContext?.productSku || response.builder.discoveryPlan?.productSku;
-        
         if (extractedSku && extractedSku !== discoveryPlanRef.current?.productSku) {
           discoveryPlanRef.current = {
             ...(discoveryPlanRef.current || { detectedContext: "", missingInfo: "", proposedStrategy: "" }),
             ...response.detectedContext,
             productSku: extractedSku,
           } as DiscoveryPlan;
-          
+
           await tryScrapeProduct(extractedSku, isHiddenAction);
         }
 
@@ -478,7 +495,6 @@ export function useBriefflowAgent() {
         ) {
           const discoveryPlan = response.builder.discoveryPlan;
           discoveryPlanRef.current = { ...discoveryPlanRef.current, ...discoveryPlan };
-
           if (!inCampaignPhase) {
             setBuilder({ type: "discovery_plan", discoveryPlan: discoveryPlanRef.current });
           }

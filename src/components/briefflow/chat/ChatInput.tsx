@@ -1,131 +1,85 @@
 // src/components/briefflow/chat/ChatInput.tsx
-import { useRef, useState, useEffect } from "react";
-import { Send, Paperclip, X } from "lucide-react";
-import { Textarea } from "@/components/ui/textarea";
-import { Button } from "@/components/ui/button";
+import { useState, useRef, useEffect } from "react";
+import { Send, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useBriefflowStore } from "@/store/briefflow";
 
 interface Props {
-  disabled: boolean;
   onSend: (text: string) => void;
+  disabled?: boolean;
 }
 
-export function ChatInput({ disabled, onSend }: Props) {
-  const [value, setValue] = useState("");
-  const [mounted, setMounted] = useState(false);
-  const ref = useRef<HTMLTextAreaElement>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
-  
-  // O user e setAuthOpen não são mais necessários aqui
-  const { uploadedImage, setUploadedImage } = useBriefflowStore();
+export function ChatInput({ onSend, disabled }: Props) {
+  const [text, setText] = useState("");
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  const submit = () => {
-    const t = value.trim();
-    if (!t && !uploadedImage) return;
-
-    onSend(t || "Imagem enviada.");
-    setValue("");
-    requestAnimationFrame(() => ref.current?.focus());
+  const handleSubmit = (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (!text.trim() || disabled) return;
+    onSend(text.trim());
+    setText("");
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto";
+    }
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSubmit();
+    }
+  };
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      setUploadedImage(event.target?.result as string);
-    };
-    reader.readAsDataURL(file);
-
-    if (fileRef.current) fileRef.current.value = "";
+  const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setText(e.target.value);
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto";
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 150)}px`;
+    }
   };
 
   return (
-    <div className="p-4 bg-gradient-to-t from-surface-1 via-surface-1 to-transparent pt-6 relative z-10">
-      
-      {/* PREVIEW DO ANEXO */}
-      {uploadedImage && (
-        <div className="relative mb-3 inline-block animate-in fade-in zoom-in duration-200 ml-2">
-          <img src={uploadedImage} alt="Upload preview" className="h-14 w-14 object-cover rounded-xl border border-border-strong shadow-lg" />
-          <button 
-            onClick={() => setUploadedImage(null)} 
-            className="absolute -top-2 -right-2 bg-surface-3 rounded-full p-1 border border-border-strong text-fg-muted hover:text-rose-400 hover:bg-rose-400/10 transition-colors shadow-md"
-          >
-            <X className="size-3" />
-          </button>
-        </div>
-      )}
-
-      {/* INPUT COM GLASSMORPHISM */}
-      <div
+    <div className="p-4 bg-surface-1 border-t border-border-subtle shrink-0">
+      <form 
+        onSubmit={handleSubmit}
+        // UX: Anel de foco interativo (focus-within) para o contêiner inteiro
         className={cn(
-          "relative rounded-2xl glass-strong border border-border-strong",
-          "transition-all duration-300 focus-within:border-brand/60 focus-within:ring-2 focus-within:ring-brand/20",
+          "relative flex items-end gap-2 bg-surface-2 rounded-[20px] p-2 pr-2.5 transition-all duration-300 border",
+          text.length > 0 ? "border-brand/50 shadow-[0_0_15px_rgba(99,102,241,0.1)]" : "border-border-subtle shadow-sm",
+          "focus-within:border-brand focus-within:ring-2 focus-within:ring-brand/20"
         )}
       >
-        <Textarea
-          ref={ref}
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              submit();
-            }
-          }}
-          placeholder="Mensagem para a IA..."
+        <textarea
+          ref={textareaRef}
+          value={text}
+          onChange={handleInput}
+          onKeyDown={handleKeyDown}
+          disabled={disabled}
+          placeholder="Digite o site ou o que deseja criar..."
+          className="w-full max-h-[150px] min-h-[44px] resize-none bg-transparent px-3 py-3 text-sm text-fg-primary placeholder:text-fg-muted focus:outline-none disabled:opacity-50"
           rows={1}
-          disabled={disabled}
-          className={cn(
-            "min-h-[56px] max-h-[160px] resize-none border-0 bg-transparent py-4 pl-12 pr-14",
-            "text-[14.5px] leading-relaxed text-fg-primary placeholder:text-fg-muted",
-            "focus-visible:ring-0",
-          )}
         />
-        
-        {mounted && (
-          <input 
-            type="file" 
-            accept="image/*" 
-            ref={fileRef} 
-            className="hidden" 
-            onChange={handleFileChange}
-            suppressHydrationWarning
-          />
-        )}
-        
-        <button 
-          onClick={() => fileRef.current?.click()}
-          disabled={disabled}
-          className="absolute left-3 top-3.5 p-1 rounded-full text-fg-muted hover:text-fg-primary hover:bg-surface-3 transition-colors disabled:opacity-50"
-        >
-          <Paperclip className="size-5" />
-        </button>
-
-        <Button
-          size="icon"
-          onClick={submit}
-          disabled={disabled || (!value.trim() && !uploadedImage)}
-          aria-label="Enviar mensagem"
+        <button
+          type="submit"
+          disabled={disabled || !text.trim()}
           className={cn(
-            "absolute bottom-2 right-2 size-10 rounded-xl",
-            "bg-brand text-brand-fg hover:brightness-110 hover:scale-105 transition-all duration-300",
-            "shadow-[var(--shadow-brand)] disabled:shadow-none disabled:opacity-30 disabled:hover:scale-100",
+            "flex size-10 shrink-0 items-center justify-center rounded-full transition-all duration-200 mb-0.5",
+            text.trim() && !disabled
+              ? "bg-brand text-white shadow-md active:scale-90 hover:brightness-110"
+              : "bg-surface-3 text-fg-muted cursor-not-allowed"
           )}
         >
-          <Send className="size-4 ml-0.5" />
-        </Button>
+          {disabled ? (
+            <Loader2 className="size-4 animate-spin" />
+          ) : (
+            <Send className="size-4 ml-0.5" />
+          )}
+        </button>
+      </form>
+      <div className="text-center mt-3">
+        <span className="text-[10px] text-fg-tertiary font-medium tracking-wide">
+          BrieFlow pode cometer erros. Revise antes de exportar.
+        </span>
       </div>
-
-      <p className="mt-2 text-[10px] text-fg-tertiary text-center font-medium">
-        A IA pode cometer erros. Revise o conteúdo gerado.
-      </p>
     </div>
   );
 }
