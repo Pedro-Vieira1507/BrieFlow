@@ -36,10 +36,10 @@ export interface BannerContent {
   productSku?: string | null;
   themeColor?: string;
   secondaryColor?: string;
-  layoutStyle?: "diagonal" | "split" | "minimalist" | "centered";
+  layoutStyle?: "diagonal" | "split" | "minimalist" | "centered" | "reverse";
   badgePrimary?: string;
   badgeSecondary?: string;
-  backgroundShape?: "diagonal" | "curve" | "split" | "minimalist";
+  backgroundShape?: "diagonal" | "curve" | "split" | "minimalist" | "blob" | "geometric" | "frame" | "arch" | "wave" | "pill" | "offset";
 }
 
 export interface EmailContent {
@@ -63,7 +63,9 @@ export interface EmailContent {
   urgencyText?: string;
   testimonials?: string[];
   footerInfo?: string;
-  layoutStyle?: "diagonal" | "split" | "minimalist" | "centered";
+  // --> NOVAS OPÇÕES DE E-MAIL AQUI <--
+  layoutStyle?: "diagonal" | "split" | "minimalist" | "centered" | "editorial" | "modern" | "overlap" | "newsletter";
+  backgroundShape?: "square" | "curve" | "arch" | "pill" | "blob";
 }
 
 export interface SocialContent {
@@ -80,7 +82,6 @@ export interface SocialContent {
 }
 
 export type AssetContent = BannerContent | EmailContent | SocialContent;
-
 export type CtaVariant = "primary" | "secondary" | "urgent" | "soft";
 
 export interface BuilderState {
@@ -108,10 +109,10 @@ export interface BuilderState {
   productImages?: string[];
   themeColor?: string;
   secondaryColor?: string;
-  layoutStyle?: "diagonal" | "split" | "minimalist" | "centered";
+  layoutStyle?: "diagonal" | "split" | "minimalist" | "centered" | "reverse" | "editorial" | "modern" | "overlap" | "newsletter";
   badgePrimary?: string;
   badgeSecondary?: string;
-  backgroundShape?: "diagonal" | "curve" | "split" | "minimalist";
+  backgroundShape?: "diagonal" | "curve" | "split" | "minimalist" | "blob" | "geometric" | "frame" | "arch" | "wave" | "pill" | "offset" | "square";
   imagePosX?: number;
   imagePosY?: number;
   imageScale?: number;
@@ -121,6 +122,10 @@ export interface BuilderState {
   urgencyText?: string;
   testimonials?: string[];
   footerInfo?: string;
+  
+  textColor?: string;
+  boxColor?: string;
+  fontFamily?: string;
 }
 
 export interface SiteBrandData {

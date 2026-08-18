@@ -31,7 +31,7 @@ export const CHANNEL_PLAYBOOKS: Record<MarketingChannel, string> = {
 - O texto do banner DEVE SER CURTO e IMPACTANTE para leitura em 2 segundos.
 - CONTEÚDO RICO: Não faça banners vazios. Use o campo "body" para adicionar 1 parágrafo curto. Use "keyBenefits" para listas e "footerInfo" para regras legais.
 - BADGES: Se houver oferta, preencha 'badgePrimary' com exatas 2 palavras (ex: 15% OFF) e 'badgeSecondary' (ex: FRETE GRÁTIS). Limite absoluto de 15 caracteres por badge!
-- LAYOUT: Vocẽ DEVE variar o campo "layoutStyle" entre "split", "reverse" ou "centered".`,
+- LAYOUT: Você DEVE variar o campo "layoutStyle" entre "split", "reverse" ou "centered".`,
   linkedin: `CANAL - LINKEDIN: Tom consultivo B2B, abertura forte com dados do mercado ou insights de negócios.`,
   instagram: `CANAL - INSTAGRAM:
 - HOOK (Gancho): A primeira frase deve parar o scroll (ex: uma pergunta provocativa ou quebra de padrão).
@@ -58,7 +58,6 @@ function brandSection(brief: MarketingBrief): string {
     brief.audience ? `Público: ${brief.audience}` : null,
     brief.tone ? `Tom: ${brief.tone}` : null,
   ].filter((l): l is string => l !== null);
-
   const site = brief.site ? formatSiteContextForAgent(brief.site) : null;
   return [`=== MARCA ===`, ...lines, site ?? "Nenhum site analisado."].join("\n");
 }
@@ -90,14 +89,24 @@ export function buildMaterialPrompt(brief: MarketingBrief, material: MaterialTyp
   const channel = options.channel ?? MATERIAL_CHANNEL[material];
 
   let layoutEnforcement = "";
+
   if (material === "email") {
-    const layouts = ["centered", "minimalist", "split", "diagonal"];
+    const layouts = ["centered", "minimalist", "split", "diagonal", "editorial", "modern", "overlap", "newsletter"];
+    const shapes = ["square", "curve", "arch", "pill", "blob"];
     const randomLayout = layouts[Math.floor(Math.random() * layouts.length)];
-    layoutEnforcement = `\n\nREGRA CRÍTICA DE DESIGN: Para esta geração específica, você DEVE OBRIGATORIAMENTE definir o campo "layoutStyle" exato como "${randomLayout}". Isso é essencial para layouts únicos.`;
+    const randomShape = shapes[Math.floor(Math.random() * shapes.length)];
+    layoutEnforcement = `\n\nREGRA CRÍTICA DE DESIGN DO E-MAIL:
+- O campo "layoutStyle" DEVE SER OBRIGATORIAMENTE "${randomLayout}". (Nota: Use 'editorial' para visual de revista, 'newsletter' para comunicados, 'modern' ou 'overlap' para visual criativo).
+- O campo "backgroundShape" DEVE SER OBRIGATORIAMENTE "${randomShape}".`;
   } else if (material === "banner") {
     const layouts = ["split", "reverse", "centered"];
+    const shapes = ["blob", "geometric", "frame", "curve", "diagonal", "arch", "wave", "pill", "offset"];
     const randomLayout = layouts[Math.floor(Math.random() * layouts.length)];
-    layoutEnforcement = `\n\nREGRA CRÍTICA DE DESIGN: Para o BANNER, você DEVE OBRIGATORIAMENTE definir o campo "layoutStyle" exato como "${randomLayout}". Abuse de "badgePrimary" e "badgeSecondary" se houver oferta.`;
+    const randomShape = shapes[Math.floor(Math.random() * shapes.length)];
+    layoutEnforcement = `\n\nREGRA CRÍTICA DE DESIGN DO BANNER:
+- Para o campo "layoutStyle", use obrigatoriamente "${randomLayout}".
+- Para o campo "backgroundShape", use obrigatoriamente "${randomShape}".
+- Abuse de "badgePrimary" e "badgeSecondary" se houver oferta.`;
   }
 
   // --- SORTEIO DE CORES PARA QUEBRAR O PADRÃO AZUL ---
@@ -117,6 +126,7 @@ export function buildMaterialPrompt(brief: MarketingBrief, material: MaterialTyp
   const system = `Você é o BrieFlow Art Director, um Mestre em Copywriting.\nSua tarefa: produzir a peça ${material.toUpperCase()} para ${channel.toUpperCase()}.\n\n${BRAND_VOICE}\n\n${COPY_QUALITY_RULES}\n\n${CHANNEL_PLAYBOOKS[channel]}\n\n${brandSection(brief)}\n\n${offerSection(brief)}\n\n${productSection(brief)}\n\n${OUTPUT_CONTRACT}\n\nSCHEMA JSON OBRIGATÓRIO (Siga os limites de palavras):\n${SCHEMA_HINTS[material]}${layoutEnforcement}${colorEnforcement}`;
 
   const briefing = options.channelBriefing?.trim() || brief.context?.trim() || brief.strategy?.trim() || "Sem briefing adicional: use os dados da marca.";
+
   const user = `=== BRIEFING ===\n${briefing}\n\nGere AGORA o JSON da peça. Respire fundo e aplique as melhores técnicas de conversão.`;
 
   return { system, user };

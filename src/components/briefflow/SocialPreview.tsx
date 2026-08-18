@@ -7,8 +7,9 @@ import { buildPollinationsUrl, buildFallbackUrl } from "@/lib/pollinations";
 import { Button } from "@/components/ui/button";
 import { 
   Loader2, Heart, MessageCircle, Send, Bookmark, MoreHorizontal, 
-  AlertCircle, Upload, RefreshCw, Hexagon, Trash2, ImagePlus, Sparkles 
+  AlertCircle, Upload, RefreshCw, Hexagon, Trash2, ImagePlus, Sparkles, Palette, Type
 } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { useBriefflowStore } from "@/store/briefflow";
 import { cleanText } from "@/lib/sanitize";
@@ -32,10 +33,15 @@ export function SocialPreview({ state, onChange }: Props) {
 
   const prompt = state.imagePrompt || "";
   
-  const hasImportedImage = !!state.productImageUrl;
-  const isProductImage = hasImportedImage;
+  // Customizações do Design
   const themeColor = state.themeColor || "#2563EB";
   const secondaryColor = state.secondaryColor || "#F472B6";
+  const boxColor = state.boxColor || "#060609";
+  const textColor = state.textColor || "#ffffff";
+  const fontClass = state.fontFamily === "serif" ? "font-serif" : state.fontFamily === "mono" ? "font-mono" : "font-sans";
+
+  const hasImportedImage = !!state.productImageUrl;
+  const isProductImage = hasImportedImage;
   const brandName = cleanText(state.brandName, "Sua Marca");
 
   const offerStr = builder.discoveryPlan?.offer;
@@ -123,44 +129,44 @@ export function SocialPreview({ state, onChange }: Props) {
   const caption = state.caption ?? "Legenda do post...";
 
   return (
-    <div className="mx-auto flex w-full max-w-[420px] flex-col space-y-4" data-testid="social-preview">
-      <div className="overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-xl shadow-slate-200/50 dark:border-slate-800 dark:bg-[#000000] dark:shadow-none">
+    <div className={cn("mx-auto flex w-full max-w-[420px] flex-col space-y-4", fontClass)} data-testid="social-preview">
+      <div className="overflow-hidden rounded-[24px] border shadow-xl flex flex-col" style={{ backgroundColor: boxColor, borderColor: `${textColor}20` }}>
         
         {/* HEADER DO POST */}
-        <div className="flex items-center justify-between px-4 py-3 bg-white dark:bg-[#000000]">
+        <div className="flex items-center justify-between px-4 py-3" style={{ backgroundColor: boxColor }}>
           <div className="flex items-center gap-3">
             <div 
               className="relative size-10 shrink-0 rounded-full p-[2px] shadow-sm transition-colors duration-500"
               style={{ background: `linear-gradient(135deg, ${themeColor}, ${secondaryColor})` }}
             >
-              <div className="flex size-full items-center justify-center rounded-full bg-white dark:bg-[#000000]">
+              <div className="flex size-full items-center justify-center rounded-full" style={{ backgroundColor: boxColor }}>
                 <Hexagon className="size-4" style={{ color: themeColor }} />
               </div>
             </div>
             <div className="flex flex-col justify-center">
               <div className="flex items-center gap-1.5">
-                <span className="text-[14px] font-semibold leading-none tracking-tight text-slate-900 dark:text-slate-100">
+                <span className="text-[14px] font-semibold leading-none tracking-tight" style={{ color: textColor }}>
                   {brandName}
                 </span>
-                <div className="size-1 rounded-full bg-slate-300 dark:bg-slate-700"></div>
-                <span className="text-[12px] font-bold text-blue-600 dark:text-blue-500 cursor-pointer hover:text-blue-700">
+                <div className="size-1 rounded-full" style={{ backgroundColor: `${textColor}50` }}></div>
+                <span className="text-[12px] font-bold cursor-pointer transition-opacity hover:opacity-80" style={{ color: themeColor }}>
                   Seguir
                 </span>
               </div>
-              <span className="text-[12px] font-normal text-slate-500 dark:text-slate-400 mt-0.5">Patrocinado</span>
+              <span className="text-[12px] font-normal mt-0.5" style={{ color: textColor, opacity: 0.5 }}>Patrocinado</span>
             </div>
           </div>
-          <button className="p-2 hover:bg-slate-50 dark:hover:bg-slate-900 rounded-full transition-colors">
-            <MoreHorizontal className="size-5 text-slate-600 dark:text-slate-400" />
+          <button className="p-2 rounded-full transition-colors hover:bg-black/10">
+            <MoreHorizontal className="size-5" style={{ color: textColor, opacity: 0.6 }} />
           </button>
         </div>
 
         {/* ÁREA DA ARTE VISUAL */}
-        <div className="relative aspect-[4/5] w-full overflow-hidden border-y border-slate-100 dark:border-slate-900 flex items-center justify-center bg-[#060609] group/hero-img">
+        <div className="relative aspect-[4/5] w-full overflow-hidden border-y flex items-center justify-center group/hero-img" style={{ backgroundColor: boxColor, borderColor: `${textColor}10` }}>
           {hasOffer && (
             <div 
-              className="absolute right-4 top-4 z-50 rotate-[6deg] rounded-lg border-2 border-white/20 px-4 py-2 text-[12px] font-black uppercase tracking-widest text-white shadow-2xl backdrop-blur-md"
-              style={{ background: `linear-gradient(135deg, ${themeColor}ee, ${secondaryColor}dd)` }}
+              className="absolute right-4 top-4 z-50 rotate-[6deg] rounded-lg border-2 px-4 py-2 text-[12px] font-black uppercase tracking-widest shadow-2xl backdrop-blur-md"
+              style={{ background: `linear-gradient(135deg, ${themeColor}ee, ${secondaryColor}dd)`, color: textColor, borderColor: `${textColor}33` }}
             >
               <Editable as="span" value="OFERTA ESPECIAL" onChange={() => {}} className="pointer-events-none drop-shadow-md" />
             </div>
@@ -168,23 +174,24 @@ export function SocialPreview({ state, onChange }: Props) {
 
           {!activeHeroUrl && imageStatus !== "loading" && draggableImages.length === 0 ? (
             <div 
-              className="absolute inset-0 z-[1] bg-slate-100/10 dark:bg-slate-900/50 flex flex-col items-center justify-center cursor-pointer hover:bg-slate-100/20 transition-colors"
+              className="absolute inset-0 z-[1] flex flex-col items-center justify-center cursor-pointer transition-colors"
+              style={{ backgroundColor: `${textColor}0A` }}
               onClick={() => fileRef.current?.click()}
             >
-              <ImagePlus className="size-10 text-slate-500 mb-3" />
-              <p className="text-sm font-bold text-slate-400">Adicionar Imagem</p>
+              <ImagePlus className="size-10 mb-3" style={{ color: textColor, opacity: 0.5 }} />
+              <p className="text-sm font-bold" style={{ color: textColor, opacity: 0.7 }}>Adicionar Imagem</p>
             </div>
           ) : (
             <>
               {!hasImportedImage && imageStatus === "loading" && (
-                <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#060609]/60 backdrop-blur-md">
-                  <Loader2 className="size-8 animate-spin text-white/60" />
+                <div className="absolute inset-0 z-10 flex items-center justify-center backdrop-blur-md" style={{ backgroundColor: `${boxColor}99` }}>
+                  <Loader2 className="size-8 animate-spin" style={{ color: textColor, opacity: 0.6 }} />
                 </div>
               )}
               {!hasImportedImage && imageStatus === "error" ? (
-                <div className="absolute inset-0 z-0 flex flex-col items-center justify-center bg-slate-900">
-                  <AlertCircle className="mb-3 size-8 text-slate-500" />
-                  <span className="text-center text-[12px] font-bold uppercase tracking-widest text-slate-500">
+                <div className="absolute inset-0 z-0 flex flex-col items-center justify-center" style={{ backgroundColor: boxColor }}>
+                  <AlertCircle className="mb-3 size-8" style={{ color: textColor, opacity: 0.5 }} />
+                  <span className="text-center text-[12px] font-bold uppercase tracking-widest" style={{ color: textColor, opacity: 0.5 }}>
                     Recurso Visual<br />Indisponível
                   </span>
                 </div>
@@ -207,11 +214,11 @@ export function SocialPreview({ state, onChange }: Props) {
               )}
 
               {hasImportedImage && (
-                <div className="absolute inset-0 z-[1] bg-black flex items-center justify-center">
+                <div className="absolute inset-0 z-[1] flex items-center justify-center">
                   <img
                     src={state.productImageUrl!}
                     alt="Post Importado"
-                    className="w-full h-full object-cover"
+                    className="w-full h-full object-contain p-6 drop-shadow-[0_20px_30px_rgba(0,0,0,0.5)]"
                     style={{ imageRendering: "high-quality" }}
                   />
                   <button 
@@ -236,30 +243,30 @@ export function SocialPreview({ state, onChange }: Props) {
         </div>
 
         {/* BARRA DE AÇÕES (Social Footer) */}
-        <div className="bg-white dark:bg-[#000000] pt-1">
+        <div className="pt-1" style={{ backgroundColor: boxColor }}>
           <div className="flex items-center justify-between px-3 py-2">
             <div className="flex items-center gap-1">
-              <button type="button" onClick={() => setLiked((v) => !v)} className="p-2 hover:bg-slate-50 dark:hover:bg-slate-900 rounded-full transition-all active:scale-75">
-                <Heart className={cn("size-6 transition-colors", liked ? "fill-rose-500 text-rose-500" : "text-slate-900 dark:text-slate-100")} strokeWidth={liked ? 1 : 2} />
+              <button type="button" onClick={() => setLiked((v) => !v)} className="p-2 rounded-full transition-all active:scale-75 hover:bg-black/10">
+                <Heart className={cn("size-6 transition-colors", liked ? "fill-rose-500 text-rose-500" : "")} style={{ color: !liked ? textColor : undefined }} strokeWidth={liked ? 1 : 2} />
               </button>
-              <button type="button" className="p-2 hover:bg-slate-50 dark:hover:bg-slate-900 rounded-full transition-all active:scale-95">
-                <MessageCircle className="size-6 text-slate-900 dark:text-slate-100" />
+              <button type="button" className="p-2 rounded-full transition-all active:scale-95 hover:bg-black/10">
+                <MessageCircle className="size-6" style={{ color: textColor }} />
               </button>
-              <button type="button" className="p-2 hover:bg-slate-50 dark:hover:bg-slate-900 rounded-full transition-all active:scale-95">
-                <Send className="size-6 -rotate-12 text-slate-900 dark:text-slate-100 -mt-1 ml-0.5" />
+              <button type="button" className="p-2 rounded-full transition-all active:scale-95 hover:bg-black/10">
+                <Send className="size-6 -rotate-12 -mt-1 ml-0.5" style={{ color: textColor }} />
               </button>
             </div>
-            <button type="button" onClick={() => setSaved((v) => !v)} className="p-2 hover:bg-slate-50 dark:hover:bg-slate-900 rounded-full transition-all active:scale-75">
-              <Bookmark className={cn("size-6 transition-colors", saved ? "fill-slate-900 text-slate-900 dark:fill-white dark:text-white" : "text-slate-900 dark:text-slate-100")} />
+            <button type="button" onClick={() => setSaved((v) => !v)} className="p-2 rounded-full transition-all active:scale-75 hover:bg-black/10">
+              <Bookmark className={cn("size-6 transition-colors")} style={{ color: textColor, fill: saved ? textColor : "transparent" }} />
             </button>
           </div>
 
           <div className="px-5 pb-5 pt-1">
-            <p className="text-[14px] font-semibold text-slate-900 dark:text-slate-100 mb-2.5">
+            <p className="text-[14px] font-semibold mb-2.5" style={{ color: textColor }}>
               Curtido por milhares de pessoas
             </p>
-            <div className="text-[14px] leading-relaxed text-slate-800 dark:text-slate-200 break-words">
-              <span className="font-semibold text-slate-900 dark:text-slate-100 mr-2">{brandName}</span>
+            <div className="text-[14px] leading-relaxed break-words" style={{ color: textColor, opacity: 0.9 }}>
+              <span className="font-semibold mr-2" style={{ color: textColor }}>{brandName}</span>
               <Editable 
                 as="span" 
                 multiline 
@@ -277,6 +284,65 @@ export function SocialPreview({ state, onChange }: Props) {
           {analyzingColors && <span className="text-xs text-brand animate-pulse flex items-center gap-1"><Sparkles className="size-3" /> Extraindo Cores...</span>}
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button size="sm" variant="outline" className="h-8 text-xs font-bold rounded-lg border-border-strong text-fg-primary hover:bg-surface-3">
+                <Palette className="mr-1.5 size-3.5" /> Design
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent side="top" align="end" className="w-80 bg-surface-1 border-border-strong p-4 shadow-2xl rounded-xl z-50 mb-2">
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <h4 className="text-[10px] font-bold uppercase tracking-widest text-fg-muted flex items-center">
+                    <Palette className="mr-1.5 size-3" /> Cores
+                  </h4>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] text-fg-secondary">Destaque 1</label>
+                      <div className="flex items-center gap-2 border border-border-subtle rounded-md p-1 bg-surface-2">
+                        <input type="color" value={themeColor} onChange={(e) => onChange({ themeColor: e.target.value })} className="size-5 rounded cursor-pointer border-0 bg-transparent p-0" />
+                        <span className="text-[10px] uppercase text-fg-primary">{themeColor}</span>
+                      </div>
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] text-fg-secondary">Destaque 2</label>
+                      <div className="flex items-center gap-2 border border-border-subtle rounded-md p-1 bg-surface-2">
+                        <input type="color" value={secondaryColor} onChange={(e) => onChange({ secondaryColor: e.target.value })} className="size-5 rounded cursor-pointer border-0 bg-transparent p-0" />
+                        <span className="text-[10px] uppercase text-fg-primary">{secondaryColor}</span>
+                      </div>
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] text-fg-secondary">Fundo Imagem</label>
+                      <div className="flex items-center gap-2 border border-border-subtle rounded-md p-1 bg-surface-2">
+                        <input type="color" value={boxColor} onChange={(e) => onChange({ boxColor: e.target.value })} className="size-5 rounded cursor-pointer border-0 bg-transparent p-0" />
+                        <span className="text-[10px] uppercase text-fg-primary">{boxColor}</span>
+                      </div>
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] text-fg-secondary">Texto Imagem</label>
+                      <div className="flex items-center gap-2 border border-border-subtle rounded-md p-1 bg-surface-2">
+                        <input type="color" value={textColor} onChange={(e) => onChange({ textColor: e.target.value })} className="size-5 rounded cursor-pointer border-0 bg-transparent p-0" />
+                        <span className="text-[10px] uppercase text-fg-primary">{textColor}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <h4 className="text-[10px] font-bold uppercase tracking-widest text-fg-muted flex items-center">
+                    <Type className="mr-1.5 size-3" /> Tipografia
+                  </h4>
+                  <div className="grid grid-cols-3 gap-2">
+                    <Button size="sm" variant={(!state.fontFamily || state.fontFamily === 'sans') ? 'default' : 'outline'} onClick={() => onChange({ fontFamily: 'sans' })} className="h-7 text-[11px] font-sans">Sans</Button>
+                    <Button size="sm" variant={state.fontFamily === 'serif' ? 'default' : 'outline'} onClick={() => onChange({ fontFamily: 'serif' })} className="h-7 text-[11px] font-serif">Serif</Button>
+                    <Button size="sm" variant={state.fontFamily === 'mono' ? 'default' : 'outline'} onClick={() => onChange({ fontFamily: 'mono' })} className="h-7 text-[11px] font-mono">Mono</Button>
+                  </div>
+                </div>
+              </div>
+            </PopoverContent>
+          </Popover>
+
           <input
             type="file"
             accept="image/*"

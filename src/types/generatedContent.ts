@@ -24,30 +24,16 @@ const looseList = z.preprocess((value) => {
     .filter((item) => item.length > 0 && item.toLowerCase() !== "null");
 }, z.array(z.string()));
 
-// --- SALVA VIDAS DE COR AQUI ---
 const hexColor = z.preprocess((value) => {
   const raw = typeof value === "string" ? value.trim() : "";
-  
-  // Dicionário de fallback caso a IA escreva a cor em texto em vez de HEX
   const colorMap: Record<string, string> = {
-    "roxo": "#7c3aed",
-    "branco": "#ffffff",
-    "preto": "#0f172a",
-    "vermelho": "#dc2626",
-    "verde": "#16a34a",
-    "amarelo": "#eab308",
-    "rosa": "#db2777",
-    "laranja": "#ea580c",
-    "azul": "#2563eb",
-    "cinza": "#475569",
-    "marrom": "#78350f"
+    "roxo": "#7c3aed", "branco": "#ffffff", "preto": "#0f172a",
+    "vermelho": "#dc2626", "verde": "#16a34a", "amarelo": "#eab308",
+    "rosa": "#db2777", "laranja": "#ea580c", "azul": "#2563eb",
+    "cinza": "#475569", "marrom": "#78350f"
   };
-  
-  // Tenta pegar a primeira palavra (útil se a IA jogar "roxo escuro" ou "roxo e branco")
   const firstWord = raw.toLowerCase().split(/[\s,-]+/)[0];
   if (colorMap[firstWord]) return colorMap[firstWord];
-
-  // Retorna o hex se for válido, senão undefined para usar a paleta sorteada
   return /^#[0-9a-fA-F]{3,8}$/.test(raw) ? raw : undefined;
 }, z.string().optional());
 
@@ -81,8 +67,8 @@ export const LandingCopySchema = designSchema.extend({
   badgeSecondary: looseString.optional(),
   backgroundShape: z.preprocess((value) => {
     const raw = typeof value === "string" ? value.toLowerCase().trim() : "";
-    return ["diagonal", "curve", "split", "minimalist"].includes(raw) ? raw : "curve";
-  }, z.enum(["diagonal", "curve", "split", "minimalist"])).default("curve"),
+    return ["diagonal", "curve", "split", "minimalist", "blob", "geometric", "frame", "arch", "wave", "pill", "offset"].includes(raw) ? raw : "curve";
+  }, z.enum(["diagonal", "curve", "split", "minimalist", "blob", "geometric", "frame", "arch", "wave", "pill", "offset"])).default("curve"),
 });
 
 export const SocialCopySchema = designSchema.extend({
@@ -117,8 +103,12 @@ export const EmailCopySchema = designSchema.extend({
   footerInfo: looseString.default(""),
   layoutStyle: z.preprocess((value) => {
     const raw = typeof value === "string" ? value.toLowerCase().trim() : "";
-    return ["diagonal", "split", "minimalist", "centered"].includes(raw) ? raw : "centered";
-  }, z.enum(["diagonal", "split", "minimalist", "centered"])).default("centered"),
+    return ["diagonal", "split", "minimalist", "centered", "editorial", "modern", "overlap", "newsletter"].includes(raw) ? raw : "centered";
+  }, z.enum(["diagonal", "split", "minimalist", "centered", "editorial", "modern", "overlap", "newsletter"])).default("centered"),
+  backgroundShape: z.preprocess((value) => {
+    const raw = typeof value === "string" ? value.toLowerCase().trim() : "";
+    return ["square", "curve", "arch", "pill", "blob"].includes(raw) ? raw : "square";
+  }, z.enum(["square", "curve", "arch", "pill", "blob"])).default("square"),
 });
 
 export type LandingCopy = z.infer<typeof LandingCopySchema>;
@@ -140,9 +130,9 @@ export const MATERIAL_SCHEMAS = {
 } as const;
 
 export const SCHEMA_HINTS: Record<MaterialType, string> = {
-  banner: `{\n  "headline": "Benefício principal...",\n  "subheadline": "1 frase explicando",\n  "body": "Parágrafo detalhando a oferta ou produto...",\n  "ctaText": "CTA",\n  "ctaVariant": "primary",\n  "badgePrimary": "Destaque curto (ex: 15% OFF)",\n  "badgeSecondary": "Apoio (ex: FRETE GRÁTIS)",\n  "footerInfo": "Informações de rodapé, regras ou nomes técnicos",\n  "keyBenefits": ["Benefício 1", "Benefício 2"],\n  "objectionsHandled": ["Objeção 1"],\n  "layoutStyle": "split",\n  "backgroundShape": "curve",\n  "imagePrompt": "Prompt",\n  "themeColor": "#HEX",\n  "secondaryColor": "#HEX"\n}`,
+  banner: `{\n  "headline": "Benefício principal...",\n  "subheadline": "1 frase explicando",\n  "body": "Parágrafo detalhando a oferta ou produto...",\n  "ctaText": "CTA",\n  "ctaVariant": "primary",\n  "badgePrimary": "Destaque curto (ex: 15% OFF)",\n  "badgeSecondary": "Apoio (ex: FRETE GRÁTIS)",\n  "footerInfo": "Informações de rodapé, regras ou nomes técnicos",\n  "keyBenefits": ["Benefício 1", "Benefício 2"],\n  "objectionsHandled": ["Objeção 1"],\n  "layoutStyle": "split",\n  "backgroundShape": "blob",\n  "imagePrompt": "Prompt",\n  "themeColor": "#HEX",\n  "secondaryColor": "#HEX"\n}`,
   social: `{\n  "hook": "Gancho",\n  "body": "Corpo",\n  "cta": "CTA",\n  "hashtags": ["#tag"],\n  "imagePrompt": "Prompt",\n  "themeColor": "#HEX",\n  "secondaryColor": "#HEX"\n}`,
-  email: `{\n  "subject": "Assunto",\n  "preheader": "Preheader",\n  "headline": "Título dinâmico",\n  "subtitle": "Subtítulo de apoio",\n  "body": "Corpo persuasivo em 2-3 parágrafos",\n  "heroBadge": "Badge (ex: NOVIDADE)",\n  "benefitTitle": "Por que escolher?",\n  "keyBenefits": ["Benefício forte 1", "Benefício 2"],\n  "objectionsHandled": ["Objeção 1"],\n  "urgencyText": "Apenas hoje",\n  "testimonials": ["Nome do Cliente - R$ Resultado Alcançado | 'Citação do cliente aqui'"],\n  "ctaText": "Comprar Agora",\n  "ctaVariant": "primary",\n  "secondaryCta": "Comprar Agora",\n  "footerInfo": "*Regras, validade ou termos legais",\n  "imagePrompt": "Prompt em inglês",\n  "layoutStyle": "minimalist | split | diagonal | centered",\n  "themeColor": "#HEX",\n  "secondaryColor": "#HEX"\n}`
+  email: `{\n  "subject": "Assunto",\n  "preheader": "Preheader",\n  "headline": "Título dinâmico",\n  "subtitle": "Subtítulo de apoio",\n  "body": "Corpo persuasivo em 2-3 parágrafos",\n  "heroBadge": "Badge (ex: NOVIDADE)",\n  "benefitTitle": "Por que escolher?",\n  "keyBenefits": ["Benefício forte 1", "Benefício 2"],\n  "objectionsHandled": ["Objeção 1"],\n  "urgencyText": "Apenas hoje",\n  "testimonials": ["Nome do Cliente - R$ Resultado Alcançado | 'Citação do cliente aqui'"],\n  "ctaText": "Comprar Agora",\n  "ctaVariant": "primary",\n  "secondaryCta": "Comprar Agora",\n  "footerInfo": "*Regras, validade ou termos legais",\n  "imagePrompt": "Prompt em inglês",\n  "layoutStyle": "minimalist | split | diagonal | centered | editorial | modern | overlap | newsletter",\n  "backgroundShape": "square | curve | arch | pill | blob",\n  "themeColor": "#HEX",\n  "secondaryColor": "#HEX"\n}`
 };
 
 export interface MaterialRenderContext {
@@ -173,17 +163,17 @@ export function toBuilderContent<T extends MaterialType>(
 
   if (type === "banner") {
     const landing = copy as LandingCopy;
-    return { 
-      ...base, 
-      title: landing.headline, 
-      subtitle: landing.subheadline,
+    return {
+       ...base,
+       title: landing.headline,
+       subtitle: landing.subheadline,
       body: landing.body,
       footerInfo: landing.footerInfo,
-      cta: landing.ctaText, 
-      ctaVariant: landing.ctaVariant satisfies CtaVariant, 
-      keyBenefits: landing.keyBenefits, 
-      objectionsHandled: landing.objectionsHandled, 
-      layoutStyle: landing.layoutStyle,
+      cta: landing.ctaText,
+       ctaVariant: landing.ctaVariant satisfies CtaVariant,
+       keyBenefits: landing.keyBenefits,
+       objectionsHandled: landing.objectionsHandled,
+       layoutStyle: landing.layoutStyle,
       badgePrimary: landing.badgePrimary,
       badgeSecondary: landing.badgeSecondary,
       backgroundShape: landing.backgroundShape
@@ -210,11 +200,13 @@ export function toBuilderContent<T extends MaterialType>(
       testimonials: email.testimonials,
       footerInfo: email.footerInfo,
       layoutStyle: email.layoutStyle,
+      backgroundShape: email.backgroundShape,
     } as BuilderState;
   }
 
   const social = copy as SocialCopy;
   const caption = [social.hook, social.body, social.cta].filter((p) => p.length > 0).join("\n\n");
+
   return { ...base, hook: social.hook, caption, body: social.body, cta: social.cta, hashtags: social.hashtags };
 }
 
