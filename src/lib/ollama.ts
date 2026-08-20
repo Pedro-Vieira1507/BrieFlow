@@ -256,16 +256,16 @@ function normalizeBuilder(response: OllamaResponse, currentPlan: DiscoveryPlan |
 }
 
 // ============================================================
-// CHAMADA DIRETA – Roteia entre Ollama e Omniroute
+// CHAMADA DIRETA - Roteia entre Ollama e API de Nuvem (Groq/Gemini)
 // ============================================================
-
 async function callDirectAi(
   messagesPayload: { role: "system" | "user"; content: string }[],
   options: OllamaGenerationOptions,
   controller: AbortController,
 ): Promise<{ raw: string; provider: "omniroute" | "ollama" }> {
   const isExecution = Boolean(options.targetAsset);
-  const wantsStream = false;
+  // DESLIGAMOS O STREAM PARA NÃO TER PROBLEMAS DE CORS COM A GROQ
+  const wantsStream = false; 
   const provider = options.provider || "omniroute";
 
   if (supabase) {
@@ -276,6 +276,7 @@ async function callDirectAi(
     }
   }
 
+  // 1. OLLAMA LOCAL
   if (provider === "ollama") {
     const ollamaUrl = import.meta.env.VITE_OLLAMA_URL || "http://localhost:11434/api/chat";
     const model = isExecution
@@ -302,77 +303,82 @@ async function callDirectAi(
       const errText = await response.text();
       throw new Error(`Ollama Local Erro ${response.status}: ${errText}`);
     }
-
     const data = await response.json();
     return { raw: data.message?.content ?? "", provider: "ollama" };
-  } else {
-    const apiKey = import.meta.env.VITE_OMNIROUTE_API_KEY;
-    const apiUrl = import.meta.env.VITE_OMNIROUTE_API_URL || "https://api.openai.com/v1/chat/completions";
-    const model = import.meta.env.VITE_OMNIROUTE_MODEL || "gpt-4o-mini";
-
-    if (!apiKey) throw new Error("API Key não configurada no .env (VITE_OMNIROUTE_API_KEY)");
-
-    const response = await fetch(apiUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
+  } 
+  
+ // 2. NUVEM COM FALLBACK (GROQ -> GEMINI)
+  else {
+    const fallbackProviders = [
+      {
+        name: "groq",
+        url: "https://api.groq.com/openai/v1/chat/completions",
+        key: import.meta.env.VITE_GROQ_API_KEY,
+        // Atualizado para o novo modelo super rápido recomendado pela Groq
+        model: "openai/gpt-oss-20b" 
       },
-      body: JSON.stringify({
-        model,
-        messages: messagesPayload,
-        temperature: isExecution ? 0.1 : 0.3,
-        max_tokens: isExecution ? 8000 : 4000,
-        stream: wantsStream,
-        response_format: { type: "json_object" },
-      }),
-      signal: controller.signal,
-    });
-
-    if (!response.ok) {
-      const errText = await response.text();
-      throw new Error(`HTTP ${response.status}: ${errText}`);
-    }
-
-    if (wantsStream && response.body) {
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder("utf-8");
-      let rawJson = "";
-      let pendingChunk = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        pendingChunk += decoder.decode(value, { stream: true });
-        const lines = pendingChunk.split("\n");
-        pendingChunk = lines.pop() ?? "";
-
-        for (const line of lines) {
-          const trimmedLine = line.trim();
-          if (!trimmedLine || trimmedLine === "data: [DONE]") continue;
-
-          if (trimmedLine.startsWith("data: ")) {
-            try {
-              const chunk = JSON.parse(trimmedLine.slice(6));
-              const content = chunk.choices?.[0]?.delta?.content;
-              if (content) {
-                rawJson += content;
-                if (options.onStream) {
-                  const partialChat = extractChatField(rawJson);
-                  if (partialChat) options.onStream(partialChat);
-                }
-              }
-            } catch { /* Ignora */ }
-          }
-        }
+      {
+        name: "gemini",
+        url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+        key: import.meta.env.VITE_GEMINI_API_KEY,
+        // Nome limpo do modelo para o endpoint de compatibilidade do Google
+        model: "gemini-1.5-flash" 
       }
-      return { raw: rawJson, provider: "omniroute" };
-    } else {
-      const data = await response.json();
-      const content = data.choices?.[0]?.message?.content ?? "";
-      return { raw: content, provider: "omniroute" };
+    ];
+
+    let response: Response | undefined;
+    let lastError: any;
+
+    for (const p of fallbackProviders) {
+      if (!p.key) continue;
+
+      try {
+        const payload: any = {
+          model: p.model,
+          messages: messagesPayload,
+          temperature: isExecution ? 0.1 : 0.3,
+          max_tokens: isExecution ? 4000 : 2000,
+          stream: false, 
+        };
+
+        // Groq is strict about response_format. We only use it for Gemini.
+        if (p.name === "gemini") {
+            payload.response_format = { type: "json_object" };
+        }
+
+        response = await fetch(p.url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${p.key}`,
+          },
+          body: JSON.stringify(payload),
+          signal: controller.signal,
+        });
+
+        if (response.ok) break; // Success! Exit the loop.
+
+        if (response.status === 429) {
+          console.warn(`[Ollama.ts] Limite atingido em ${p.name} (429). Tentando o próximo...`);
+          continue;
+        }
+        
+        console.warn(`[Ollama.ts] Erro ${response.status} em ${p.name}. Tentando o próximo...`);
+        const errText = await response.text();
+        console.warn(`Detalhes do erro:`, errText);
+
+      } catch (err) {
+        lastError = err;
+      }
     }
+
+    if (!response || !response.ok) {
+      throw new Error(`Falha em todos os provedores de IA. Último erro: ${lastError}`);
+    }
+
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content ?? "";
+    return { raw: content, provider: "omniroute" };
   }
 }
 

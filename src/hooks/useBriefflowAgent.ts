@@ -299,7 +299,7 @@ export function useBriefflowAgent() {
     async (text: string, isHiddenAction = false) => {
       const currentPlan = useCreditsStore.getState().plan?.plan || "free";
       const isPro = currentPlan === "pro" || currentPlan === "agency";
-      const provider = isPro ? "omniroute" : "ollama";
+      const provider = "omniroute";
 
       const tryScrapeProduct = async (
         skuOrUrl: string,
@@ -379,7 +379,7 @@ export function useBriefflowAgent() {
             setGeneratingLabel(`Google Vision API analisando imagem do produto...`);
             try {
               const visionResult = await analyzeImageWithVisionFn({ data: { imageUrl: productData.imageUrl } });
-              
+
               if (visionResult.primaryBrandColor) {
                 const themeColor = visionResult.primaryBrandColor;
                 const secondaryColor = visionResult.secondaryBrandColor || "#0f172a";
