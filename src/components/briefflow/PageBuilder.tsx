@@ -1,4 +1,5 @@
 // src/components/briefflow/PageBuilder.tsx
+import { DesignExporter } from "./DesignExporter";
 import { useState, useRef } from "react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -52,6 +53,7 @@ export function PageBuilder({ onRefine, onOpenSettings }: Props) {
   
   const [exportConfig, setExportConfig] = useState<{ isMobile: boolean } | null>(null);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [designExporterOpen, setDesignExporterOpen] = useState(false);
 
   const isSavingRef = useRef(false);
   const isExportingRef = useRef(false);
@@ -92,14 +94,10 @@ export function PageBuilder({ onRefine, onOpenSettings }: Props) {
   };
 
   const handleExportClick = () => {
-    if (activeTab === "banner") {
-      setExportDialogOpen(true);
-    } else {
-      executeExport("desktop"); // Email e social não precisam perguntar formato
-    }
+    setDesignExporterOpen(true);
   };
 
-  const executeExport = async (mode: "desktop" | "mobile") => {
+ const executeExport = async (mode: "desktop" | "mobile") => {
     if (builder.type !== "campaign" || !builder.campaignAssets || isExportingRef.current) return;
     const asset = builder.campaignAssets.find((a) => a.type === activeTab);
     if (!asset) return;
@@ -122,11 +120,12 @@ export function PageBuilder({ onRefine, onOpenSettings }: Props) {
       if (activeTab === "banner") {
         toastId = toast.loading("Renderizando arte em alta qualidade...");
         
-        // Ativa o estado de exportação informando ao componente se deve usar classes mobile
+        // Ativa o estado de exportação
         setExportConfig({ isMobile: mode === "mobile" });
         
-        // Aguarda as transições CSS e o render do DOM adaptarem a forma do React
-        await new Promise((resolve) => setTimeout(resolve, 500));
+        // CORREÇÃO MÁGICA: Atraso maior para fontes e imagens externas renderizarem no DOM Mobile/Desktop 
+        // e aguardar que o React reflita as novas dimensões de altura "Auto".
+        await new Promise((resolve) => setTimeout(resolve, 800));
         
         const bannerElement = document.getElementById("banner-export-node");
         
@@ -139,30 +138,33 @@ export function PageBuilder({ onRefine, onOpenSettings }: Props) {
         }
 
         try {
-          // Mede o elemento após ele ter se adaptado na tela
+          // CORREÇÃO: Pega as dimensões REAIS da tela, independente do zoom que o preview visual mostra
           const width = bannerElement.offsetWidth;
           const height = bannerElement.offsetHeight;
 
-          // Extração direta: o pixelRatio 2 dobra a resolução para não perder qualidade (Retina)
+          // CORREÇÃO 2: Aplicando a proporção de Canva Retina
           const finalData = await toPng(bannerElement, {
-            pixelRatio: 2,
-            backgroundColor: null,
+            pixelRatio: 2, 
+            backgroundColor: c.boxColor || "#ffffff",
             skipFonts: true,
+            width: width, // Trava a largura pro print não comprimir
+            height: height, // Trava a altura pro print não cortar em overflow
             style: {
-              transform: 'none',
-              margin: '0'
+              transform: 'scale(1)', // Garante que a foto capturada ignora a escala do CSS de Preview
+              transformOrigin: 'top left',
+              width: `${width}px`,
+              height: `${height}px`,
+              margin: '0',
             }
           });
 
           const a = document.createElement("a");
           a.href = finalData;
-          // Arquivo reflete o tamanho exportado (ex: se na tela era 1200x300, baixa a 2400x600 px)
-          a.download = `banner_${brandName.replace(/\s+/g, '_').toLowerCase()}_${width}x${height}.png`;
+          a.download = `banner_${mode}_${brandName.replace(/\s+/g, '_').toLowerCase()}_${width}x${height}.png`;
           a.click();
           
           toast.success("Banner exportado com sucesso!", { id: toastId });
         } finally {
-          // Desliga o modo de exportação e devolve o layout ao normal
           setExportConfig(null);
         }
       }
@@ -436,6 +438,12 @@ export function PageBuilder({ onRefine, onOpenSettings }: Props) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      
+      <DesignExporter 
+        open={designExporterOpen} 
+        onOpenChange={setDesignExporterOpen} 
+        state={builder} 
+      />
     </div>
   );
 }
