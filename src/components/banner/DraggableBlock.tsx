@@ -5,7 +5,7 @@ import type { BannerTextBlock, Position } from './types';
 export interface DraggableBlockProps {
   block: BannerTextBlock;
   onChange: (block: BannerTextBlock) => void;
-  containerRef: React.RefObject<HTMLElement>;
+  containerRef: React.RefObject<HTMLElement | null>;
   isExport?: boolean;
   isExportClone?: boolean;
 }

@@ -3,6 +3,13 @@
 @source "../src";
 @import "tw-animate-css";
 
+.export-rendering,
+.export-rendering * {
+  animation: none !important;
+  caret-color: transparent !important;
+  transition: none !important;
+}
+
 @custom-variant dark (&:is(.dark, .dark *));
 
 @theme inline {

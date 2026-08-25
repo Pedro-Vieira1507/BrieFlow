@@ -6,7 +6,7 @@ export interface DraggableImageProps {
   image: BannerImageData | null;
   onChange: (image: BannerImageData | null) => void;
   onUpload: () => void;
-  containerRef: React.RefObject<HTMLElement>;
+  containerRef: React.RefObject<HTMLElement | null>;
   /** True when rendering for image export — disables all interactive UI */
   isExport?: boolean;
   /** True when this instance is the export clone — strips responsive classes */
@@ -140,11 +140,7 @@ export default function DraggableImage({
           width: '100%',
           height: '100%',
           objectFit,
-          // High-quality rendering hint for all <img> inside the banner
-          // 'high-quality' is valid CSS but TS types don't include it yet
-          imageRendering: 'high-quality' as React.CSSProperties['imageRendering'],
-          // WebKit fallback for Safari
-          WebkitFilter: 'optimize-contrast' as never,
+          imageRendering: 'auto',
           pointerEvents: 'none',
           display: 'block',
         }}

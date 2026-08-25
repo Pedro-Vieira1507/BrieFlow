@@ -65,7 +65,7 @@ function DraggableBlock({ id, children, className, isExport }: { id: string, chi
       window.removeEventListener("mousemove", handleMove);
       window.removeEventListener("touchmove", handleMove);
       window.removeEventListener("mouseup", handleUp);
-      window.removeEventListener("touchmove", handleUp);
+      window.removeEventListener("touchend", handleUp);
     };
   }, [isDragging, isExport]);
 
@@ -180,7 +180,7 @@ export function BannerPreview({ state: propState, onChange, exportWrapperClass, 
     return () => { isMounted = false; };
   }, [activeBgUrl]);
 
-  const isSafeOriginBg = safeBgUrl?.startsWith("data:") || safeBgUrl?.startsWith("blob:") || safeBgUrl?.startsWith("http");
+  const isLocalBg = safeBgUrl?.startsWith("data:") || safeBgUrl?.startsWith("blob:");
 
   useEffect(() => {
     if (!heroUrl) return;
@@ -310,6 +310,7 @@ export function BannerPreview({ state: propState, onChange, exportWrapperClass, 
     <div className="mx-auto flex w-full flex-col space-y-4" data-testid="banner-preview">
       <div
         id="banner-export-node"
+        data-export-node="banner"
         className={cn(
           "relative overflow-hidden shadow-[0_24px_50px_-12px_rgba(0,0,0,0.6)] flex transition-colors duration-500 bg-black",
           exportWrapperClass,
@@ -331,7 +332,7 @@ export function BannerPreview({ state: propState, onChange, exportWrapperClass, 
           {safeBgUrl && (
             <img
               src={safeBgUrl}
-              crossOrigin={isSafeOriginBg ? undefined : "anonymous"}
+              crossOrigin={isLocalBg ? undefined : "anonymous"}
               className={cn(
                 "w-full h-full object-cover transition-opacity duration-1000",
                 (!state.productImageUrl && imageStatus === "loading") ? "opacity-0 scale-105" : "opacity-90 scale-100"
@@ -594,7 +595,7 @@ export function BannerPreview({ state: propState, onChange, exportWrapperClass, 
                       <Button size="sm" variant={backgroundShape === 'arch' ? 'default' : 'outline'} onClick={() => onChange({ backgroundShape: 'arch', layoutStyle: layoutStyle === 'centered' ? 'split' : layoutStyle })} className="h-7 text-[11px]">Arco</Button>
                       <Button size="sm" variant={backgroundShape === 'pill' ? 'default' : 'outline'} onClick={() => onChange({ backgroundShape: 'pill', layoutStyle: layoutStyle === 'centered' ? 'split' : layoutStyle })} className="h-7 text-[11px]">Pílula</Button>
                       <Button size="sm" variant={backgroundShape === 'blob' ? 'default' : 'outline'} onClick={() => onChange({ backgroundShape: 'blob', layoutStyle: layoutStyle === 'centered' ? 'split' : layoutStyle })} className="h-7 text-[11px]">Orgânico</Button>
-                      <Button size="sm" variant={backgroundShape === 'grid' ? 'default' : 'outline'} onClick={() => onChange({ backgroundShape: 'geometric', layoutStyle: layoutStyle === 'centered' ? 'split' : layoutStyle })} className="h-7 text-[11px]">Grid</Button>
+                      <Button size="sm" variant={backgroundShape === 'geometric' ? 'default' : 'outline'} onClick={() => onChange({ backgroundShape: 'geometric', layoutStyle: layoutStyle === 'centered' ? 'split' : layoutStyle })} className="h-7 text-[11px]">Grid</Button>
                       <Button size="sm" variant={backgroundShape === 'frame' ? 'default' : 'outline'} onClick={() => onChange({ backgroundShape: 'frame', layoutStyle: layoutStyle === 'centered' ? 'split' : layoutStyle })} className="h-7 text-[11px]">Moldura</Button>
                       <Button size="sm" variant={backgroundShape === 'offset' ? 'default' : 'outline'} onClick={() => onChange({ backgroundShape: 'offset', layoutStyle: layoutStyle === 'centered' ? 'split' : layoutStyle })} className="h-7 text-[11px]">Editorial</Button>
                     </div>

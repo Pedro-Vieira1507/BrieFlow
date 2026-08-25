@@ -88,6 +88,7 @@ export default function BannerPreview({
   return (
     <div
       ref={canvasRef}
+      data-export-node="banner"
       className={[containerClass, exportWrapperClass ?? ''].filter(Boolean).join(' ')}
       style={{
         ...containerStyle,
@@ -134,7 +135,7 @@ export default function BannerPreview({
           onChange={handleImageChange}
           onUpload={() => onProductImageUpload?.()}
           containerRef={canvasRef}
-          isExport={isExport}
+          isExport={exportMode}
           isExportClone={isExportClone}
           objectFit={content.productImage?.objectFit ?? 'contain'}
         />
@@ -154,7 +155,7 @@ export default function BannerPreview({
           block={block}
           onChange={(b) => onTextBlockChange?.(b)}
           containerRef={canvasRef}
-          isExport={isExport}
+          isExport={exportMode}
           isExportClone={isExportClone}
         />
       ))}

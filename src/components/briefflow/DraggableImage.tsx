@@ -131,7 +131,7 @@ export function DraggableImage({ src, type = "default", isExport = false }: { sr
       window.removeEventListener("mousemove", handleMove);
       window.removeEventListener("touchmove", handleMove);
       window.removeEventListener("mouseup", handleUp);
-      window.removeEventListener("touchmove", handleUp);
+      window.removeEventListener("touchend", handleUp);
       document.removeEventListener("mousedown", handleClickOutside);
       document.removeEventListener("touchstart", handleClickOutside);
     };
@@ -235,7 +235,7 @@ export function DraggableImage({ src, type = "default", isExport = false }: { sr
           className="pointer-events-none w-full h-auto select-none rounded-xl bg-transparent object-contain"
           draggable={false}
           onError={handleImgError}
-          style={{ imageRendering: "high-quality" }}
+          style={{ imageRendering: "auto" }}
         />
       )}
       

@@ -19,9 +19,12 @@ import { toast } from "sonner";
 interface Props {
   state: BuilderState;
   onChange: (patch: Partial<BuilderState>) => void;
+  exportWrapperClass?: string;
+  exportWrapperStyle?: React.CSSProperties;
 }
 
-export function SocialPreview({ state, onChange }: Props) {
+export function SocialPreview({ state, onChange, exportWrapperClass, exportWrapperStyle }: Props) {
+  const isExportClone = Boolean(exportWrapperClass);
   const [imageStatus, setImageStatus] = useState<"loading" | "loaded" | "error">("loading");
   const [useFallback, setUseFallback] = useState(false);
   const [analyzingColors, setAnalyzingColors] = useState(false);
@@ -39,6 +42,11 @@ export function SocialPreview({ state, onChange }: Props) {
   const boxColor = state.boxColor || "#060609";
   const textColor = state.textColor || "#ffffff";
   const fontClass = state.fontFamily === "serif" ? "font-serif" : state.fontFamily === "mono" ? "font-mono" : "font-sans";
+  const baseFontFamily = state.fontFamily === "serif"
+    ? 'ui-serif, Georgia, Cambria, "Times New Roman", Times, serif'
+    : state.fontFamily === "mono"
+      ? 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace'
+      : 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
 
   const hasImportedImage = !!state.productImageUrl;
   const isProductImage = hasImportedImage;
@@ -61,7 +69,10 @@ export function SocialPreview({ state, onChange }: Props) {
   const activeHeroUrl = hasImportedImage ? state.productImageUrl : url;
 
   useEffect(() => {
-    if (!url) return;
+    if (!activeHeroUrl) {
+      setImageStatus("error");
+      return;
+    }
     setImageStatus("loading");
     const timer = setTimeout(() => {
       setImageStatus((prev) => {
@@ -76,7 +87,7 @@ export function SocialPreview({ state, onChange }: Props) {
       });
     }, 5000);
     return () => clearTimeout(timer);
-  }, [url, useFallback, isProductImage]);
+  }, [activeHeroUrl, useFallback, isProductImage]);
 
   const handleImageError = () => {
     if (!useFallback && !isProductImage) setUseFallback(true);
@@ -129,10 +140,11 @@ export function SocialPreview({ state, onChange }: Props) {
   const caption = state.caption ?? "Legenda do post...";
 
   return (
-    <div className={cn("mx-auto flex w-full max-w-[420px] flex-col space-y-4", fontClass)} data-testid="social-preview">
-      <div className="overflow-hidden rounded-[24px] border shadow-xl flex flex-col" style={{ backgroundColor: boxColor, borderColor: `${textColor}20` }}>
+    <div className={cn("mx-auto flex w-full flex-col", !isExportClone && "max-w-[420px] space-y-4", exportWrapperClass, fontClass)} data-testid="social-preview" style={{ fontFamily: baseFontFamily, ...exportWrapperStyle }}>
+      <div className={cn("overflow-hidden flex flex-col", !isExportClone && "rounded-[24px] border shadow-xl")} style={{ backgroundColor: boxColor, borderColor: `${textColor}20` }}>
         
         {/* HEADER DO POST */}
+        {!isExportClone && (
         <div className="flex items-center justify-between px-4 py-3" style={{ backgroundColor: boxColor }}>
           <div className="flex items-center gap-3">
             <div 
@@ -160,9 +172,10 @@ export function SocialPreview({ state, onChange }: Props) {
             <MoreHorizontal className="size-5" style={{ color: textColor, opacity: 0.6 }} />
           </button>
         </div>
+        )}
 
         {/* ÁREA DA ARTE VISUAL */}
-        <div className="relative aspect-[4/5] w-full overflow-hidden border-y flex items-center justify-center group/hero-img" style={{ backgroundColor: boxColor, borderColor: `${textColor}10` }}>
+        <div id="social-export-node" data-export-node="social" className={cn("relative aspect-[4/5] w-full overflow-hidden flex items-center justify-center group/hero-img", !isExportClone && "border-y")} style={{ backgroundColor: boxColor, borderColor: `${textColor}10` }}>
           {hasOffer && (
             <div 
               className="absolute right-4 top-4 z-50 rotate-[6deg] rounded-lg border-2 px-4 py-2 text-[12px] font-black uppercase tracking-widest shadow-2xl backdrop-blur-md"
@@ -172,7 +185,8 @@ export function SocialPreview({ state, onChange }: Props) {
             </div>
           )}
 
-          {!activeHeroUrl && imageStatus !== "loading" && draggableImages.length === 0 ? (
+          {!activeHeroUrl && draggableImages.length === 0 ? (
+            !isExportClone ? (
             <div 
               className="absolute inset-0 z-[1] flex flex-col items-center justify-center cursor-pointer transition-colors"
               style={{ backgroundColor: `${textColor}0A` }}
@@ -181,15 +195,18 @@ export function SocialPreview({ state, onChange }: Props) {
               <ImagePlus className="size-10 mb-3" style={{ color: textColor, opacity: 0.5 }} />
               <p className="text-sm font-bold" style={{ color: textColor, opacity: 0.7 }}>Adicionar Imagem</p>
             </div>
+            ) : (
+              <div data-export-image-error="true" className="hidden" />
+            )
           ) : (
             <>
-              {!hasImportedImage && imageStatus === "loading" && (
+              {!hasImportedImage && url && imageStatus === "loading" && (
                 <div className="absolute inset-0 z-10 flex items-center justify-center backdrop-blur-md" style={{ backgroundColor: `${boxColor}99` }}>
                   <Loader2 className="size-8 animate-spin" style={{ color: textColor, opacity: 0.6 }} />
                 </div>
               )}
               {!hasImportedImage && imageStatus === "error" ? (
-                <div className="absolute inset-0 z-0 flex flex-col items-center justify-center" style={{ backgroundColor: boxColor }}>
+                <div data-export-image-error="true" className="absolute inset-0 z-0 flex flex-col items-center justify-center" style={{ backgroundColor: boxColor }}>
                   <AlertCircle className="mb-3 size-8" style={{ color: textColor, opacity: 0.5 }} />
                   <span className="text-center text-[12px] font-bold uppercase tracking-widest" style={{ color: textColor, opacity: 0.5 }}>
                     Recurso Visual<br />Indisponível
@@ -202,6 +219,7 @@ export function SocialPreview({ state, onChange }: Props) {
                   <div className="absolute inset-0 z-0 blur-3xl transition-colors duration-500" style={{ backgroundColor: `${themeColor}40` }} />
                   <img
                     src={url}
+                    crossOrigin="anonymous"
                     alt="Post visual gerado"
                     onLoad={handleImageLoad}
                     onError={handleImageError}
@@ -217,24 +235,29 @@ export function SocialPreview({ state, onChange }: Props) {
                 <div className="absolute inset-0 z-[1] flex items-center justify-center">
                   <img
                     src={state.productImageUrl!}
+                    crossOrigin={state.productImageUrl?.startsWith("data:") || state.productImageUrl?.startsWith("blob:") ? undefined : "anonymous"}
                     alt="Post Importado"
                     className="w-full h-full object-contain p-6 drop-shadow-[0_20px_30px_rgba(0,0,0,0.5)]"
-                    style={{ imageRendering: "high-quality" }}
+                    onLoad={handleImageLoad}
+                    onError={handleImageError}
                   />
+                  {!isExportClone && (
                   <button 
+                    data-export-exclude="true"
                     onClick={() => onChange({ productImageUrl: null })}
                     className="absolute top-4 right-4 z-50 p-2.5 bg-rose-600/80 hover:bg-rose-600 text-white rounded-full opacity-0 group-hover/hero-img:opacity-100 transition-all backdrop-blur-md shadow-2xl"
                     title="Remover imagem importada"
                   >
                     <Trash2 className="size-4" />
                   </button>
+                  )}
                 </div>
               )}
             </>
           )}
           
           {!hasImportedImage && draggableImages.map((src, i) => (
-            <DraggableImage key={`${src}-${i}`} src={src} />
+            <DraggableImage key={`${src}-${i}`} src={src} type="social" isExport={isExportClone} />
           ))}
 
           {(imageStatus === "loaded" || hasImportedImage) && (
@@ -243,6 +266,7 @@ export function SocialPreview({ state, onChange }: Props) {
         </div>
 
         {/* BARRA DE AÇÕES (Social Footer) */}
+        {!isExportClone && (
         <div className="pt-1" style={{ backgroundColor: boxColor }}>
           <div className="flex items-center justify-between px-3 py-2">
             <div className="flex items-center gap-1">
@@ -276,8 +300,10 @@ export function SocialPreview({ state, onChange }: Props) {
             </div>
           </div>
         </div>
+        )}
       </div>
 
+      {!isExportClone && (
       <div className="flex items-center justify-between rounded-xl border border-border/60 bg-background/60 p-3 opacity-80 shadow-sm backdrop-blur-sm transition-opacity hover:opacity-100 mt-4">
         <div className="min-w-0 flex-1 truncate pr-4 text-[11px] font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-2">
           Peça: <span className="px-2 py-1 rounded bg-brand/10 text-brand">SOCIAL</span>
@@ -358,6 +384,7 @@ export function SocialPreview({ state, onChange }: Props) {
           </Button>
         </div>
       </div>
+      )}
     </div>
   );
 }

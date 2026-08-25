@@ -131,7 +131,7 @@ export function EmailPreview({ state: propState, onChange, exportWrapperClass, e
   const cta = cleanText(state.cta, "Acessar Agora");
   const footerInfo = cleanText(state.footerInfo, "");
   const paragraphs = useMemo(() => 
-      cleanText(state.body ?? "").split(/\n+/).map(cleanText).filter(Boolean),
+      cleanText(state.body ?? "").split(/\n+/).map((paragraph) => cleanText(paragraph)).filter(Boolean),
   [state.body]);
 
   const testimonials = state.testimonials || [];
@@ -175,7 +175,7 @@ export function EmailPreview({ state: propState, onChange, exportWrapperClass, e
     return () => { isMounted = false; };
   }, [activeBgUrl]);
 
-  const isSafeOriginBg = safeBgUrl?.startsWith("data:") || safeBgUrl?.startsWith("blob:") || safeBgUrl?.startsWith("http");
+  const isLocalBg = safeBgUrl?.startsWith("data:") || safeBgUrl?.startsWith("blob:");
 
   useEffect(() => {
     if (!heroUrl) return;
@@ -264,7 +264,7 @@ export function EmailPreview({ state: propState, onChange, exportWrapperClass, e
         {safeBgUrl ? (
            <img 
                src={safeBgUrl} 
-               crossOrigin={isSafeOriginBg ? undefined : "anonymous"}
+               crossOrigin={isLocalBg ? undefined : "anonymous"}
               className={cn("w-full h-full object-cover transition-opacity duration-1000", (!state.productImageUrl && imageStatus === "loading") ? "opacity-0 scale-105" : "opacity-100 scale-100")}
               onLoad={() => setImageStatus("loaded")} 
                onError={handleImageError} 
@@ -576,24 +576,23 @@ export function EmailPreview({ state: propState, onChange, exportWrapperClass, e
     <div className="mx-auto flex w-full flex-col space-y-4" data-testid="email-preview">
       <div 
          id="email-export-node"
+         data-export-node="email"
          className={cn(
             "relative mx-auto bg-[#f8f9fa] shadow-2xl rounded-2xl overflow-hidden transition-colors duration-500",
             exportWrapperClass || "w-full max-w-[600px] min-h-[800px]"
          )}
-         style={{ ...exportWrapperStyle, fontFamily: baseFontFamily, width: isExportClone ? '600px' : '100%', margin: isExportClone ? '0 auto' : undefined }}
+         style={{ fontFamily: baseFontFamily, width: isExportClone ? '600px' : '100%', margin: isExportClone ? '0 auto' : undefined, ...exportWrapperStyle }}
       >
-        {isExportClone && (
-           <script src="https://cdn.tailwindcss.com"></script>
-        )}
-        {/* CORREÇÃO: Readicionada a regra que habilita eventos de clique nas tags dos produtos na exportação */}
+        {/* Produtos adicionados pelo usuário são preservados na arte final, sem controles interativos. */}
         <div className="absolute inset-0 z-50 pointer-events-none [&>*]:pointer-events-auto" style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 50 }}>
             {draggableImages.length > 0 && draggableImages.map((src, i) => (
-               <DraggableImage key={`email-img-${i}`} src={src} type="email" />
+               <DraggableImage key={`email-img-${i}`} src={src} type="email" isExport={isExportClone} />
             ))}
         </div>
         {emailContent}
       </div>
 
+      {!isExportClone && (
       <div className="flex items-center justify-between rounded-xl border border-border-subtle bg-surface-2 p-3 shadow-md transition-opacity hover:opacity-100">
         <div className="min-w-0 flex-1 truncate pr-4 text-[11px] font-bold uppercase tracking-widest text-fg-muted flex items-center gap-2">
           Peça: <span className="px-2 py-1 rounded bg-brand/10 text-brand">E-MAIL MARKETING</span>
@@ -710,6 +709,7 @@ export function EmailPreview({ state: propState, onChange, exportWrapperClass, e
           </Button>
         </div>
       </div>
+      )}
     </div>
   );
 }
