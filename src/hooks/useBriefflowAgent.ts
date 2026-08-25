@@ -22,7 +22,9 @@ import type {
 import { analyzeImageWithVisionFn } from "@/lib/vision-api";
 
 type CampaignChannel = "banner" | "email" | "social";
+
 const ALL_CHANNELS: CampaignChannel[] = ["banner", "email", "social"];
+
 const CHANNEL_LABEL: Record<CampaignChannel, string> = {
   banner: "Banner",
   email: "E-mail",
@@ -50,10 +52,13 @@ export function useBriefflowAgent() {
   } = useBriefflowStore();
 
   const { generateMaterial } = useGenerateMaterials();
+
   const discoveryPlanRef = useRef<DiscoveryPlan | undefined>(undefined);
   const scrapedProductsRef = useRef<ScrapedProductData[]>([]);
+
   const brandContextRef = useRef(brandContext);
   brandContextRef.current = brandContext;
+
   const builderRef = useRef(builder);
   builderRef.current = builder;
 
@@ -122,12 +127,14 @@ export function useBriefflowAgent() {
           : undefined);
 
       const channels: CampaignChannel[] = only ? [only] : ALL_CHANNELS;
+
       setLoading(true);
 
       const allImages = [
         ...(uploadedImage ? [uploadedImage] : []),
         ...scrapedProductsRef.current.map((p) => p.imageUrl).filter(Boolean),
       ] as string[];
+
       const uniqueImages = Array.from(new Set(allImages));
 
       if (!only) {
@@ -139,7 +146,7 @@ export function useBriefflowAgent() {
         id: assistantId,
         role: "assistant",
         content: only
-          ? `Ok! Vou regerar apenas o **${CHANNEL_LABEL[only]}** — as outras peças permanecem como estão.`
+          ? `Ok! Vou regerar apenas o **${CHANNEL_LABEL[only]}** – as outras peças permanecem como estão.`
           : `Mão na massa! Gerando ${channels.length} peças sequencialmente.`,
       });
 
@@ -157,6 +164,7 @@ export function useBriefflowAgent() {
           );
 
           const allowedKeys = new Set<string>();
+
           if (!isAll) {
             const normalizedStr = safeTargetKeys.join(" ").toLowerCase();
             const schemaMap: Record<string, string[]> = {
@@ -199,18 +207,26 @@ export function useBriefflowAgent() {
           if (existingAsset?.content) {
             try {
               const c = existingAsset.content as any;
-              const safeContext: any = {
-                title: c.title,
-                subtitle: c.subtitle,
-                cta: c.cta,
-                body: c.body,
-                caption: c.caption,
-                hashtags: c.hashtags,
-                imagePrompt: c.imagePrompt,
-                themeColor: c.themeColor,
-                secondaryColor: c.secondaryColor,
-              };
-              currentContentContext = `\n\n=== CONTEÚDO ATUAL DA PEÇA ===\nATENÇÃO: Preserve o texto abaixo exatamente como está para todos os campos que o usuário NÃO pediu para alterar:\n${JSON.stringify(safeContext, null, 2)}`;
+              
+              // PREVINE INJEÇÃO DE ERRO: Ignora o texto atual da tela se ele contiver a mensagem de erro
+              const isErrorState = 
+                (c.title && c.title.includes("Não consegui gerar")) || 
+                (c.caption && c.caption.includes("Não consegui gerar"));
+
+              if (!isErrorState) {
+                const safeContext: any = {
+                  title: c.title,
+                  subtitle: c.subtitle,
+                  cta: c.cta,
+                  body: c.body,
+                  caption: c.caption,
+                  hashtags: c.hashtags,
+                  imagePrompt: c.imagePrompt,
+                  themeColor: c.themeColor,
+                  secondaryColor: c.secondaryColor,
+                };
+                currentContentContext = `\n\n=== CONTEÚDO ATUAL DA PEÇA ===\nATENÇÃO: Preserve o texto abaixo exatamente como está para todos os campos que o usuário NÃO pediu para alterar:\n${JSON.stringify(safeContext, null, 2)}`;
+              }
             } catch (e) {
               console.warn("Falha ao serializar contexto seguro para a IA", e);
             }
@@ -299,7 +315,9 @@ export function useBriefflowAgent() {
     async (text: string, isHiddenAction = false) => {
       const currentPlan = useCreditsStore.getState().plan?.plan || "free";
       const isPro = currentPlan === "pro" || currentPlan === "agency";
-      const provider = "omniroute";
+      
+      // FORÇANDO OLLAMA AQUI PARA RODAR LOCALMENTE:
+      const provider: "ollama" | "omniroute" = "omniroute"; 
 
       const tryScrapeProduct = async (
         skuOrUrl: string,
@@ -326,8 +344,8 @@ export function useBriefflowAgent() {
         }
 
         if (isHomepage) return;
-        setLoading(true);
 
+        setLoading(true);
         try {
           let productData: ScrapedProductData = {
             sku: value,
@@ -354,7 +372,6 @@ export function useBriefflowAgent() {
                 productData.found = true;
                 productData.name = productData.name || value;
               }
-
               if (visualResult.error) {
                 appendMessage({
                   id: uid(),
@@ -368,7 +385,6 @@ export function useBriefflowAgent() {
             setGeneratingLabel(undefined);
           }
 
-          // -------------------------------------------------------------
           // INTEGRAÇÃO GOOGLE AI VISION: Extrai cores do produto automaticamente
           if (productData.found && productData.imageUrl) {
             scrapedProductsRef.current = [
@@ -379,12 +395,11 @@ export function useBriefflowAgent() {
             setGeneratingLabel(`Google Vision API analisando imagem do produto...`);
             try {
               const visionResult = await analyzeImageWithVisionFn({ data: { imageUrl: productData.imageUrl } });
-
+              
               if (visionResult.primaryBrandColor) {
                 const themeColor = visionResult.primaryBrandColor;
                 const secondaryColor = visionResult.secondaryBrandColor || "#0f172a";
 
-                // Aplica a cor extraída da foto no canvas imediatamente
                 if (builderRef.current.type === "campaign" && builderRef.current.campaignAssets) {
                   const updatedAssets = builderRef.current.campaignAssets.map(asset => ({
                     ...asset,
@@ -450,6 +465,7 @@ export function useBriefflowAgent() {
 
       setLoading(true);
       const ticketId = uid();
+
       if (!isPro) {
         await enqueueOllama(ticketId);
       }
@@ -471,6 +487,7 @@ export function useBriefflowAgent() {
         );
 
         useCreditsStore.getState().refresh();
+
         if (!isHiddenAction) {
           updateMessage(assistantId, { content: response.chat });
         }
@@ -482,7 +499,6 @@ export function useBriefflowAgent() {
             ...response.detectedContext,
             productSku: extractedSku,
           } as DiscoveryPlan;
-
           await tryScrapeProduct(extractedSku, isHiddenAction);
         }
 

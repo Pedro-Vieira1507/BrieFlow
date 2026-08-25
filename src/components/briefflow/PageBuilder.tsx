@@ -2,11 +2,11 @@
 import { useState, useRef } from "react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { toCanvas } from "html-to-image";
+import { toPng } from "html-to-image";
 import { useBriefflowStore } from "@/store/briefflow";
 import { isSupabaseConfigured, saveAssetToLibrary } from "@/lib/supabase";
 import { buildPollinationsUrl } from "@/lib/pollinations";
-import { cleanText, isEmptyLike } from "@/lib/sanitize";
+import { cleanText } from "@/lib/sanitize";
 
 import { BuilderHeader } from "./builder/BuilderHeader";
 import { GeneratingBanner } from "./builder/GeneratingBanner";
@@ -20,7 +20,6 @@ import type { BuilderState, CampaignAsset } from "@/types/builder";
 
 import {
   AlertDialog,
-  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -28,10 +27,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
-import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
-import { Loader2, Monitor, Mail, Instagram } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Loader2, Monitor, Mail, Instagram, Smartphone } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 interface Props {
@@ -53,11 +50,8 @@ export function PageBuilder({ onRefine, onOpenSettings }: Props) {
   const [isSaving, setIsSaving] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   
-  const [exportConfig, setExportConfig] = useState<{ width: number; height: number; isMobile: boolean } | null>(null);
+  const [exportConfig, setExportConfig] = useState<{ isMobile: boolean } | null>(null);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
-  const [exportFormat, setExportFormat] = useState("png");
-  const [exportW, setExportW] = useState("1200");
-  const [exportH, setExportH] = useState("600");
 
   const isSavingRef = useRef(false);
   const isExportingRef = useRef(false);
@@ -69,10 +63,6 @@ export function PageBuilder({ onRefine, onOpenSettings }: Props) {
     (builder.type === "campaign"
       ? Boolean(builder.campaignAssets?.length)
       : true);
-
-  const parsedW = parseInt(exportW, 10);
-  const parsedH = parseInt(exportH, 10);
-  const isExportValid = !isNaN(parsedW) && parsedW >= 1 && !isNaN(parsedH) && parsedH >= 1;
 
   const handleSave = async () => {
     if (!isSupabaseConfigured) {
@@ -103,15 +93,13 @@ export function PageBuilder({ onRefine, onOpenSettings }: Props) {
 
   const handleExportClick = () => {
     if (activeTab === "banner") {
-      setExportW("1200");
-      setExportH("600");
       setExportDialogOpen(true);
     } else {
-      executeExport();
+      executeExport("desktop"); // Email e social não precisam perguntar formato
     }
   };
 
-  const executeExport = async () => {
+  const executeExport = async (mode: "desktop" | "mobile") => {
     if (builder.type !== "campaign" || !builder.campaignAssets || isExportingRef.current) return;
     const asset = builder.campaignAssets.find((a) => a.type === activeTab);
     if (!asset) return;
@@ -121,7 +109,6 @@ export function PageBuilder({ onRefine, onOpenSettings }: Props) {
     
     const c = asset.content as any;
     const brandName = cleanText(c.brandName, "Marca");
-    const themeColor = c.themeColor || "#2563EB";
     const images = Array.from(
       new Set([
         ...(c.productImageUrl ? [c.productImageUrl] : []),
@@ -133,25 +120,13 @@ export function PageBuilder({ onRefine, onOpenSettings }: Props) {
 
     try {
       if (activeTab === "banner") {
-        toastId = toast.loading("Aplicando inteligência de layout...");
-        const targetWidth = parseInt(exportW) || 1200;
-        const targetHeight = parseInt(exportH) || 600;
+        toastId = toast.loading("Renderizando arte em alta qualidade...");
         
-        const isMobileExport = targetWidth <= targetHeight;
+        // Ativa o estado de exportação informando ao componente se deve usar classes mobile
+        setExportConfig({ isMobile: mode === "mobile" });
         
-        let domWidth = 1200;
-        if (isMobileExport) {
-           domWidth = 450; 
-        } else if (targetWidth / targetHeight <= 1.2) {
-           domWidth = 800;
-        } else {
-           domWidth = 1200;
-        }
-        
-        const domHeight = domWidth / (targetWidth / targetHeight);
-        
-        setExportConfig({ width: domWidth, height: domHeight, isMobile: isMobileExport });
-        await new Promise((resolve) => setTimeout(resolve, 300));
+        // Aguarda as transições CSS e o render do DOM adaptarem a forma do React
+        await new Promise((resolve) => setTimeout(resolve, 500));
         
         const bannerElement = document.getElementById("banner-export-node");
         
@@ -159,27 +134,35 @@ export function PageBuilder({ onRefine, onOpenSettings }: Props) {
           toast.error("Erro: Banner não encontrado na tela.", { id: toastId });
           isExportingRef.current = false;
           setIsExporting(false);
-          setExportDialogOpen(false);
           setExportConfig(null);
           return;
         }
 
         try {
-          const canvas = await toCanvas(bannerElement, {
-            pixelRatio: targetWidth / domWidth,
-            backgroundColor: exportFormat === 'jpeg' ? '#000000' : null,
+          // Mede o elemento após ele ter se adaptado na tela
+          const width = bannerElement.offsetWidth;
+          const height = bannerElement.offsetHeight;
+
+          // Extração direta: o pixelRatio 2 dobra a resolução para não perder qualidade (Retina)
+          const finalData = await toPng(bannerElement, {
+            pixelRatio: 2,
+            backgroundColor: null,
             skipFonts: true,
-            fontEmbedCSS: '',
+            style: {
+              transform: 'none',
+              margin: '0'
+            }
           });
 
-          const finalData = canvas.toDataURL(`image/${exportFormat}`, 1.0);
           const a = document.createElement("a");
           a.href = finalData;
-          a.download = `banner_${brandName.replace(/\s+/g, '_').toLowerCase()}_${targetWidth}x${targetHeight}.${exportFormat}`;
+          // Arquivo reflete o tamanho exportado (ex: se na tela era 1200x300, baixa a 2400x600 px)
+          a.download = `banner_${brandName.replace(/\s+/g, '_').toLowerCase()}_${width}x${height}.png`;
           a.click();
           
           toast.success("Banner exportado com sucesso!", { id: toastId });
         } finally {
+          // Desliga o modo de exportação e devolve o layout ao normal
           setExportConfig(null);
         }
       }
@@ -192,12 +175,10 @@ export function PageBuilder({ onRefine, onOpenSettings }: Props) {
           toast.error("Erro: E-mail não encontrado na tela.", { id: toastId });
           isExportingRef.current = false;
           setIsExporting(false);
-          setExportDialogOpen(false);
           setExportConfig(null);
           return;
         }
 
-        // Constrói o HTML empacotando o Tailwind CDN e capturando o nó exato da tela
         const htmlContent = `<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -206,23 +187,19 @@ export function PageBuilder({ onRefine, onOpenSettings }: Props) {
   <title>Exportação Visual - BrieFlow</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
-    /* Pequeno reset para garantir fundo neutro fora da área exportada */
     body {
       margin: 0;
       padding: 40px;
-      background-color: #1a1a24; /* surface-3 */
+      background-color: #1a1a24;
       display: flex;
       justify-content: center;
       align-items: flex-start;
       min-height: 100vh;
     }
-    
-    /* Limpa bordas ativas ou de edição caso restem do canvas */
     .editable-hover { outline: none !important; }
   </style>
 </head>
 <body>
-  <!-- Clone Exato da Tela -->
   ${emailElement.outerHTML}
 </body>
 </html>`;
@@ -305,7 +282,6 @@ export function PageBuilder({ onRefine, onOpenSettings }: Props) {
     } finally {
       isExportingRef.current = false;
       setIsExporting(false);
-      setExportDialogOpen(false);
       setExportConfig(null);
     }
   };
@@ -344,7 +320,7 @@ export function PageBuilder({ onRefine, onOpenSettings }: Props) {
           style={{ background: "var(--gradient-radial-brand)" }}
         />
 
-        <div className={cn("relative mx-auto space-y-10 pb-40", exportConfig ? "w-fit" : "max-w-5xl")}>
+        <div className={cn("relative mx-auto space-y-10 pb-40", exportConfig ? "w-fit overflow-visible" : "max-w-5xl")}>
           {loading && generatingLabel && builder.type === "campaign" && (
             <GeneratingBanner label={generatingLabel} />
           )}
@@ -374,8 +350,9 @@ export function PageBuilder({ onRefine, onOpenSettings }: Props) {
                        <BannerPreview
                            state={asset.content}
                            onChange={(patch) => handleAssetPatch(asset.id, patch)}
-                           exportWrapperClass={exportConfig?.isMobile ? "force-mobile" : ""}
-                           exportWrapperStyle={exportConfig ? { width: `${exportConfig.width}px`, height: `${exportConfig.height}px`, aspectRatio: "unset", borderRadius: "0px" } : undefined}
+                           exportWrapperClass={exportConfig ? (exportConfig.isMobile ? "export-mode force-mobile" : "export-mode") : ""}
+                           // Sem injeções rígidas de tamanho inline: o layout flexível atua nativamente.
+                           exportWrapperStyle={exportConfig ? { borderRadius: "0px" } : undefined}
                        />
                      )}
                      {asset.type === "email" && (
@@ -414,56 +391,48 @@ export function PageBuilder({ onRefine, onOpenSettings }: Props) {
               Exportar Banner
             </AlertDialogTitle>
             <AlertDialogDescription className="text-fg-secondary mt-2 leading-relaxed">
-              Gere a arte final renderizada em alta qualidade para sua campanha.
+              Gere a arte final renderizada. Escolha o formato de saída:
             </AlertDialogDescription>
           </AlertDialogHeader>
 
-          <div className="grid gap-5 py-4">
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="format" className="text-right text-fg-secondary">Formato</Label>
-              <Select value={exportFormat} onValueChange={setExportFormat}>
-                <SelectTrigger className="col-span-3 bg-surface-2 border-border-subtle focus:ring-brand transition-all duration-200">
-                  <SelectValue placeholder="Selecione o formato" />
-                </SelectTrigger>
-                <SelectContent className="bg-surface-2 border-border-subtle text-fg-primary">
-                  <SelectItem value="jpeg" className="focus:bg-surface-3 cursor-pointer">JPG</SelectItem>
-                  <SelectItem value="png" className="focus:bg-surface-3 cursor-pointer">PNG</SelectItem>
-                  <SelectItem value="webp" className="focus:bg-surface-3 cursor-pointer">WEBP</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+          <div className="grid grid-cols-2 gap-4 py-4">
+            <Button
+              type="button"
+              variant="outline"
+              className="h-28 flex flex-col gap-3 bg-surface-2 border-border-subtle hover:bg-brand/10 hover:border-brand/50 hover:text-brand transition-all shadow-md"
+              onClick={() => {
+                setExportDialogOpen(false);
+                executeExport("desktop");
+              }}
+            >
+              <Monitor className="size-8" />
+              <div className="flex flex-col items-center gap-1">
+                <span className="font-bold text-sm">Formato Web</span>
+                <span className="text-[10px] text-fg-muted font-normal">Salvar visual atual</span>
+              </div>
+            </Button>
             
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="width" className="text-right text-fg-secondary">Largura (px)</Label>
-              <Input id="width" type="number" min="1" value={exportW} onChange={(e) => setExportW(e.target.value)} className="col-span-3 bg-surface-2 border-border-subtle text-fg-primary transition-all duration-200 focus-visible:ring-brand" />
-            </div>
-            
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="height" className="text-right text-fg-secondary">Altura (px)</Label>
-              <Input id="height" type="number" min="1" value={exportH} onChange={(e) => setExportH(e.target.value)} className="col-span-3 bg-surface-2 border-border-subtle text-fg-primary transition-all duration-200 focus-visible:ring-brand" />
-            </div>
+            <Button
+              type="button"
+              variant="outline"
+              className="h-28 flex flex-col gap-3 bg-surface-2 border-border-subtle hover:bg-brand/10 hover:border-brand/50 hover:text-brand transition-all shadow-md"
+              onClick={() => {
+                setExportDialogOpen(false);
+                executeExport("mobile");
+              }}
+            >
+              <Smartphone className="size-8" />
+              <div className="flex flex-col items-center gap-1">
+                <span className="font-bold text-sm">Formato Mobile</span>
+                <span className="text-[10px] text-fg-muted font-normal">Adaptar para Stories</span>
+              </div>
+            </Button>
           </div>
 
-          <AlertDialogFooter className="mt-4">
-            <AlertDialogCancel className="border-border-strong bg-transparent text-fg-secondary hover:bg-surface-2 hover:text-fg-primary transition-all duration-200 active:scale-95" onClick={() => setExportDialogOpen(false)}>
+          <AlertDialogFooter className="mt-2">
+            <AlertDialogCancel className="w-full border-border-strong bg-transparent text-fg-secondary hover:bg-surface-2 hover:text-fg-primary transition-all duration-200 active:scale-95" onClick={() => setExportDialogOpen(false)}>
               Cancelar
             </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={(e) => {
-                e.preventDefault();
-                if (!isExportValid) {
-                  toast.error("Dimensões inválidas", { description: "Insira valores numéricos positivos e maiores que zero." });
-                  return;
-                }
-                executeExport();
-              }}
-              disabled={isExporting || !isExportValid}
-              // UX: Feedback de botão desativado e clique
-              className="bg-brand text-brand-fg hover:brightness-110 shadow-[var(--shadow-brand)] transition-all duration-200 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100"
-            >
-              {isExporting ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
-              {isExporting ? "Exportando..." : "Baixar Arte"}
-            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

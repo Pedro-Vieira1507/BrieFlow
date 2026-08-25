@@ -7,13 +7,13 @@ const looseString = z.preprocess((value) => {
   if (value === null || value === undefined) return "";
   const raw = typeof value === "string" ? value : String(value);
   return raw.replace(/\*\*/g, "").replace(/\r/g, "").replace(/\s+/g, " ").trim();
-}, z.string());
+}, z.string().catch(""));
 
 const looseText = z.preprocess((value) => {
   if (value === null || value === undefined) return "";
   const raw = typeof value === "string" ? value : String(value);
   return raw.replace(/\*\*/g, "").replace(/\r/g, "").trim();
-}, z.string());
+}, z.string().catch(""));
 
 const looseList = z.preprocess((value) => {
   if (value === null || value === undefined) return [];
@@ -22,7 +22,7 @@ const looseList = z.preprocess((value) => {
     .map((item) => (typeof item === "string" ? item : String(item)))
     .map((item) => item.replace(/\*\*/g, "").trim())
     .filter((item) => item.length > 0 && item.toLowerCase() !== "null");
-}, z.array(z.string()));
+}, z.array(z.string()).catch([]));
 
 const hexColor = z.preprocess((value) => {
   const raw = typeof value === "string" ? value.trim() : "";
@@ -35,14 +35,14 @@ const hexColor = z.preprocess((value) => {
   const firstWord = raw.toLowerCase().split(/[\s,-]+/)[0];
   if (colorMap[firstWord]) return colorMap[firstWord];
   return /^#[0-9a-fA-F]{3,8}$/.test(raw) ? raw : undefined;
-}, z.string().optional());
+}, z.string().optional().catch(undefined));
 
 const ctaVariantSchema = z.preprocess((value) => {
   const raw = typeof value === "string" ? value.toLowerCase().trim() : "";
   return ["primary", "secondary", "urgent", "soft"].includes(raw)
     ? (raw as CtaVariant)
     : "primary";
-}, z.enum(["primary", "secondary", "urgent", "soft"]));
+}, z.enum(["primary", "secondary", "urgent", "soft"]).catch("primary"));
 
 const designSchema = z.object({
   imagePrompt: looseString.default(""),
@@ -72,18 +72,10 @@ export const LandingCopySchema = designSchema.extend({
 });
 
 export const SocialCopySchema = designSchema.extend({
-  hook: looseString,
-  body: looseString,
-  cta: looseString.default(""),
-  // CORREÇÃO: Removido o .min(1) para não quebrar a IA quando ela omitir hashtags
-  hashtags: z.preprocess((value) => {
-    if (value === null || value === undefined) return [];
-    const arr = Array.isArray(value) ? value : String(value).split(/[,;\n]/);
-    return arr
-      .map((item) => (typeof item === "string" ? item : String(item)))
-      .map((item) => item.replace(/\*\*/g, "").trim())
-      .filter((item) => item.length > 0 && item.toLowerCase() !== "null");
-  }, z.array(z.string())).default([]),
+  hook: looseString.default("Criando conexões autênticas."),
+  body: looseText.default("Nossa marca se conecta com o seu propósito de vida. Descubra mais!"),
+  cta: looseString.default("Acesse o Link"),
+  hashtags: looseList.default([]),
 });
 
 export const EmailCopySchema = designSchema.extend({
@@ -206,8 +198,22 @@ export function toBuilderContent<T extends MaterialType>(
   }
 
   const social = copy as SocialCopy;
-  const caption = [social.hook, social.body, social.cta].filter((p) => p.length > 0).join("\n\n");
-  return { ...base, hook: social.hook, caption, body: social.body, cta: social.cta, hashtags: social.hashtags };
+  
+  // Garantia extrema: Sempre devolve uma string limpa para não quebrar a tela do React.
+  const theHook = social.hook?.trim() || "";
+  const theBody = social.body?.trim() || "";
+  const theCta = social.cta?.trim() || "";
+  
+  const caption = [theHook, theBody, theCta].filter((p) => p.length > 0).join("\n\n");
+
+  return { 
+    ...base, 
+    hook: theHook, 
+    body: theBody, 
+    cta: theCta,
+    caption: caption || "Crie um post atraente e envolvente com nossa ferramenta.", 
+    hashtags: social.hashtags || [] 
+  };
 }
 
 export type { MaterialType };

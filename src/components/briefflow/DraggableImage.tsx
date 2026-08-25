@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 
 const positionCache = new Map<string, { x: number; y: number; scale: number }>();
 
-export function DraggableImage({ src, type = "default" }: { src: string; type?: string }) {
+export function DraggableImage({ src, type = "default", isExport = false }: { src: string; type?: string; isExport?: boolean }) {
   const cacheKey = useMemo(() => {
     const hash = src.length > 100 ? `${src.length}-${src.substring(src.length - 50)}` : src;
     return `${type}-v10-${hash}`;
@@ -79,6 +79,11 @@ export function DraggableImage({ src, type = "default" }: { src: string; type?: 
   }, [pos, scale, cacheKey]);
 
   useEffect(() => {
+    if (isExport) {
+       setIsActive(false);
+       return;
+    }
+    
     const handleMove = (e: MouseEvent | TouchEvent) => {
       if (!isDragging.current && !isResizing.current) return;
       const clientX = e instanceof MouseEvent ? e.clientX : e.touches[0].clientX;
@@ -130,11 +135,12 @@ export function DraggableImage({ src, type = "default" }: { src: string; type?: 
       document.removeEventListener("mousedown", handleClickOutside);
       document.removeEventListener("touchstart", handleClickOutside);
     };
-  }, [isActive]);
+  }, [isActive, isExport]);
 
   const onPointerDown = (
     e: React.PointerEvent | React.MouseEvent | React.TouchEvent,
   ) => {
+    if (isExport) return;
     e.stopPropagation();
     if (failed) return;
     setIsActive(true);
@@ -150,6 +156,7 @@ export function DraggableImage({ src, type = "default" }: { src: string; type?: 
   const onResizeDown = (
     e: React.PointerEvent | React.MouseEvent | React.TouchEvent,
   ) => {
+    if (isExport) return;
     e.stopPropagation();
     setIsActive(true);
     isResizing.current = true;
@@ -175,7 +182,7 @@ export function DraggableImage({ src, type = "default" }: { src: string; type?: 
 
   const isSafeOrigin = imgSrc?.startsWith("data:") || imgSrc?.startsWith("blob:");
 
-  if (failed) {
+  if (failed && !isExport) {
     return (
       <div
         ref={containerRef}
@@ -193,16 +200,19 @@ export function DraggableImage({ src, type = "default" }: { src: string; type?: 
         </span>
       </div>
     );
+  } else if (failed && isExport) {
+    return null;
   }
 
   return (
     <div
       ref={containerRef}
       className={cn(
-        "absolute z-40 cursor-grab active:cursor-grabbing transition-all duration-200 pointer-events-auto",
-        isActive
+        "absolute z-40 transition-all duration-200 pointer-events-auto",
+        !isExport && "cursor-grab active:cursor-grabbing",
+        isActive && !isExport
           ? "ring-2 ring-dashed ring-brand shadow-[0_20px_50px_rgba(0,0,0,0.5)]"
-          : "drop-shadow-2xl hover:ring-2 hover:ring-dashed hover:ring-white/50",
+          : (!isExport ? "drop-shadow-2xl hover:ring-2 hover:ring-dashed hover:ring-white/50" : "drop-shadow-2xl"),
       )}
       style={{
         position: 'absolute',
@@ -213,7 +223,7 @@ export function DraggableImage({ src, type = "default" }: { src: string; type?: 
         transform: `scale(${scale})`,
         transformOrigin: "center",
       }}
-      onPointerDown={onPointerDown}
+      onPointerDown={!isExport ? onPointerDown : undefined}
     >
       {imgSrc && (
         <img
@@ -228,7 +238,8 @@ export function DraggableImage({ src, type = "default" }: { src: string; type?: 
           style={{ imageRendering: "high-quality" }}
         />
       )}
-      {isActive && (
+      
+      {isActive && !isExport && (
         <>
           <div onPointerDown={onResizeDown} className="absolute -left-2.5 -top-2.5 z-50 h-5 w-5 cursor-nwse-resize rounded-full border-[3px] border-brand bg-white shadow-md hover:scale-125 transition-transform" />
           <div onPointerDown={onResizeDown} className="absolute -right-2.5 -top-2.5 z-50 h-5 w-5 cursor-nesw-resize rounded-full border-[3px] border-brand bg-white shadow-md hover:scale-125 transition-transform" />
