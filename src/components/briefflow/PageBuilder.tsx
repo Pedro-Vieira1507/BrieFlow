@@ -184,109 +184,61 @@ export function PageBuilder({ onRefine, onOpenSettings }: Props) {
         }
       }
       else if (activeTab === "email") {
-        toastId = toast.loading("Gerando HTML do e-mail...");
+        toastId = toast.loading("Gerando HTML visual do e-mail...");
         
-        const layoutStyle = c.layoutStyle || "centered";
-        const title = cleanText(c.subtitle || c.title, "Headline do e-mail");
-        const heroBadge = cleanText(c.heroBadge, "");
-        const cta = cleanText(c.cta, "");
-        const footerInfo = cleanText(c.footerInfo, "");
-        const offerRaw = builder.discoveryPlan?.offer;
-        const hasOffer = !isEmptyLike(offerRaw);
-        const testimonials = c.testimonials || [];
-        const paragraphs = cleanText(c.body || "")
-          .split(/\n+/)
-          .map((p: string) => cleanText(p))
-          .filter((p: string) => p.length > 0);
-          
-        let heroUrl = images[0] || null;
-        if (!heroUrl && c.emailHeroImagePrompt) {
-          heroUrl = buildPollinationsUrl(c.emailHeroImagePrompt, { width: 1200, height: 600, seed: c.imageSeed });
+        const emailElement = document.getElementById("email-export-node");
+        
+        if (!emailElement) {
+          toast.error("Erro: E-mail não encontrado na tela.", { id: toastId });
+          isExportingRef.current = false;
+          setIsExporting(false);
+          setExportDialogOpen(false);
+          setExportConfig(null);
+          return;
         }
 
-        let testimonialsHtml = "";
-        if (testimonials.length > 0) {
-          testimonialsHtml = `<table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top: 24px; margin-bottom: 24px;">`;
-          testimonials.forEach((test: string) => {
-            const parts = test.split(/\||\n/);
-            const head = parts[0]?.trim() || "";
-            const txt = parts[1]?.trim() || test;
-            
-            let cardStyle = `background-color: #ffffff; border: 2px solid ${themeColor}; border-radius: 12px; padding: 20px; margin-bottom: 16px; text-align: left;`;
-            let titleStyle = `margin: 0 0 6px 0; font-weight: bold; font-size: 15px; color: #0f172a;`;
-            let textStyle = `margin: 0; font-size: 14px; color: #475569; font-style: italic; line-height: 1.5;`;
-
-            testimonialsHtml += `
-                <tr>
-                  <td>
-                    <div style="${cardStyle}">
-                      <p style="${titleStyle}">${head}</p>
-                      <p style="${textStyle}">${txt.replace(/["']/g, '')}</p>
-                    </div>
-                  </td>
-                </tr>
-              `;
-          });
-          testimonialsHtml += `</table>`;
-        }
-
-        let htmlContent = `
-          <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width: 600px; background-color: ${themeColor}; border-radius: 12px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.1); font-family: Arial, sans-serif;">
-            <tr>
-              <td align="center" style="padding: 30px 20px 20px 20px;">
-                <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-style: italic; letter-spacing: 1px; font-weight: 900;">${brandName}</h1>
-              </td>
-            </tr>
-            <tr>
-              <td align="center" style="padding: 10px 30px 40px 30px;">
-                ${heroBadge ? `<div style="display: inline-block; background-color: rgba(255,255,255,0.15); color: #ffffff; padding: 4px 16px; border-radius: 20px; font-size: 10px; font-weight: bold; text-transform: uppercase; margin-bottom: 20px;">${heroBadge}</div>` : ''}
-                <h2 style="color: #ffffff; font-size: 34px; font-weight: 900; margin: 0 0 24px 0; line-height: 1.1;">${title}</h2>
-                ${cta ? `<a href="#" style="display: inline-block; background-color: #86efac; color: ${themeColor}; padding: 14px 32px; text-decoration: none; border-radius: 30px; font-weight: bold; font-size: 14px;">${cta}</a>` : ''}
-                ${heroUrl ? `<div style="margin-top: 32px;"><img src="${heroUrl}" width="100%" style="display: block; width: 100%; max-width: 100%; border-radius: 12px; border: 2px solid rgba(255,255,255,0.2); object-fit: cover; height: 220px;" alt="Hero"></div>` : ''}
-              </td>
-            </tr>
-            <tr>
-              <td align="center" style="background-color: #fffbf5; border-radius: 32px 32px 0 0; padding: 40px 30px;">
-                ${paragraphs.map((p: string, i: number) => `<p style="color: ${i === 0 ? '#0f172a' : '#475569'}; font-size: ${i === 0 ? '20px' : '16px'}; font-weight: ${i === 0 ? 'bold' : 'normal'}; line-height: 1.6; margin: 0 0 20px 0; text-align: center;">${p}</p>`).join('')}
-                ${testimonialsHtml}
-                ${hasOffer ? `<div style="background-color: #86efac; color: ${themeColor}; border-radius: 12px; padding: 16px; margin-top: 32px; font-weight: bold; text-align: center; font-size: 18px;">${offerRaw}</div>` : ''}
-                ${cta ? `<div style="margin-top: 32px; text-align: center;"><a href="#" style="display: inline-block; background-color: #86efac; color: ${themeColor}; padding: 16px 36px; text-decoration: none; border-radius: 30px; font-weight: bold; font-size: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">${cta}</a></div>` : ''}
-                ${footerInfo ? `<p style="text-align: center; margin-top: 24px; font-size: 12px; color: #64748b; text-decoration: underline;">${footerInfo}</p>` : ''}
-              </td>
-            </tr>
-          </table>
-        `;
-
-        const fullHtml = `<!DOCTYPE html>
+        // Constrói o HTML empacotando o Tailwind CDN e capturando o nó exato da tela
+        const htmlContent = `<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${title}</title>
+  <title>Exportação Visual - BrieFlow</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* Pequeno reset para garantir fundo neutro fora da área exportada */
+    body {
+      margin: 0;
+      padding: 40px;
+      background-color: #1a1a24; /* surface-3 */
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      min-height: 100vh;
+    }
+    
+    /* Limpa bordas ativas ou de edição caso restem do canvas */
+    .editable-hover { outline: none !important; }
+  </style>
 </head>
-<body style="margin: 0; padding: 0; background-color: #f4f4f5; font-family: Arial, sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="padding: 40px 20px;">
-    <tr>
-      <td align="center">
-        ${htmlContent}
-      </td>
-    </tr>
-  </table>
+<body>
+  <!-- Clone Exato da Tela -->
+  ${emailElement.outerHTML}
 </body>
 </html>`;
 
-        const blobHtml = new Blob([fullHtml], { type: "text/html;charset=utf-8" });
+        const blobHtml = new Blob([htmlContent], { type: "text/html;charset=utf-8" });
         const htmlUrl = URL.createObjectURL(blobHtml);
 
         const aHtml = document.createElement("a");
         aHtml.href = htmlUrl;
-        aHtml.download = `email_${brandName.replace(/\s+/g, "_").toLowerCase()}.html`;
+        aHtml.download = `email_visual_${brandName.replace(/\s+/g, "_").toLowerCase()}.html`;
         document.body.appendChild(aHtml);
         aHtml.click();
         document.body.removeChild(aHtml);
         URL.revokeObjectURL(htmlUrl);
         
-        toast.success("E-mail adaptável exportado com sucesso!", { id: toastId });
+        toast.success("Arte do E-mail exportada com sucesso!", { id: toastId });
       }
       else if (activeTab === "social") {
         toastId = toast.loading("Preparando arquivos para download...");

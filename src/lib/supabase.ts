@@ -25,6 +25,7 @@ export async function saveAssetToLibrary(name: string, state: BuilderState) {
   }
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Você precisa fazer login para salvar campanhas na biblioteca.");
+
   const { data, error } = await supabase
     .from("assets")
     .insert([{
@@ -36,6 +37,7 @@ export async function saveAssetToLibrary(name: string, state: BuilderState) {
     }])
     .select()
     .single();
+
   if (error) throw error;
   return data;
 }
@@ -50,6 +52,7 @@ export async function getSavedAssets() {
     .from("assets")
     .select("*")
     .order("created_at", { ascending: false });
+
   if (error) throw error;
   return data;
 }
@@ -64,5 +67,27 @@ export async function deleteSavedAsset(id: string) {
     .from("assets")
     .delete()
     .eq("id", id);
+
   if (error) throw error;
+}
+
+// NOVA FUNÇÃO: Faz o upload da imagem para o Supabase Storage e retorna a URL Pública
+export async function uploadCampaignAsset(file: File, pathFolder: string): Promise<string> {
+  if (!supabase) throw new Error("Supabase não configurado.");
+  
+  const fileExt = file.name.split('.').pop();
+  const fileName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
+  const filePath = `${pathFolder}/${fileName}`;
+
+  const { error } = await supabase.storage
+    .from('campaign-assets')
+    .upload(filePath, file, { cacheControl: '3600', upsert: false });
+
+  if (error) throw error;
+
+  const { data: { publicUrl } } = supabase.storage
+    .from('campaign-assets')
+    .getPublicUrl(filePath);
+
+  return publicUrl;
 }
