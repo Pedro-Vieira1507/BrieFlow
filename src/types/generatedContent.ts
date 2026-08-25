@@ -62,7 +62,7 @@ export const LandingCopySchema = designSchema.extend({
   layoutStyle: z.preprocess((value) => {
     const raw = typeof value === "string" ? value.toLowerCase().trim() : "";
     return ["diagonal", "split", "minimalist", "centered", "reverse"].includes(raw) ? raw : "split";
-  }, z.enum(["diagonal", "split", "minimalist", "centered", "reverse"])),
+  }, z.enum(["diagonal", "split", "minimalist", "centered", "reverse"])).default("split"),
   badgePrimary: looseString.optional(),
   badgeSecondary: looseString.optional(),
   backgroundShape: z.preprocess((value) => {
@@ -75,6 +75,7 @@ export const SocialCopySchema = designSchema.extend({
   hook: looseString,
   body: looseString,
   cta: looseString.default(""),
+  // CORREÇÃO: Removido o .min(1) para não quebrar a IA quando ela omitir hashtags
   hashtags: z.preprocess((value) => {
     if (value === null || value === undefined) return [];
     const arr = Array.isArray(value) ? value : String(value).split(/[,;\n]/);
@@ -82,7 +83,7 @@ export const SocialCopySchema = designSchema.extend({
       .map((item) => (typeof item === "string" ? item : String(item)))
       .map((item) => item.replace(/\*\*/g, "").trim())
       .filter((item) => item.length > 0 && item.toLowerCase() !== "null");
-  }, z.array(z.string())).pipe(z.array(z.string()).min(1, "A geração de hashtags é estritamente obrigatória.")),
+  }, z.array(z.string())).default([]),
 });
 
 export const EmailCopySchema = designSchema.extend({
@@ -163,17 +164,17 @@ export function toBuilderContent<T extends MaterialType>(
 
   if (type === "banner") {
     const landing = copy as LandingCopy;
-    return {
-       ...base,
-       title: landing.headline,
-       subtitle: landing.subheadline,
+    return { 
+      ...base, 
+      title: landing.headline, 
+      subtitle: landing.subheadline,
       body: landing.body,
       footerInfo: landing.footerInfo,
-      cta: landing.ctaText,
-       ctaVariant: landing.ctaVariant satisfies CtaVariant,
-       keyBenefits: landing.keyBenefits,
-       objectionsHandled: landing.objectionsHandled,
-       layoutStyle: landing.layoutStyle,
+      cta: landing.ctaText, 
+      ctaVariant: landing.ctaVariant satisfies CtaVariant, 
+      keyBenefits: landing.keyBenefits, 
+      objectionsHandled: landing.objectionsHandled, 
+      layoutStyle: landing.layoutStyle,
       badgePrimary: landing.badgePrimary,
       badgeSecondary: landing.badgeSecondary,
       backgroundShape: landing.backgroundShape
@@ -206,7 +207,6 @@ export function toBuilderContent<T extends MaterialType>(
 
   const social = copy as SocialCopy;
   const caption = [social.hook, social.body, social.cta].filter((p) => p.length > 0).join("\n\n");
-
   return { ...base, hook: social.hook, caption, body: social.body, cta: social.cta, hashtags: social.hashtags };
 }
 
