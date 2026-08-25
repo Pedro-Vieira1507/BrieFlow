@@ -3,9 +3,31 @@ import assert from "node:assert/strict";
 
 import {
   buildSocialExportText,
+  calculatePreviewScale,
   escapeHtml,
   sanitizeFilenamePart,
 } from "../src/lib/export-utils.ts";
+
+test("calculatePreviewScale fits the complete canvas without cropping", () => {
+  assert.equal(
+    calculatePreviewScale({
+      availableWidth: 1000,
+      availableHeight: 300,
+      contentWidth: 1200,
+      contentHeight: 600,
+    }),
+    0.5,
+  );
+  assert.equal(
+    calculatePreviewScale({
+      availableWidth: 400,
+      availableHeight: 320,
+      contentWidth: 540,
+      contentHeight: 960,
+    }),
+    1 / 3,
+  );
+});
 
 test("sanitizeFilenamePart creates a safe, stable filename segment", () => {
   assert.equal(

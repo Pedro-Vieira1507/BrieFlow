@@ -68,6 +68,24 @@ export function buildSocialExportText(content: SocialExportContent): string {
     .join("\n\n");
 }
 
+export function calculatePreviewScale({
+  availableHeight,
+  availableWidth,
+  contentHeight,
+  contentWidth,
+  fitHeight = true,
+}: {
+  availableHeight: number;
+  availableWidth: number;
+  contentHeight: number;
+  contentWidth: number;
+  fitHeight?: boolean;
+}): number {
+  const widthScale = Math.max(1, availableWidth) / Math.max(1, contentWidth);
+  const heightScale = Math.max(1, availableHeight) / Math.max(1, contentHeight);
+  return Math.min(1, widthScale, fitHeight ? heightScale : 1);
+}
+
 function nextFrame(): Promise<void> {
   return new Promise((resolve) => requestAnimationFrame(() => resolve()));
 }

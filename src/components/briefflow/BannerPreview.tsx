@@ -394,7 +394,7 @@ export function BannerPreview({ state: propState, onChange, exportWrapperClass, 
 
                     {hasSubtitle && <Editable as="p" multiline value={subtitle} onChange={(v) => onChange({ subtitle: v })} className={cn("font-medium opacity-90 text-[28px] [.force-mobile_&]:!text-[22px] leading-relaxed max-w-[90%] mx-auto mt-4 break-words pointer-events-auto", !isComplexShape && "drop-shadow-sm", !isExportClone && "max-md:!text-[18px]")} style={{ color: textColor }} />}
 
-                    {bodyText && <Editable as="p" multiline value={bodyText} onChange={(v) => onChange({ body: v })} className={cn("font-normal opacity-80 text-[20px] [.force-mobile_&]:!text-[18px] leading-relaxed max-w-[90%] mx-auto mt-3 break-words pointer-events-auto block [.force-mobile_&]:!hidden", !isComplexShape && "drop-shadow-sm", !isExportClone && "max-md:!text-[14px] max-md:!hidden")} style={{ color: textColor }} />}
+                    {bodyText && <Editable as="p" multiline value={bodyText} onChange={(v) => onChange({ body: v })} className={cn("font-normal opacity-80 text-[20px] [.force-mobile_&]:!text-[16px] leading-relaxed max-w-[90%] mx-auto mt-3 break-words pointer-events-auto block", !isComplexShape && "drop-shadow-sm", !isExportClone && "max-md:!text-[14px]")} style={{ color: textColor }} />}
 
                     {benefits.length > 0 && (
                       <div className="flex flex-wrap justify-center gap-2 mt-6">
@@ -512,7 +512,7 @@ export function BannerPreview({ state: propState, onChange, exportWrapperClass, 
 
                   {hasSubtitle && <Editable as="p" multiline value={subtitle} onChange={(v) => onChange({ subtitle: v })} className={cn("font-semibold opacity-95 text-[28px] [.force-mobile_&]:!text-[22px] leading-relaxed max-w-[95%] break-words mb-3", (!isComplexShape || isOffset) && "drop-shadow-md", !isExportClone && "max-md:!text-[18px]")} style={{ color: textColor }} />}
 
-                  {bodyText && <Editable as="p" multiline value={bodyText} onChange={(v) => onChange({ body: v })} className={cn("font-normal opacity-80 text-[20px] [.force-mobile_&]:!text-[18px] leading-relaxed max-w-[95%] break-words mb-5 block [.force-mobile_&]:!hidden", (!isComplexShape || isOffset) && "drop-shadow-md", !isExportClone && "max-md:!text-[14px] max-md:!hidden")} style={{ color: textColor }} />}
+                  {bodyText && <Editable as="p" multiline value={bodyText} onChange={(v) => onChange({ body: v })} className={cn("font-normal opacity-80 text-[20px] [.force-mobile_&]:!text-[16px] leading-relaxed max-w-[95%] break-words mb-5 block", (!isComplexShape || isOffset) && "drop-shadow-md", !isExportClone && "max-md:!text-[14px]")} style={{ color: textColor }} />}
 
                   {benefits.length > 0 && (
                     <div className={cn("flex flex-wrap gap-2 mt-4", isReverse ? "justify-end" : "justify-start", "[.force-mobile_&]:!justify-center", !isExportClone && "max-md:!justify-center")}>
@@ -524,7 +524,7 @@ export function BannerPreview({ state: propState, onChange, exportWrapperClass, 
                 </DraggableBlock>
 
                 {footerInfo && (
-                  <div className={cn("mt-auto pt-8 pointer-events-auto block [.force-mobile_&]:!hidden", !isExportClone && "max-md:!hidden")}>
+                  <div className={cn("mt-auto pt-8 pointer-events-auto block [.force-mobile_&]:!pt-4", !isExportClone && "max-md:!pt-4")}>
                     <Editable as="p" value={footerInfo} onChange={(v) => onChange({ footerInfo: v })} className={cn("font-medium opacity-60 text-[14px] uppercase tracking-widest break-words drop-shadow-sm")} style={{ color: textColor }} />
                   </div>
                 )}
