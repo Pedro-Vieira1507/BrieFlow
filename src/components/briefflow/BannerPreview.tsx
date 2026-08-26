@@ -2,10 +2,10 @@
 import { useEffect, useLayoutEffect, useMemo, useState, useRef } from "react";
 import { Editable } from "./Editable";
 import { DraggableImage } from "./DraggableImage";
-import type { BuilderState } from "@/types/builder";
+import type { BannerFontSizes, BuilderState } from "@/types/builder";
 import { buildPollinationsUrl, buildFallbackUrl } from "@/lib/pollinations";
 import { Button } from "@/components/ui/button";
-import { Upload, ImagePlus, RefreshCw, ArrowUpRight, Trash2, Sparkles, Palette, LayoutTemplate, Type, Layers, Move } from "lucide-react";
+import { Upload, ImagePlus, RefreshCw, ArrowUpRight, Trash2, Sparkles, Palette, LayoutTemplate, Type, Layers, Move, Minus, Plus, RotateCcw } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { cleanText, isEmptyLike } from "@/lib/sanitize";
@@ -22,6 +22,54 @@ interface Props {
 }
 
 const blockCache = new Map<string, { x: number; y: number }>();
+
+type BannerFontSizeKey = keyof BannerFontSizes;
+
+interface FontSizeControlProps {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step?: number;
+  onChange: (value: number) => void;
+}
+
+function FontSizeControl({ label, value, min, max, step = 1, onChange }: FontSizeControlProps) {
+  const update = (nextValue: number) => onChange(Math.min(max, Math.max(min, nextValue)));
+
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-lg border border-border-subtle bg-surface-2 px-2 py-1.5">
+      <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-fg-secondary">{label}</span>
+      <div className="flex shrink-0 items-center gap-1">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="size-7 rounded-md"
+          disabled={value <= min}
+          aria-label={`Diminuir ${label.toLowerCase()}`}
+          title={`Diminuir ${label.toLowerCase()}`}
+          onClick={() => update(value - step)}
+        >
+          <Minus className="size-3.5" />
+        </Button>
+        <span className="w-12 text-center text-[11px] font-bold tabular-nums text-fg-primary">{value}px</span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="size-7 rounded-md"
+          disabled={value >= max}
+          aria-label={`Aumentar ${label.toLowerCase()}`}
+          title={`Aumentar ${label.toLowerCase()}`}
+          onClick={() => update(value + step)}
+        >
+          <Plus className="size-3.5" />
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 function DraggableBlock({ id, children, className, isExport }: { id: string, children: React.ReactNode, className?: string, isExport?: boolean }) {
   const cached = useMemo(() => blockCache.get(id) || { x: 0, y: 0 }, [id]);
@@ -341,6 +389,55 @@ export function BannerPreview({ state: propState, onChange, exportWrapperClass, 
   const isCentered = layoutStyle === "centered" || layoutStyle === "minimalist";
   const isComplexShape = isFrame || isBlob || isGeometric || isArch || isPill || isOffset;
 
+  const defaultFontSizes: Required<BannerFontSizes> = {
+    title: isCentered ? 56 : 64,
+    subtitle: 28,
+    body: 20,
+    benefits: 14,
+    footer: isCentered ? 16 : 14,
+    badgePrimary: 48,
+    badgeSecondary: 18,
+  };
+  const fontSizes: Required<BannerFontSizes> = {
+    ...defaultFontSizes,
+    ...state.bannerFontSizes,
+  };
+  const mobileDefaultFontSizes: Required<BannerFontSizes> = {
+    title: 40,
+    subtitle: 22,
+    body: 16,
+    benefits: 12,
+    footer: isCentered ? 12 : 14,
+    badgePrimary: 36,
+    badgeSecondary: 16,
+  };
+  const mobileFontSize = (key: BannerFontSizeKey) =>
+    Math.max(8, Math.round(fontSizes[key] * (mobileDefaultFontSizes[key] / defaultFontSizes[key])));
+  const bannerFontVariables = {
+    "--banner-title-size": `${fontSizes.title}px`,
+    "--banner-subtitle-size": `${fontSizes.subtitle}px`,
+    "--banner-body-size": `${fontSizes.body}px`,
+    "--banner-benefits-size": `${fontSizes.benefits}px`,
+    "--banner-footer-size": `${fontSizes.footer}px`,
+    "--banner-badge-primary-size": `${fontSizes.badgePrimary}px`,
+    "--banner-badge-secondary-size": `${fontSizes.badgeSecondary}px`,
+    "--banner-title-mobile-size": `${mobileFontSize("title")}px`,
+    "--banner-subtitle-mobile-size": `${mobileFontSize("subtitle")}px`,
+    "--banner-body-mobile-size": `${mobileFontSize("body")}px`,
+    "--banner-benefits-mobile-size": `${mobileFontSize("benefits")}px`,
+    "--banner-footer-mobile-size": `${mobileFontSize("footer")}px`,
+    "--banner-badge-primary-mobile-size": `${mobileFontSize("badgePrimary")}px`,
+    "--banner-badge-secondary-mobile-size": `${mobileFontSize("badgeSecondary")}px`,
+  } as React.CSSProperties;
+  const updateFontSize = (key: BannerFontSizeKey, value: number) => {
+    onChange({
+      bannerFontSizes: {
+        ...state.bannerFontSizes,
+        [key]: value,
+      },
+    });
+  };
+
   let shapeClass = "";
   if (isCurve) {
     shapeClass = isReverse
@@ -406,6 +503,7 @@ export function BannerPreview({ state: propState, onChange, exportWrapperClass, 
           borderWidth: '1px',
           fontFamily: baseFontFamily,
           ...exportWrapperStyle,
+          ...bannerFontVariables,
           height: canvasHeight,
           width: canvasWidth,
         }}
@@ -473,16 +571,16 @@ export function BannerPreview({ state: propState, onChange, exportWrapperClass, 
                     )}
                     style={{ backgroundColor: isComplexShape ? 'transparent' : `${boxColor}E6`, color: textColor }}
                   >
-                    <Editable as="h2" value={title} onChange={(v) => onChange({ title: v })} className={cn("font-extrabold text-[56px] [.force-mobile_&]:!text-[46px] leading-[1.1] tracking-tighter break-words text-balance", !isExportClone && "max-md:!text-[36px]")} style={{ color: textColor }} />
+                    <Editable as="h2" value={title} onChange={(v) => onChange({ title: v })} className={cn("banner-title-text font-extrabold text-[56px] [.force-mobile_&]:!text-[46px] leading-[1.1] tracking-tighter break-words text-balance", !isExportClone && "max-md:!text-[36px]")} style={{ color: textColor, fontSize: fontSizes.title }} />
 
-                    {hasSubtitle && <Editable as="p" multiline value={subtitle} onChange={(v) => onChange({ subtitle: v })} className={cn("font-medium opacity-90 text-[28px] [.force-mobile_&]:!text-[22px] leading-relaxed max-w-[90%] mx-auto mt-4 break-words pointer-events-auto", !isComplexShape && "drop-shadow-sm", !isExportClone && "max-md:!text-[18px]")} style={{ color: textColor }} />}
+                    {hasSubtitle && <Editable as="p" multiline value={subtitle} onChange={(v) => onChange({ subtitle: v })} className={cn("banner-subtitle-text font-medium opacity-90 text-[28px] [.force-mobile_&]:!text-[22px] leading-relaxed max-w-[90%] mx-auto mt-4 break-words pointer-events-auto", !isComplexShape && "drop-shadow-sm", !isExportClone && "max-md:!text-[18px]")} style={{ color: textColor, fontSize: fontSizes.subtitle }} />}
 
-                    {bodyText && <Editable as="p" multiline value={bodyText} onChange={(v) => onChange({ body: v })} className={cn("font-normal opacity-80 text-[20px] [.force-mobile_&]:!text-[16px] leading-relaxed max-w-[90%] mx-auto mt-3 break-words pointer-events-auto block", !isComplexShape && "drop-shadow-sm", !isExportClone && "max-md:!text-[14px]")} style={{ color: textColor }} />}
+                    {bodyText && <Editable as="p" multiline value={bodyText} onChange={(v) => onChange({ body: v })} className={cn("banner-body-text font-normal opacity-80 text-[20px] [.force-mobile_&]:!text-[16px] leading-relaxed max-w-[90%] mx-auto mt-3 break-words pointer-events-auto block", !isComplexShape && "drop-shadow-sm", !isExportClone && "max-md:!text-[14px]")} style={{ color: textColor, fontSize: fontSizes.body }} />}
 
                     {benefits.length > 0 && (
                       <div className="flex flex-wrap justify-center gap-2 mt-6">
                         {benefits.map((ben, i) => (
-                          <span key={i} className={cn("border border-white/10 text-[14px] [.force-mobile_&]:!text-[12px] uppercase tracking-widest font-bold px-4 py-2 rounded-xl shadow-inner", !isExportClone && "max-md:!text-[11px]")} style={{ color: textColor, backgroundColor: `${boxColor}40` }}>{ben}</span>
+                          <span key={i} className={cn("banner-benefit-text border border-white/10 text-[14px] [.force-mobile_&]:!text-[12px] uppercase tracking-widest font-bold px-4 py-2 rounded-xl shadow-inner", !isExportClone && "max-md:!text-[11px]")} style={{ color: textColor, backgroundColor: `${boxColor}40`, fontSize: fontSizes.benefits }}>{ben}</span>
                         ))}
                       </div>
                     )}
@@ -491,7 +589,7 @@ export function BannerPreview({ state: propState, onChange, exportWrapperClass, 
 
                 {footerInfo && (
                   <div className="mt-auto pt-6 pointer-events-auto">
-                    <Editable as="p" value={footerInfo} onChange={(v) => onChange({ footerInfo: v })} className={cn("font-medium opacity-60 text-[16px] [.force-mobile_&]:!text-[12px] uppercase tracking-widest break-words", !isExportClone && "max-md:!text-[12px]")} style={{ color: textColor }} />
+                    <Editable as="p" value={footerInfo} onChange={(v) => onChange({ footerInfo: v })} className={cn("banner-footer-text font-medium opacity-60 text-[16px] [.force-mobile_&]:!text-[12px] uppercase tracking-widest break-words", !isExportClone && "max-md:!text-[12px]")} style={{ color: textColor, fontSize: fontSizes.footer }} />
                   </div>
                 )}
 
@@ -499,12 +597,12 @@ export function BannerPreview({ state: propState, onChange, exportWrapperClass, 
                   <DraggableBlock id="banner-badge-center" isExport={isExportClone} className={cn("absolute z-50 bottom-8 right-8 flex flex-col items-end gap-3 pointer-events-auto [.force-mobile_&]:!bottom-4 [.force-mobile_&]:!right-4", !isExportClone && "max-md:!bottom-4 max-md:!right-4")}>
                     {badgePrimary && (
                       <div className={cn("rounded-full size-[180px] [.force-mobile_&]:!size-[140px] flex items-center justify-center text-center p-3 shadow-[0_20px_40px_-10px_rgba(0,0,0,0.5)] border border-white/20", !isExportClone && "max-md:!size-[120px]")} style={{ backgroundColor: `${boxColor}F2`, color: textColor }}>
-                        <Editable as="span" value={badgePrimary} onChange={(v) => onChange({ badgePrimary: v })} className={cn("font-black text-[48px] [.force-mobile_&]:!text-[36px] leading-[1.0] tracking-tighter", !isExportClone && "max-md:!text-[36px]")} style={{ color: textColor }} />
+                        <Editable as="span" value={badgePrimary} onChange={(v) => onChange({ badgePrimary: v })} className={cn("banner-badge-primary-text font-black text-[48px] [.force-mobile_&]:!text-[36px] leading-[1.0] tracking-tighter", !isExportClone && "max-md:!text-[36px]")} style={{ color: textColor, fontSize: fontSizes.badgePrimary }} />
                       </div>
                     )}
                     {badgeSecondary && (
                       <div className="rounded-full px-5 py-2.5 text-center shadow-lg border border-white/20 relative z-10" style={{ backgroundColor: themeColor, color: textColor }}>
-                        <Editable as="span" value={badgeSecondary} onChange={(v) => onChange({ badgeSecondary: v })} className={cn("font-bold text-[18px] [.force-mobile_&]:!text-[16px] tracking-wide leading-tight", !isExportClone && "max-md:!text-[14px]")} style={{ color: textColor }} />
+                        <Editable as="span" value={badgeSecondary} onChange={(v) => onChange({ badgeSecondary: v })} className={cn("banner-badge-secondary-text font-bold text-[18px] [.force-mobile_&]:!text-[16px] tracking-wide leading-tight", !isExportClone && "max-md:!text-[14px]")} style={{ color: textColor, fontSize: fontSizes.badgeSecondary }} />
                       </div>
                     )}
                   </DraggableBlock>
@@ -584,7 +682,7 @@ export function BannerPreview({ state: propState, onChange, exportWrapperClass, 
                       color: textColor
                     }}
                   >
-                    <Editable as="h2" value={title} onChange={(v) => onChange({ title: v })} className={cn("font-extrabold text-[64px] [.force-mobile_&]:!text-[46px] leading-[1.05] tracking-tighter break-words text-balance", !isOffset && "drop-shadow-lg", !isExportClone && "max-md:!text-[36px]")} style={{ color: textColor }} />
+                    <Editable as="h2" value={title} onChange={(v) => onChange({ title: v })} className={cn("banner-title-text font-extrabold text-[64px] [.force-mobile_&]:!text-[46px] leading-[1.05] tracking-tighter break-words text-balance", !isOffset && "drop-shadow-lg", !isExportClone && "max-md:!text-[36px]")} style={{ color: textColor, fontSize: fontSizes.title }} />
 
                     {!isComplexShape && !isExportClone && (
                       <div className={cn("absolute top-6 opacity-30", isReverse ? "left-6" : "right-6", "[.force-mobile_&]:!hidden", !isExportClone && "max-md:!hidden")}>
@@ -593,14 +691,14 @@ export function BannerPreview({ state: propState, onChange, exportWrapperClass, 
                     )}
                   </div>
 
-                  {hasSubtitle && <Editable as="p" multiline value={subtitle} onChange={(v) => onChange({ subtitle: v })} className={cn("font-semibold opacity-95 text-[28px] [.force-mobile_&]:!text-[22px] leading-relaxed max-w-[95%] break-words mb-3", (!isComplexShape || isOffset) && "drop-shadow-md", !isExportClone && "max-md:!text-[18px]")} style={{ color: textColor }} />}
+                  {hasSubtitle && <Editable as="p" multiline value={subtitle} onChange={(v) => onChange({ subtitle: v })} className={cn("banner-subtitle-text font-semibold opacity-95 text-[28px] [.force-mobile_&]:!text-[22px] leading-relaxed max-w-[95%] break-words mb-3", (!isComplexShape || isOffset) && "drop-shadow-md", !isExportClone && "max-md:!text-[18px]")} style={{ color: textColor, fontSize: fontSizes.subtitle }} />}
 
-                  {bodyText && <Editable as="p" multiline value={bodyText} onChange={(v) => onChange({ body: v })} className={cn("font-normal opacity-80 text-[20px] [.force-mobile_&]:!text-[16px] leading-relaxed max-w-[95%] break-words mb-5 block", (!isComplexShape || isOffset) && "drop-shadow-md", !isExportClone && "max-md:!text-[14px]")} style={{ color: textColor }} />}
+                  {bodyText && <Editable as="p" multiline value={bodyText} onChange={(v) => onChange({ body: v })} className={cn("banner-body-text font-normal opacity-80 text-[20px] [.force-mobile_&]:!text-[16px] leading-relaxed max-w-[95%] break-words mb-5 block", (!isComplexShape || isOffset) && "drop-shadow-md", !isExportClone && "max-md:!text-[14px]")} style={{ color: textColor, fontSize: fontSizes.body }} />}
 
                   {benefits.length > 0 && (
                     <div className={cn("flex flex-wrap gap-2 mt-4", isReverse ? "justify-end" : "justify-start", "[.force-mobile_&]:!justify-center", !isExportClone && "max-md:!justify-center")}>
                       {benefits.map((ben, i) => (
-                        <span key={i} className={cn("border border-white/10 text-[14px] [.force-mobile_&]:!text-[12px] uppercase tracking-widest font-bold px-4 py-2 rounded-xl shadow-inner", !isExportClone && "max-md:!text-[10px]")} style={{ color: isComplexShape ? boxColor : textColor, backgroundColor: isComplexShape ? themeColor : `${boxColor}40` }}>{ben}</span>
+                        <span key={i} className={cn("banner-benefit-text border border-white/10 text-[14px] [.force-mobile_&]:!text-[12px] uppercase tracking-widest font-bold px-4 py-2 rounded-xl shadow-inner", !isExportClone && "max-md:!text-[10px]")} style={{ color: isComplexShape ? boxColor : textColor, backgroundColor: isComplexShape ? themeColor : `${boxColor}40`, fontSize: fontSizes.benefits }}>{ben}</span>
                       ))}
                     </div>
                   )}
@@ -608,7 +706,7 @@ export function BannerPreview({ state: propState, onChange, exportWrapperClass, 
 
                 {footerInfo && (
                   <div className={cn("mt-auto pt-8 pointer-events-auto block [.force-mobile_&]:!pt-4", !isExportClone && "max-md:!pt-4")}>
-                    <Editable as="p" value={footerInfo} onChange={(v) => onChange({ footerInfo: v })} className={cn("font-medium opacity-60 text-[14px] uppercase tracking-widest break-words drop-shadow-sm")} style={{ color: textColor }} />
+                    <Editable as="p" value={footerInfo} onChange={(v) => onChange({ footerInfo: v })} className={cn("banner-footer-text font-medium opacity-60 text-[14px] uppercase tracking-widest break-words drop-shadow-sm")} style={{ color: textColor, fontSize: fontSizes.footer }} />
                   </div>
                 )}
               </div>
@@ -621,12 +719,12 @@ export function BannerPreview({ state: propState, onChange, exportWrapperClass, 
                 )}>
                   {badgePrimary && (
                     <div className={cn("rounded-full size-[180px] [.force-mobile_&]:!size-[140px] flex items-center justify-center text-center p-3 shadow-[0_20px_40px_-10px_rgba(0,0,0,0.5)] border border-white/20", !isExportClone && "max-md:!size-[110px]")} style={{ backgroundColor: `${boxColor}F2`, color: textColor }}>
-                      <Editable as="span" value={badgePrimary} onChange={(v) => onChange({ badgePrimary: v })} className={cn("font-black text-[48px] [.force-mobile_&]:!text-[36px] leading-[1.0] tracking-tighter", !isExportClone && "max-md:!text-[28px]")} style={{ color: textColor }} />
+                      <Editable as="span" value={badgePrimary} onChange={(v) => onChange({ badgePrimary: v })} className={cn("banner-badge-primary-text font-black text-[48px] [.force-mobile_&]:!text-[36px] leading-[1.0] tracking-tighter", !isExportClone && "max-md:!text-[28px]")} style={{ color: textColor, fontSize: fontSizes.badgePrimary }} />
                     </div>
                   )}
                   {badgeSecondary && (
                     <div className="rounded-full px-5 py-2.5 text-center shadow-lg border border-white/20 relative z-10" style={{ backgroundColor: themeColor, color: textColor }}>
-                      <Editable as="span" value={badgeSecondary} onChange={(v) => onChange({ badgeSecondary: v })} className={cn("font-bold text-[18px] [.force-mobile_&]:!text-[16px] tracking-wide leading-tight", !isExportClone && "max-md:!text-[13px]")} style={{ color: textColor }} />
+                      <Editable as="span" value={badgeSecondary} onChange={(v) => onChange({ badgeSecondary: v })} className={cn("banner-badge-secondary-text font-bold text-[18px] [.force-mobile_&]:!text-[16px] tracking-wide leading-tight", !isExportClone && "max-md:!text-[13px]")} style={{ color: textColor, fontSize: fontSizes.badgeSecondary }} />
                     </div>
                   )}
                 </DraggableBlock>
@@ -654,7 +752,7 @@ export function BannerPreview({ state: propState, onChange, exportWrapperClass, 
                   <Palette className="mr-1.5 size-3.5" /> Design
                 </Button>
               </PopoverTrigger>
-              <PopoverContent side="top" align="end" className="w-[340px] bg-surface-1 border-border-strong p-4 shadow-2xl rounded-xl z-50 mb-2">
+              <PopoverContent side="top" align="end" className="max-h-[calc(100vh-96px)] w-[380px] overflow-y-auto bg-surface-1 border-border-strong p-4 shadow-2xl rounded-xl z-50 mb-2">
                 <div className="space-y-4">
 
                   <div className="space-y-2">
@@ -724,6 +822,35 @@ export function BannerPreview({ state: propState, onChange, exportWrapperClass, 
                       <Button size="sm" variant={(!state.fontFamily || state.fontFamily === 'sans') ? 'default' : 'outline'} onClick={() => onChange({ fontFamily: 'sans' })} className="h-7 text-[11px] font-sans">Modern (Sans)</Button>
                       <Button size="sm" variant={state.fontFamily === 'serif' ? 'default' : 'outline'} onClick={() => onChange({ fontFamily: 'serif' })} className="h-7 text-[11px] font-serif">Classic (Serif)</Button>
                       <Button size="sm" variant={state.fontFamily === 'mono' ? 'default' : 'outline'} onClick={() => onChange({ fontFamily: 'mono' })} className="h-7 text-[11px] font-mono">Tech (Mono)</Button>
+                    </div>
+
+                    <div className="mt-3 border-t border-border-subtle pt-3">
+                      <div className="mb-2 flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-[10px] font-bold uppercase tracking-widest text-fg-muted">Tamanho por linha</p>
+                          <p className="mt-0.5 text-[10px] text-fg-muted">O mobile acompanha a proporção automaticamente.</p>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 shrink-0 px-2 text-[10px] text-fg-secondary"
+                          disabled={!state.bannerFontSizes}
+                          onClick={() => onChange({ bannerFontSizes: undefined })}
+                        >
+                          <RotateCcw className="mr-1 size-3" /> Restaurar
+                        </Button>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <FontSizeControl label="Título" value={fontSizes.title} min={24} max={96} step={2} onChange={(value) => updateFontSize("title", value)} />
+                        <FontSizeControl label="Subtítulo" value={fontSizes.subtitle} min={12} max={48} step={2} onChange={(value) => updateFontSize("subtitle", value)} />
+                        <FontSizeControl label="Descrição" value={fontSizes.body} min={10} max={36} onChange={(value) => updateFontSize("body", value)} />
+                        <FontSizeControl label="Benefícios" value={fontSizes.benefits} min={8} max={24} onChange={(value) => updateFontSize("benefits", value)} />
+                        <FontSizeControl label="Rodapé" value={fontSizes.footer} min={8} max={24} onChange={(value) => updateFontSize("footer", value)} />
+                        <FontSizeControl label="Selo principal" value={fontSizes.badgePrimary} min={16} max={72} step={2} onChange={(value) => updateFontSize("badgePrimary", value)} />
+                        <FontSizeControl label="Selo auxiliar" value={fontSizes.badgeSecondary} min={8} max={28} onChange={(value) => updateFontSize("badgeSecondary", value)} />
+                      </div>
                     </div>
                   </div>
 

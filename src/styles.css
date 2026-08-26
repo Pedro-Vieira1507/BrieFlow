@@ -10,6 +10,34 @@
   transition: none !important;
 }
 
+#banner-export-node .banner-title-text {
+  font-size: var(--banner-title-size) !important;
+}
+
+#banner-export-node .banner-subtitle-text {
+  font-size: var(--banner-subtitle-size) !important;
+}
+
+#banner-export-node .banner-body-text {
+  font-size: var(--banner-body-size) !important;
+}
+
+#banner-export-node .banner-benefit-text {
+  font-size: var(--banner-benefits-size) !important;
+}
+
+#banner-export-node .banner-footer-text {
+  font-size: var(--banner-footer-size) !important;
+}
+
+#banner-export-node .banner-badge-primary-text {
+  font-size: var(--banner-badge-primary-size) !important;
+}
+
+#banner-export-node .banner-badge-secondary-text {
+  font-size: var(--banner-badge-secondary-size) !important;
+}
+
 /* Canonical 540×960 mobile composition for banner preview/export. */
 .force-mobile .banner-layout {
   display: block !important;
@@ -45,6 +73,34 @@
 .force-mobile .banner-centered-pane h2 {
   font-size: 40px !important;
   line-height: 1.05 !important;
+}
+
+#banner-export-node.force-mobile .banner-title-text {
+  font-size: var(--banner-title-mobile-size) !important;
+}
+
+#banner-export-node.force-mobile .banner-subtitle-text {
+  font-size: var(--banner-subtitle-mobile-size) !important;
+}
+
+#banner-export-node.force-mobile .banner-body-text {
+  font-size: var(--banner-body-mobile-size) !important;
+}
+
+#banner-export-node.force-mobile .banner-benefit-text {
+  font-size: var(--banner-benefits-mobile-size) !important;
+}
+
+#banner-export-node.force-mobile .banner-footer-text {
+  font-size: var(--banner-footer-mobile-size) !important;
+}
+
+#banner-export-node.force-mobile .banner-badge-primary-text {
+  font-size: var(--banner-badge-primary-mobile-size) !important;
+}
+
+#banner-export-node.force-mobile .banner-badge-secondary-text {
+  font-size: var(--banner-badge-secondary-mobile-size) !important;
 }
 
 .force-mobile .banner-mobile-reset {

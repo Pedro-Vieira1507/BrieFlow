@@ -40,6 +40,7 @@ export interface BannerContent {
   badgePrimary?: string;
   badgeSecondary?: string;
   backgroundShape?: "diagonal" | "curve" | "split" | "minimalist" | "blob" | "geometric" | "frame" | "arch" | "wave" | "pill" | "offset";
+  bannerFontSizes?: BannerFontSizes;
 }
 
 export interface EmailContent {
@@ -84,6 +85,16 @@ export interface SocialContent {
 export type AssetContent = BannerContent | EmailContent | SocialContent;
 export type CtaVariant = "primary" | "secondary" | "urgent" | "soft";
 
+export interface BannerFontSizes {
+  title?: number;
+  subtitle?: number;
+  body?: number;
+  benefits?: number;
+  footer?: number;
+  badgePrimary?: number;
+  badgeSecondary?: number;
+}
+
 export interface BuilderState {
   type: BuilderType;
   title?: string;
@@ -126,6 +137,7 @@ export interface BuilderState {
   textColor?: string;
   boxColor?: string;
   fontFamily?: string;
+  bannerFontSizes?: BannerFontSizes;
 }
 
 export interface SiteBrandData {
