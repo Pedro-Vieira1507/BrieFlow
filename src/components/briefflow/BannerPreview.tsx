@@ -1,5 +1,5 @@
 // src/components/briefflow/BannerPreview.tsx
-import { useEffect, useMemo, useState, useRef } from "react";
+import { useEffect, useLayoutEffect, useMemo, useState, useRef } from "react";
 import { Editable } from "./Editable";
 import { DraggableImage } from "./DraggableImage";
 import type { BuilderState } from "@/types/builder";
@@ -40,8 +40,9 @@ function DraggableBlock({ id, children, className, isExport }: { id: string, chi
       const clientY = e instanceof MouseEvent ? e.clientY : e.touches[0].clientY;
 
       const parent = containerRef.current?.closest('#banner-export-node, #email-export-node');
-      const pWidth = parent ? parent.clientWidth : window.innerWidth;
-      const pHeight = parent ? parent.clientHeight : window.innerHeight;
+      const parentRect = parent?.getBoundingClientRect();
+      const pWidth = parentRect?.width || window.innerWidth;
+      const pHeight = parentRect?.height || window.innerHeight;
 
       const deltaX = ((clientX - startMousePos.current.x) / pWidth) * 100;
       const deltaY = ((clientY - startMousePos.current.y) / pHeight) * 100;
@@ -70,8 +71,44 @@ function DraggableBlock({ id, children, className, isExport }: { id: string, chi
   }, [isDragging, isExport]);
 
   useEffect(() => {
-    blockCache.set(id, pos);
-  }, [pos, id]);
+    if (!isExport) blockCache.set(id, pos);
+  }, [pos, id, isExport]);
+
+  useLayoutEffect(() => {
+    if (isDragging) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      const element = containerRef.current;
+      const parent = element?.closest<HTMLElement>('#banner-export-node, #email-export-node');
+      if (!element || !parent) return;
+
+      const elementRect = element.getBoundingClientRect();
+      const parentRect = parent.getBoundingClientRect();
+      let correctionX = 0;
+      let correctionY = 0;
+
+      if (elementRect.left < parentRect.left) {
+        correctionX = parentRect.left - elementRect.left;
+      } else if (elementRect.right > parentRect.right) {
+        correctionX = parentRect.right - elementRect.right;
+      }
+
+      if (elementRect.top < parentRect.top) {
+        correctionY = parentRect.top - elementRect.top;
+      } else if (elementRect.bottom > parentRect.bottom) {
+        correctionY = parentRect.bottom - elementRect.bottom;
+      }
+
+      if (Math.abs(correctionX) > 0.5 || Math.abs(correctionY) > 0.5) {
+        setPos((current) => ({
+          x: current.x + (correctionX / parentRect.width) * 100,
+          y: current.y + (correctionY / parentRect.height) * 100,
+        }));
+      }
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [isDragging]);
 
   const onPointerDown = (e: React.PointerEvent | React.MouseEvent | React.TouchEvent) => {
     if (isExport) return;
@@ -111,7 +148,30 @@ function DraggableBlock({ id, children, className, isExport }: { id: string, chi
 export function BannerPreview({ state: propState, onChange, exportWrapperClass, exportWrapperStyle }: Props) {
   const { builder } = useBriefflowStore();
   const isExportClone = !!exportWrapperClass;
+  const previewFrameRef = useRef<HTMLDivElement>(null);
+  const [previewWidth, setPreviewWidth] = useState(1200);
   const state = propState;
+
+  useLayoutEffect(() => {
+    if (isExportClone) return;
+    const frame = previewFrameRef.current;
+    if (!frame) return;
+
+    const updateWidth = () => setPreviewWidth(Math.max(1, frame.clientWidth));
+    const resizeObserver = new ResizeObserver(updateWidth);
+    resizeObserver.observe(frame);
+    updateWidth();
+    return () => resizeObserver.disconnect();
+  }, [isExportClone]);
+
+  const isMobileLayout =
+    exportWrapperClass?.includes("force-mobile") ||
+    (!isExportClone && previewWidth < 640);
+  const canvasWidth = isMobileLayout ? 540 : 1200;
+  const canvasHeight = isMobileLayout ? 960 : 600;
+  const previewScale = isExportClone
+    ? 1
+    : Math.min(1, previewWidth / canvasWidth);
 
   const [imageStatus, setImageStatus] = useState<"loading" | "loaded" | "error">("loading");
   const [useFallback, setUseFallback] = useState(false);
@@ -309,12 +369,34 @@ export function BannerPreview({ state: propState, onChange, exportWrapperClass, 
   return (
     <div className="mx-auto flex w-full flex-col space-y-4" data-testid="banner-preview">
       <div
+        ref={previewFrameRef}
+        className="relative flex w-full justify-center overflow-hidden"
+        style={{ height: canvasHeight * previewScale }}
+      >
+        <div
+          className="relative shrink-0"
+          style={{
+            height: canvasHeight * previewScale,
+            width: canvasWidth * previewScale,
+          }}
+        >
+          <div
+            className="absolute left-0 top-0 origin-top-left"
+            style={{
+              height: canvasHeight,
+              transform: `scale(${previewScale})`,
+              transformOrigin: "top left",
+              width: canvasWidth,
+            }}
+          >
+      <div
         id="banner-export-node"
         data-export-node="banner"
         className={cn(
           "relative overflow-hidden shadow-[0_24px_50px_-12px_rgba(0,0,0,0.6)] flex transition-colors duration-500 bg-black",
           exportWrapperClass,
-          !isExportClone && "w-full rounded-[24px] aspect-[2/1] max-md:aspect-[4/5] max-md:min-h-[500px] min-h-[380px]",
+          isMobileLayout && "force-mobile",
+          !isExportClone && "rounded-[24px]",
           isCentered ? "flex-col" : cn("[.force-mobile_&]:!flex-col-reverse", !isExportClone && "max-md:!flex-col-reverse"),
           fontClass
         )}
@@ -323,8 +405,9 @@ export function BannerPreview({ state: propState, onChange, exportWrapperClass, 
           borderColor: `${textColor}1A`,
           borderWidth: '1px',
           fontFamily: baseFontFamily,
-          width: isExportClone ? '1200px' : '100%',
-          ...exportWrapperStyle 
+          ...exportWrapperStyle,
+          height: canvasHeight,
+          width: canvasWidth,
         }}
       >
 
@@ -344,19 +427,19 @@ export function BannerPreview({ state: propState, onChange, exportWrapperClass, 
           <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent pointer-events-none" />
         </div>
 
-        <div className="absolute inset-0 z-30 pointer-events-none [&>*]:pointer-events-auto" style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 30 }}>
+        <div className="banner-product-layer absolute inset-0 z-30 pointer-events-none [&>*]:pointer-events-auto" style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 30 }}>
           {draggableImages.length > 0 && draggableImages.map((src, i) => (
             <DraggableImage key={`banner-img-${i}`} src={src} type="banner" isExport={isExportClone} />
           ))}
         </div>
 
         <div className={cn(
-          "relative z-10 w-full h-full flex flex-1 overflow-hidden z-10 flex-row",
+          "banner-layout relative z-10 w-full h-full flex flex-1 overflow-hidden z-10 flex-row",
           "[.force-mobile_&]:!flex-col-reverse [.force-mobile_&]:!overflow-visible",
           !isExportClone && "max-md:!flex-col-reverse max-md:!overflow-visible"
         )}>
           {isCentered ? (
-            <div className={cn("relative w-full h-full flex flex-col items-center justify-center p-12 text-center [.force-mobile_&]:!p-8 z-10 pointer-events-none", !isExportClone && "max-md:!p-8")}>
+            <div className={cn("banner-centered-pane relative w-full h-full flex flex-col items-center justify-center p-12 text-center [.force-mobile_&]:!p-8 z-10 pointer-events-none", !isExportClone && "max-md:!p-8")}>
 
               <div className={cn(
                 "absolute inset-0 z-0 transition-all duration-500 pointer-events-none",
@@ -380,7 +463,7 @@ export function BannerPreview({ state: propState, onChange, exportWrapperClass, 
               {!isComplexShape && <div className="absolute inset-0 z-10 opacity-70 pointer-events-none transition-colors duration-500" style={{ backgroundColor: themeColor }} />}
 
               <div className="relative z-40 w-full h-full flex flex-col items-center justify-center pointer-events-none">
-                <DraggableBlock id="banner-title-center" isExport={isExportClone} className="pointer-events-auto w-full max-w-[700px] flex flex-col items-center">
+                <DraggableBlock id="banner-title-center" isExport={isExportClone} className="banner-mobile-reset pointer-events-auto w-full max-w-[700px] flex flex-col items-center">
                   <div
                     className={cn(
                       "p-10 rounded-[32px] shadow-2xl relative mb-6 w-full [.force-mobile_&]:!p-8 [.force-mobile_&]:!max-w-[95%] transition-all",
@@ -432,7 +515,7 @@ export function BannerPreview({ state: propState, onChange, exportWrapperClass, 
             <>
               {/* Bloco da Imagem - Mobile vira a parte de baixo (h-auto livre!) */}
               <div className={cn(
-                "absolute inset-y-0 z-0 flex items-center justify-center w-[60%] transition-all duration-500 pointer-events-none",
+                "banner-visual-pane absolute inset-y-0 z-0 flex items-center justify-center w-[60%] transition-all duration-500 pointer-events-none",
                 "[.force-mobile_&]:!relative [.force-mobile_&]:!h-auto [.force-mobile_&]:!aspect-square max-md:!relative max-md:!aspect-square",
                 isReverse ? "left-0" : "right-0",
                 isFrame ? "m-6 rounded-t-[60px] rounded-b-3xl border border-white/20 shadow-2xl overflow-hidden" :
@@ -458,7 +541,7 @@ export function BannerPreview({ state: propState, onChange, exportWrapperClass, 
               {!isComplexShape && (
                 <>
                   <div className={cn(
-                    "absolute inset-y-0 w-[65%] z-10 shadow-[-20px_0_60px_rgba(0,0,0,0.5)] pointer-events-none transition-all duration-700 border-white/10 [.force-mobile_&]:!absolute max-md:!absolute",
+                    "banner-shape-panel absolute inset-y-0 w-[65%] z-10 shadow-[-20px_0_60px_rgba(0,0,0,0.5)] pointer-events-none transition-all duration-700 border-white/10 [.force-mobile_&]:!absolute max-md:!absolute",
                     isReverse ? "right-0 border-l" : "left-0 border-r",
                     shapeClass,
                     cn("[.force-mobile_&]:!inset-auto [.force-mobile_&]:!top-0 [.force-mobile_&]:!left-0 [.force-mobile_&]:!w-full [.force-mobile_&]:!h-full [.force-mobile_&]:!border-none", !isExportClone && "max-md:!inset-auto max-md:!top-0 max-md:!left-0 max-md:!w-full max-md:!h-full max-md:!border-none")
@@ -476,7 +559,7 @@ export function BannerPreview({ state: propState, onChange, exportWrapperClass, 
 
               {/* Bloco de Texto - Mobile vira a parte de cima (h-auto livre!) */}
               <div className={cn(
-                "relative z-40 w-[50%] h-full flex flex-col justify-center py-8 pointer-events-none",
+                "banner-text-pane relative z-40 w-[50%] h-full flex flex-col justify-center py-8 pointer-events-none",
                 isReverse ? cn("pr-14 pl-4 items-end text-right [.force-mobile_&]:!pr-8", !isExportClone && "max-md:!pr-8") : cn("pl-14 pr-4 items-start text-left [.force-mobile_&]:!pl-8", !isExportClone && "max-md:!pl-8"),
                 isComplexShape ? (isReverse ? cn("pr-16 [.force-mobile_&]:!pr-10", !isExportClone && "max-md:!pr-10") : cn("pl-16 [.force-mobile_&]:!pl-10", !isExportClone && "max-md:!pl-10")) : "",
                 isOffset ? (isReverse ? "-mr-16 z-40" : "-ml-16 z-40") : "",
@@ -484,7 +567,7 @@ export function BannerPreview({ state: propState, onChange, exportWrapperClass, 
               )}>
 
                 <DraggableBlock id="banner-text-split" isExport={isExportClone} className={cn(
-                  "pointer-events-auto flex flex-col w-full max-w-[560px]",
+                  "banner-mobile-reset pointer-events-auto flex flex-col w-full max-w-[560px]",
                   isReverse ? "items-end" : "items-start",
                   cn("[.force-mobile_&]:!items-center", !isExportClone && "max-md:!items-center")
                 )}>
@@ -532,7 +615,7 @@ export function BannerPreview({ state: propState, onChange, exportWrapperClass, 
 
               {(badgePrimary || badgeSecondary) && (
                 <DraggableBlock id="banner-badge-split" isExport={isExportClone} className={cn(
-                  "absolute z-50 flex flex-col items-center gap-3 pointer-events-auto top-1/2 -translate-y-1/2",
+                  "banner-mobile-badge banner-mobile-reset absolute z-50 flex flex-col items-center gap-3 pointer-events-auto top-1/2 -translate-y-1/2",
                   isReverse ? "right-[55%] translate-x-1/2" : "left-[55%] -translate-x-1/2",
                   cn("[.force-mobile_&]:!right-auto [.force-mobile_&]:!left-1/2 [.force-mobile_&]:!-translate-x-1/2 [.force-mobile_&]:!top-[50%]", !isExportClone && "max-md:!right-auto max-md:!left-1/2 max-md:!-translate-x-1/2 max-md:!top-[50%]")
                 )}>
@@ -551,6 +634,9 @@ export function BannerPreview({ state: propState, onChange, exportWrapperClass, 
 
             </>
           )}
+        </div>
+      </div>
+          </div>
         </div>
       </div>
 

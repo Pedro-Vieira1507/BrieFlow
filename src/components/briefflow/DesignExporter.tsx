@@ -440,8 +440,8 @@ export function DesignExporter({
   const bannerStyle: React.CSSProperties =
     device === "desktop"
       ? {
-          width: sourceSizes.banner.width,
-          height: sourceSizes.banner.height,
+          width: 1200,
+          height: 600,
           borderRadius: 0,
           overflow: "hidden",
         }
@@ -462,7 +462,7 @@ export function DesignExporter({
       : { width: 540, minHeight: 960, height: "auto", borderRadius: 0 };
 
   const bannerPreviewSize =
-    device === "desktop" ? sourceSizes.banner : { width: 540, height: 960 };
+    device === "desktop" ? { width: 1200, height: 600 } : { width: 540, height: 960 };
   const emailPreviewSize =
     device === "desktop" ? sourceSizes.email : { width: 540, height: 960 };
 
