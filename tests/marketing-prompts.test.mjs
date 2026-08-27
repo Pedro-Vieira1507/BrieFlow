@@ -67,6 +67,10 @@ test("editorial prompt forbids fabricated proof and removes random directives", 
   assert.match(source, /UMA IDEIA DE CAMPANHA/);
   assert.match(source, /teste do outdoor/i);
   assert.match(source, /no máximo três zonas textuais/i);
+  assert.match(source, /RÉGUA CRIATIVA/);
+  assert.match(source, /Ideias que continuam depois do palco/);
+  assert.match(source, /Não use roxo, neon ou gradiente “de IA”/);
+  assert.match(source, /evite banco de imagem literal/);
   assert.match(source, /Nunca reutilize vocabulário laboratorial/);
   assert.match(source, /testimonials como \[\]/);
   assert.doesNotMatch(source, /Inclua agressivamente/);
@@ -124,6 +128,22 @@ test("banner schema suppresses oversized promotional badges", () => {
   assert.equal(parsed.badgePrimary, "");
   assert.equal(parsed.badgeSecondary, "");
   assert.equal(parsed.keyBenefits.length, 2);
+});
+
+test("banner schema keeps the numeric offer compact enough for the circular badge", () => {
+  const parsed = LandingCopySchema.parse({
+    headline: "Um novo Brasil na xícara",
+    subheadline: "",
+    body: "",
+    ctaText: "Assinar seleção",
+    keyBenefits: [],
+    badgePrimary: "15% OFF",
+    badgeSecondary: "na primeira caixa",
+    imagePrompt: "editorial coffee subscription still life, no text",
+  });
+
+  assert.equal(parsed.badgePrimary, "15% OFF");
+  assert.equal(parsed.badgeSecondary, "na primeira caixa");
 });
 
 test("material prompt adapts the agency method without leaking the reference brand", () => {

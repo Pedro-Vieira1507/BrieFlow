@@ -20,6 +20,7 @@ import type {
   BuilderState,
 } from "@/types/builder";
 import { analyzeImageWithVisionFn } from "@/lib/vision-api";
+import { mergeDetectedBriefContext } from "@/lib/discoveryContext";
 
 type CampaignChannel = "banner" | "email" | "social";
 
@@ -570,16 +571,6 @@ export function useBriefflowAgent() {
           updateMessage(assistantId, { content: response.chat });
         }
 
-        const extractedSku = response.detectedContext?.productSku || response.builder.discoveryPlan?.productSku;
-        if (extractedSku && extractedSku !== discoveryPlanRef.current?.productSku) {
-          discoveryPlanRef.current = {
-            ...(discoveryPlanRef.current || { detectedContext: "", missingInfo: "", proposedStrategy: "" }),
-            ...response.detectedContext,
-            productSku: extractedSku,
-          } as DiscoveryPlan;
-          await tryScrapeProduct(extractedSku, isHiddenAction);
-        }
-
         const currentPhase = builderRef.current.type;
         const inCampaignPhase = currentPhase === "campaign";
 
@@ -588,10 +579,23 @@ export function useBriefflowAgent() {
           response.builder.discoveryPlan
         ) {
           const discoveryPlan = response.builder.discoveryPlan;
-          discoveryPlanRef.current = { ...discoveryPlanRef.current, ...discoveryPlan };
+          discoveryPlanRef.current = mergeDetectedBriefContext(
+            { ...discoveryPlanRef.current, ...discoveryPlan },
+            response.detectedContext,
+          );
           if (!inCampaignPhase) {
             setBuilder({ type: "discovery_plan", discoveryPlan: discoveryPlanRef.current });
           }
+        } else {
+          discoveryPlanRef.current = mergeDetectedBriefContext(
+            discoveryPlanRef.current,
+            response.detectedContext,
+          );
+        }
+
+        const extractedSku = discoveryPlanRef.current?.productSku;
+        if (extractedSku) {
+          await tryScrapeProduct(extractedSku, isHiddenAction);
         }
 
         const action = response.action || "discovery_continue";

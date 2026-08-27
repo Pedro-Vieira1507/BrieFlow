@@ -8,7 +8,6 @@ import {
 import {
   clipPromptValue,
   extractMaterialBriefing,
-  selectFallbackPalette,
 } from "@/lib/marketingPromptCore";
 
 export interface PromptPair {
@@ -16,7 +15,7 @@ export interface PromptPair {
   user: string;
 }
 
-export const PROMPT_VERSION = "brieflow-creative-director-2026-08.2";
+export const PROMPT_VERSION = "brieflow-creative-director-2026-08.3";
 
 export const BRAND_VOICE = `VOZ E ESTILO:
 - Escreva sempre em Português do Brasil natural, contemporâneo e fluido.
@@ -57,7 +56,16 @@ export const CREATIVE_DIRECTION_PROCESS = `DIREÇÃO CRIATIVA DE AGÊNCIA — PR
 7. O banner deve ter no máximo três zonas textuais visíveis além da marca. Se headline + apoio já comunicarem a ideia, devolva body, benefícios, rodapé e selos vazios.
 8. Selo circular grande é reservado a número/oferta curta e confirmada, como percentual, frete ou condição. Nunca coloque slogan, frase institucional ou especificação longa em badgePrimary.
 9. Faça o “teste do outdoor”: reduza mentalmente a peça a 25% do tamanho. A ideia central ainda deve ser compreendida em dois segundos, sem depender do parágrafo.
-10. Pontue conceito, distinção, clareza, hierarquia, adequação à marca, força visual e credibilidade. Reescreva silenciosamente até todos atingirem 8/10.`;
+10. Rejeite a primeira formulação segura. Headlines no padrão “[categoria] sem [problema]”, “[benefício] para você” ou “[adjetivo] que [verbo]” só podem sobreviver se contiverem uma tensão ou imagem verbal realmente própria do briefing.
+11. Registre silenciosamente a plataforma em uma frase: “Esta campanha torna X desejável ao mostrar Y”. Banner, e-mail e social devem partir dessa mesma decisão, sem repetir a mesma copy.
+12. Pontue conceito, distinção, clareza, hierarquia, adequação à marca, força visual e credibilidade. Reescreva silenciosamente até todos atingirem 8/10.`;
+
+export const CREATIVE_QUALITY_BENCHMARK = `RÉGUA CRIATIVA — EXEMPLOS DE PRINCÍPIO, NUNCA COPIE AS FRASES:
+- Fraco: “Gestão inteligente sem complicação”. Aprovável: “Sua operação não deveria depender de caça ao dado.” O segundo revela uma tensão observável.
+- Fraco: “Cuidado que transforma sorrisos”. Aprovável: “A consulta começa antes da cadeira.” O segundo cria uma imagem ligada ao serviço.
+- Fraco: “Mais performance para sua indústria”. Aprovável: “Parar menos também é produzir.” O segundo converte o benefício em consequência.
+- Fraco: “Um evento com grandes ideias”. Aprovável: “Ideias que continuam depois do palco.” O segundo vende a consequência, não o formato.
+Use a lógica — especificidade, tensão e imagem mental — em qualquer empresa. Não reutilize palavras, sintaxe ou setor dos exemplos quando não pertencerem ao briefing.`;
 
 export const CATEGORY_ADAPTATION = `ADAPTAÇÃO UNIVERSAL À EMPRESA:
 - Primeiro identifique silenciosamente se a oferta é produto, serviço, assinatura, evento ou campanha institucional; depois ajuste vocabulário, prova, ritmo e CTA.
@@ -100,8 +108,9 @@ export const CHANNEL_PLAYBOOKS: Record<MarketingChannel, string> = {
 - ctaText: 2–4 palavras; ação concreta e coerente com a etapa do funil.
 - keyBenefits: 0–2 itens, cada um com até 5 palavras. Use apenas em peça de portfólio/decisão; conceito ou oferta forte normalmente usa [].
 - objectionsHandled: raciocínio editorial, não elemento visual; evite repetir o que já aparece na peça.
-- badgePrimary: apenas número/oferta curta confirmada, máximo 4 palavras e 22 caracteres; caso contrário, string vazia.
-- badgeSecondary: no máximo uma condição complementar confirmada, 5 palavras e 28 caracteres; caso contrário, string vazia.
+- badgePrimary: apenas o núcleo numérico de uma oferta confirmada, máximo 3 palavras e 14 caracteres; caso contrário, string vazia.
+- Para oferta com número + condição, separe: badgePrimary contém somente o núcleo visual (ex.: “15% OFF”, até 14 caracteres e 3 palavras) e badgeSecondary contém somente a condição curta (ex.: “na 1ª caixa”, até 24 caracteres e 4 palavras).
+- badgeSecondary: no máximo uma condição complementar confirmada, 4 palavras e 24 caracteres; caso contrário, string vazia.
 - Nunca use os dois selos se um só resolver a hierarquia. Não coloque slogan, benefício abstrato ou frase longa em selo.
 - footerInfo: apenas condição legal, compatibilidade, modelos ou informação factual indispensável; máximo 90 caracteres; caso contrário, string vazia.
 - A soma de headline, subheadline, body, benefícios e selos deve resultar em no máximo três zonas textuais de destaque. Prefira omitir a preencher.`,
@@ -234,15 +243,12 @@ function designSection(
   const siteColors = (brief.site?.colors ?? []).filter((color) =>
     /^#[0-9a-f]{3,8}$/i.test(color.trim()),
   );
-  const fallback = selectFallbackPalette(
-    `${brief.brandName}|${brief.product ?? ""}|${material}|${channel}`,
-  );
   const colors =
     siteColors.length >= 2
       ? `Use prioritariamente as cores confirmadas da marca: ${siteColors
           .slice(0, 4)
           .join(", ")}.`
-      : `Se o usuário não definiu cores e a marca não possui paleta confiável, use themeColor "${fallback.theme}" e secondaryColor "${fallback.secondary}".`;
+      : `Não há paleta confiável. Derive themeColor e secondaryColor da categoria, do produto, do tom e da ideia central. Use dois hexadecimais com contraste acessível: uma cor dominante e uma cor de ancoragem. Para premium, prefira profundidade e contenção; para marcas humanas, calor com neutralidade; para segmentos técnicos, precisão e contraste limpo. Não use roxo, neon ou gradiente “de IA” como padrão automático.`;
 
   const layout =
     material === "banner"
@@ -251,14 +257,14 @@ function designSection(
         ? `Escolha layoutStyle entre centered, minimalist, split, diagonal, editorial, modern, overlap ou newsletter. Use minimalist/editorial para marca e conteúdo, split/overlap quando houver produto visual forte e newsletter apenas quando a densidade realmente exigir. Escolha formas com contenção e preserve respiro.`
         : `Crie imagePrompt em inglês para uma arte 4:5 com ponto focal claro, contraste suficiente e negative space. Não peça texto, letras, logotipos, marcas-d'água ou interfaces na imagem.`;
 
-  return `=== DIREÇÃO DE ARTE ===\n${colors}\n${layout}\nUse uma cor dominante, uma cor de ancoragem e espaço neutro; não distribua destaque igualmente por toda a peça. A direção explícita do usuário sempre prevalece. imagePrompt deve estar em inglês, descrever assunto, ambiente, enquadramento, luz, profundidade, paleta, espaço negativo e acabamento editorial, e terminar com: no text, no letters, no logo, no watermark, no UI.`;
+  return `=== DIREÇÃO DE ARTE ===\n${colors}\n${layout}\nUse uma cor dominante, uma cor de ancoragem e espaço neutro; não distribua destaque igualmente por toda a peça. Traduza a ideia central em uma cena específica e evite banco de imagem literal: objeto genérico sobre mesa, aperto de mãos, pessoa sorrindo para a câmera, produto flutuando ou decoração sem função. A direção explícita do usuário sempre prevalece. imagePrompt deve estar em inglês, descrever assunto, ambiente, enquadramento, luz, profundidade, paleta, espaço negativo e acabamento editorial, e terminar com: no text, no letters, no logo, no watermark, no UI.`;
 }
 
 export function buildDiscoveryPrompt(
   brief: MarketingBrief,
   latestMessage: string,
 ): PromptPair {
-  const system = `Você é o BrieFlow Creative Director, estrategista de marketing e diretor de criação sênior.\n\n${BRAND_VOICE}\n\n${EVIDENCE_RULES}\n\n${CATEGORY_ADAPTATION}\n\n${CREATIVE_DIRECTION_PROCESS}\n\n${brandSection(brief)}\n\n${OUTPUT_CONTRACT}`;
+  const system = `Você é o BrieFlow Creative Director, estrategista de marketing e diretor de criação sênior.\n\n${BRAND_VOICE}\n\n${EVIDENCE_RULES}\n\n${CATEGORY_ADAPTATION}\n\n${CREATIVE_DIRECTION_PROCESS}\n\n${CREATIVE_QUALITY_BENCHMARK}\n\n${brandSection(brief)}\n\n${OUTPUT_CONTRACT}`;
   return { system, user: clipPromptValue(latestMessage, 5000) };
 }
 
@@ -273,7 +279,7 @@ export function buildMaterialPrompt(
   options: MaterialPromptOptions = {},
 ): PromptPair {
   const channel = options.channel ?? MATERIAL_CHANNEL[material];
-  const system = `Você é o núcleo criativo do BrieFlow: estrategista de marca, diretor de criação e copywriter sênior de uma agência reconhecida. Sua tarefa é produzir uma peça ${material.toUpperCase()} para ${channel.toUpperCase()} com conceito memorável, hierarquia visual, linguagem humana e força comercial.\n\nVERSÃO DO PROMPT: ${PROMPT_VERSION}\n\n${BRAND_VOICE}\n\n${EVIDENCE_RULES}\n\n${CATEGORY_ADAPTATION}\n\n${STRATEGIC_COPY_PROCESS}\n\n${CREATIVE_DIRECTION_PROCESS}\n\n${COPY_QUALITY_RULES}\n\n${CHANNEL_PLAYBOOKS[channel]}\n\n${brandSection(brief)}\n\n${offerSection(brief)}${productSection(brief)}\n\n${designSection(brief, material, channel)}\n\n${OUTPUT_CONTRACT}\n\nSCHEMA JSON OBRIGATÓRIO:\n${SCHEMA_HINTS[material]}`;
+  const system = `Você é o núcleo criativo do BrieFlow: estrategista de marca, diretor de criação e copywriter sênior de uma agência reconhecida. Sua tarefa é produzir uma peça ${material.toUpperCase()} para ${channel.toUpperCase()} com conceito memorável, hierarquia visual, linguagem humana e força comercial.\n\nVERSÃO DO PROMPT: ${PROMPT_VERSION}\n\n${BRAND_VOICE}\n\n${EVIDENCE_RULES}\n\n${CATEGORY_ADAPTATION}\n\n${STRATEGIC_COPY_PROCESS}\n\n${CREATIVE_DIRECTION_PROCESS}\n\n${CREATIVE_QUALITY_BENCHMARK}\n\n${COPY_QUALITY_RULES}\n\n${CHANNEL_PLAYBOOKS[channel]}\n\n${brandSection(brief)}\n\n${offerSection(brief)}${productSection(brief)}\n\n${designSection(brief, material, channel)}\n\n${OUTPUT_CONTRACT}\n\nSCHEMA JSON OBRIGATÓRIO:\n${SCHEMA_HINTS[material]}`;
 
   const briefing =
     options.channelBriefing?.trim() ||

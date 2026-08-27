@@ -9,6 +9,7 @@ import {
   CATEGORY_ADAPTATION,
   COPY_QUALITY_RULES,
   CREATIVE_DIRECTION_PROCESS,
+  CREATIVE_QUALITY_BENCHMARK,
   EVIDENCE_RULES,
   PROMPT_VERSION,
   STRATEGIC_COPY_PROCESS,
@@ -16,6 +17,7 @@ import {
 import type { AiAssetType, AiGenerationMeta, AiIntent } from "@/types/ai";
 import { supabase } from "@/lib/supabase";
 import { getAiRoutingEnvironment, resolveCloudAiRoute } from "@/lib/aiRouting";
+import { parseStructuredJson, supportsReasoningControls } from "@/lib/structuredOutput";
 
 // ============================================================
 // PROMPTS
@@ -36,6 +38,8 @@ ${CATEGORY_ADAPTATION}
 
 ${CREATIVE_DIRECTION_PROCESS}
 
+${CREATIVE_QUALITY_BENCHMARK}
+
 === REGRAS ABSOLUTAS ===
 1. IDIOMA: TODAS as suas respostas devem ser EXCLUSIVAMENTE em Português do Brasil (PT-BR).
 2. EXTRAÇÃO DE PRODUTO: Se o usuário mencionar o nome de um produto, equipamento ou modelo (ex: "Parafilm M PM996"), preencha o campo "productSku" com esse termo exato. Se ele enviar um link, use o link.
@@ -54,6 +58,7 @@ ${CREATIVE_DIRECTION_PROCESS}
 - Identifique objetivo, produto, público, oferta, tom e ação desejada. Diferencie fatos de hipóteses.
 - Se faltar algo que realmente muda a estratégia, faça UMA pergunta curta e de alto impacto por vez.
 - Se já houver informação suficiente, apresente em 2–4 frases uma leitura estratégica específica e convide a gerar; não prolongue a descoberta artificialmente.
+- chat é conversa de direção, não a peça final: use no máximo 3 frases e nunca despeje banner, e-mail, legenda, hashtags ou assinatura dentro dele.
 - Não use elogios vazios como “ótima ideia”. Mostre compreensão citando o ponto decisivo do briefing.
 - Ao receber pedido de geração, não faça nova entrevista: selecione a action correta imediatamente.
 - detectedContext deve ser um resumo factual e reutilizável, nunca uma copy promocional.
@@ -112,8 +117,8 @@ function executionContentContract(targetAsset: AiAssetType): string {
   "cta": "ação concreta de 2 a 4 palavras",
   "keyBenefits": ["zero a dois benefícios curtos; prefira vazio"],
   "objectionsHandled": [],
-  "badgePrimary": "número ou oferta confirmada com até 22 caracteres; senão vazio",
-  "badgeSecondary": "condição complementar confirmada com até 28 caracteres; senão vazio",
+  "badgePrimary": "núcleo numérico da oferta com até 14 caracteres e 3 palavras; senão vazio",
+  "badgeSecondary": "condição complementar confirmada com até 24 caracteres e 4 palavras; senão vazio",
   "footerInfo": "condição indispensável ou vazio",
   "imagePrompt": "direção de arte editorial em inglês sem texto na imagem",
   "themeColor": "#RRGGBB",
@@ -170,6 +175,8 @@ ${CATEGORY_ADAPTATION}
 ${STRATEGIC_COPY_PROCESS}
 
 ${CREATIVE_DIRECTION_PROCESS}
+
+${CREATIVE_QUALITY_BENCHMARK}
 
 ${COPY_QUALITY_RULES}
 
@@ -267,47 +274,8 @@ function extractSpecificBriefing(text: string, targetAsset: string): string {
   return text.substring(startIndex, endIndex).trim();
 }
 
-function extractBalancedJson(text: string): string | null {
-  const start = text.indexOf("{");
-  if (start === -1) return null;
-
-  let depth = 0; let inString = false; let escaped = false;
-  for (let index = start; index < text.length; index += 1) {
-    const character = text[index];
-    if (escaped) { escaped = false; continue; }
-    if (character === "\\") { escaped = true; continue; }
-    if (character === '"') { inString = !inString; continue; }
-    if (inString) continue;
-
-    if (character === "{") depth += 1;
-    if (character === "}") {
-      depth -= 1;
-      if (depth === 0) return text.slice(start, index + 1);
-    }
-  }
-
-  if (depth > 0) return text.slice(start) + "}".repeat(depth);
-  return null;
-}
-
 function tryParseJson(text: string): OllamaResponse | null {
-  if (!text || !text.trim()) return null;
-
-  const cleanText = text.replace(/<think>[\s\S]*?<\/think>/gi, "").replace(/```json/gi, "").replace(/```/g, "").trim();
-
-  try { return JSON.parse(cleanText) as OllamaResponse; } catch { /* segue */ }
-
-  const flat = cleanText.replace(/[\n\r\t]/g, " ").replace(/,\s*([}\]])/g, "$1");
-  try { return JSON.parse(flat) as OllamaResponse; } catch { /* segue */ }
-
-  const extracted = extractBalancedJson(flat);
-  if (extracted) {
-    try { return JSON.parse(extracted) as OllamaResponse; } catch { /* segue */ }
-    const softened = extracted.replace(/,\s*([}\]])/g, "$1");
-    try { return JSON.parse(softened) as OllamaResponse; } catch { /* fim */ }
-  }
-
-  return null;
+  return parseStructuredJson(text) as OllamaResponse | null;
 }
 
 function extractChatField(rawJson: string): string | null {
@@ -428,7 +396,6 @@ async function callDirectAi(
       getAiRoutingEnvironment(import.meta.env),
     );
 
-    let response: Response | undefined;
     let lastError: any;
 
     for (const p of fallbackProviders) {
@@ -440,14 +407,14 @@ async function callDirectAi(
           temperature: isExecution ? 0.1 : 0.3,
           max_tokens: isExecution ? 4000 : 2000,
           stream: false, 
+          response_format: { type: "json_object" },
         };
 
-        // Groq is strict about response_format. We only use it for Gemini.
-        if (p.name === "gemini") {
-            payload.response_format = { type: "json_object" };
+        if (p.name === "groq" && supportsReasoningControls(p.model)) {
+          payload.reasoning_format = "hidden";
         }
 
-        response = await fetch(p.url, {
+        const response = await fetch(p.url, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -457,7 +424,18 @@ async function callDirectAi(
           signal: controller.signal,
         });
 
-        if (response.ok) break; // Success! Exit the loop.
+        if (response.ok) {
+          const data = await response.json();
+          const content = data.choices?.[0]?.message?.content ?? "";
+
+          if (tryParseJson(content)) {
+            return { raw: content, provider: "omniroute" };
+          }
+
+          lastError = new Error(`${p.name}/${p.model} retornou JSON inválido.`);
+          console.warn(`[Ollama.ts] Saída inválida em ${p.name}/${p.model}. Tentando o próximo...`);
+          continue;
+        }
 
         if (response.status === 429) {
           console.warn(`[Ollama.ts] Limite atingido em ${p.name} (429). Tentando o próximo...`);
@@ -473,13 +451,7 @@ async function callDirectAi(
       }
     }
 
-    if (!response || !response.ok) {
-      throw new Error(`Falha em todos os provedores de IA. Último erro: ${lastError}`);
-    }
-
-    const data = await response.json();
-    const content = data.choices?.[0]?.message?.content ?? "";
-    return { raw: content, provider: "omniroute" };
+    throw new Error(`Falha em todos os provedores de IA. Último erro: ${lastError}`);
   }
 }
 
