@@ -11,7 +11,7 @@ const LOADING_TEXTS = [
   "Lendo o briefing...",
   "Analisando a marca...",
   "Estruturando a estratégia...",
-  "Pensando no design perfeito..."
+  "Pensando no design perfeito...",
 ];
 
 interface Props {
@@ -21,11 +21,16 @@ interface Props {
   onPickSuggestion: (s: string) => void;
 }
 
-export function ChatMessages({ messages, loading, scraping, onPickSuggestion }: Props) {
+export function ChatMessages({
+  messages,
+  loading,
+  scraping,
+  onPickSuggestion,
+}: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const [textIdx, setTextIdx] = useState(0);
-  const { generatingLabel } = useBriefflowStore(); 
-  
+  const { generatingLabel } = useBriefflowStore();
+
   const busy = loading || scraping;
 
   useEffect(() => {
@@ -51,15 +56,20 @@ export function ChatMessages({ messages, loading, scraping, onPickSuggestion }: 
     messages[messages.length - 1].content === "";
 
   return (
-    <div className="flex-1 space-y-5 overflow-y-auto scroll-smooth px-5 py-6">
+    <div className="chat-scroll flex-1 space-y-5 overflow-y-auto scroll-smooth px-4 py-5 sm:px-5 sm:py-6">
       {messages.length === 0 && <ChatEmptyState onPick={onPickSuggestion} />}
-      
+
       {messages.map((m) => (
         <ChatMessage key={m.id} message={m} />
       ))}
-      
-      {scraping && <StatusPill icon={<Globe className="size-4 animate-spin text-brand" />} label="Acessando site " />}
-      
+
+      {scraping && (
+        <StatusPill
+          icon={<Globe className="size-4 animate-spin text-brand" />}
+          label="Acessando site "
+        />
+      )}
+
       {lastAssistantEmpty && !generatingLabel && (
         <StatusPill
           icon={<Loader2 className="size-4 animate-spin text-fg-muted" />}
@@ -68,10 +78,10 @@ export function ChatMessages({ messages, loading, scraping, onPickSuggestion }: 
       )}
 
       {loading && generatingLabel && (
-         <StatusPill 
-           icon={<Loader2 className="size-4 animate-spin text-brand" />} 
-           label={generatingLabel} 
-         />
+        <StatusPill
+          icon={<Loader2 className="size-4 animate-spin text-brand" />}
+          label={generatingLabel}
+        />
       )}
 
       <div ref={bottomRef} className="h-2" />
@@ -84,12 +94,12 @@ function StatusPill({ icon, label }: { icon: React.ReactNode; label: string }) {
     <div className="flex justify-start fade-in-up">
       <div
         className={cn(
-          "flex items-center gap-2.5 rounded-full px-4 py-2",
+          "flex items-center gap-2.5 rounded-2xl px-3.5 py-2.5",
           "glass",
         )}
       >
         {icon}
-        <span className="text-[11px] font-medium uppercase tracking-widest text-fg-tertiary">
+        <span className="text-[11px] font-medium text-fg-tertiary">
           {label}
         </span>
       </div>

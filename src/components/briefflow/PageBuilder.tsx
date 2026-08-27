@@ -8,25 +8,28 @@ import { isSupabaseConfigured, saveAssetToLibrary } from "@/lib/supabase";
 
 import { BuilderHeader } from "./builder/BuilderHeader";
 import { GeneratingBanner } from "./builder/GeneratingBanner";
-import { BannerPreview } from "./BannerPreview";
-import { EmailPreview } from "./EmailPreview";
-import { SocialPreview } from "./SocialPreview";
 import { DiscoveryPlanView } from "./builder/DiscoveryPlanView";
 import { BuilderEmptyState } from "./builder/BuilderEmptyState";
+import { CampaignTabs } from "./builder/CampaignTabs";
 
 import type { BuilderState, CampaignAsset } from "@/types/builder";
-
-import { Monitor, Mail, Instagram } from "lucide-react";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 interface Props {
   onRefine: (prompt: string) => void;
   onOpenSettings?: () => void;
+  onOpenChat?: () => void;
 }
 
-export function PageBuilder({ onRefine, onOpenSettings }: Props) {
-  const { user, builder, loading, generatingLabel, patchBuilder, setBuilder } =
-    useBriefflowStore();
+export function PageBuilder({ onRefine, onOpenSettings, onOpenChat }: Props) {
+  const {
+    user,
+    builder,
+    loading,
+    generatingLabel,
+    patchBuilder,
+    setAuthOpen,
+    setBuilder,
+  } = useBriefflowStore();
 
   const [activeTab, setActiveTab] = useState<CampaignAsset["type"]>("banner");
   const [isSaving, setIsSaving] = useState(false);
@@ -50,10 +53,7 @@ export function PageBuilder({ onRefine, onOpenSettings }: Props) {
       return;
     }
     if (!user) {
-      toast.error("Acesso restrito", {
-        description:
-          "Faça login no perfil no topo da tela para salvar sua campanha.",
-      });
+      setAuthOpen(true);
       return;
     }
     if (isSavingRef.current) return;
@@ -87,7 +87,7 @@ export function PageBuilder({ onRefine, onOpenSettings }: Props) {
   };
 
   return (
-    <div className="flex h-full flex-col bg-surface-0">
+    <div className="flex h-full min-h-0 flex-col bg-transparent">
       <BuilderHeader
         isSaveable={isSaveable}
         isSaving={isSaving}
@@ -100,7 +100,7 @@ export function PageBuilder({ onRefine, onOpenSettings }: Props) {
 
       <div
         className={cn(
-          "relative flex-1 overflow-y-auto p-6 lg:p-12",
+          "builder-scroll relative flex-1 overflow-y-auto px-4 py-6 sm:px-6 lg:px-8 lg:py-10 xl:px-12",
           loading && builder.type === "discovery_plan"
             ? "pointer-events-none opacity-60"
             : "",
@@ -112,68 +112,19 @@ export function PageBuilder({ onRefine, onOpenSettings }: Props) {
           style={{ background: "var(--gradient-radial-brand)" }}
         />
 
-        <div className="relative mx-auto max-w-5xl space-y-10 pb-40">
+        <div className="relative mx-auto max-w-6xl space-y-8 pb-32 lg:space-y-10 lg:pb-24">
           {loading && generatingLabel && builder.type === "campaign" && (
             <GeneratingBanner label={generatingLabel} />
           )}
 
           {builder.type === "campaign" && builder.campaignAssets && (
             <div className="fade-in-up">
-              <Tabs
-                value={activeTab}
-                onValueChange={(v) => setActiveTab(v as CampaignAsset["type"])}
-                className="w-full"
-              >
-                <div className="flex justify-center mb-8">
-                  <TabsList className="bg-surface-2 border border-border-subtle p-1 h-12 w-full max-w-[400px]">
-                    <TabsTrigger
-                      value="banner"
-                      className="flex-1 text-[11px] font-bold uppercase tracking-widest data-[state=active]:bg-brand data-[state=active]:text-white transition-all duration-200"
-                    >
-                      <Monitor className="size-3.5 mr-2" /> Banner
-                    </TabsTrigger>
-                    <TabsTrigger
-                      value="email"
-                      className="flex-1 text-[11px] font-bold uppercase tracking-widest data-[state=active]:bg-brand data-[state=active]:text-white transition-all duration-200"
-                    >
-                      <Mail className="size-3.5 mr-2" /> E-mail
-                    </TabsTrigger>
-                    <TabsTrigger
-                      value="social"
-                      className="flex-1 text-[11px] font-bold uppercase tracking-widest data-[state=active]:bg-brand data-[state=active]:text-white transition-all duration-200"
-                    >
-                      <Instagram className="size-3.5 mr-2" /> Social
-                    </TabsTrigger>
-                  </TabsList>
-                </div>
-
-                {builder.campaignAssets.map((asset) => (
-                  <TabsContent
-                    key={asset.id}
-                    value={asset.type}
-                    className="mt-0 outline-none animate-in fade-in duration-300"
-                  >
-                    {asset.type === "banner" && (
-                      <BannerPreview
-                        state={asset.content}
-                        onChange={(patch) => handleAssetPatch(asset.id, patch)}
-                      />
-                    )}
-                    {asset.type === "email" && (
-                      <EmailPreview
-                        state={asset.content}
-                        onChange={(patch) => handleAssetPatch(asset.id, patch)}
-                      />
-                    )}
-                    {asset.type === "social" && (
-                      <SocialPreview
-                        state={asset.content}
-                        onChange={(patch) => handleAssetPatch(asset.id, patch)}
-                      />
-                    )}
-                  </TabsContent>
-                ))}
-              </Tabs>
+              <CampaignTabs
+                assets={builder.campaignAssets}
+                onAssetChange={handleAssetPatch}
+                activeTab={activeTab}
+                onTabChange={setActiveTab}
+              />
             </div>
           )}
 
@@ -190,7 +141,9 @@ export function PageBuilder({ onRefine, onOpenSettings }: Props) {
             />
           )}
 
-          {builder.type === "none" && <BuilderEmptyState />}
+          {builder.type === "none" && (
+            <BuilderEmptyState onOpenChat={onOpenChat} />
+          )}
         </div>
       </div>
 

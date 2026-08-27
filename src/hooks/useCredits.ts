@@ -35,12 +35,13 @@ export const useCreditsStore = create<CreditsState>((set) => ({
   error: null,
   refresh: async () => {
     if (!supabase) return;
+    set({ loading: true, error: null });
     try {
       const { data, error: rpcError } = await supabase.rpc("get_user_plan");
       if (rpcError) throw rpcError;
       const row = Array.isArray(data) ? data[0] : data;
       if (!row) return;
-      
+
       set({
         plan: {
           plan: row.plan,
@@ -51,7 +52,9 @@ export const useCreditsStore = create<CreditsState>((set) => ({
         error: null,
       });
     } catch (err) {
-      set({ error: err instanceof Error ? err.message : "Erro ao carregar créditos" });
+      set({
+        error: err instanceof Error ? err.message : "Erro ao carregar créditos",
+      });
     } finally {
       set({ loading: false });
     }
@@ -81,9 +84,12 @@ export function useCredits() {
     });
   }, []);
 
-  const creditsPercent = state.plan
-    ? Math.round((state.plan.creditsRemaining / state.plan.creditsMonthly) * 100)
-    : 0;
+  const creditsPercent =
+    state.plan && state.plan.creditsMonthly > 0
+      ? Math.round(
+          (state.plan.creditsRemaining / state.plan.creditsMonthly) * 100,
+        )
+      : 0;
   const isPastDue = state.plan?.subscriptionStatus === "past_due";
   const isLow = (state.plan?.creditsRemaining ?? 0) <= 3;
 

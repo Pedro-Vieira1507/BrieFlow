@@ -12,7 +12,6 @@ import {
   Loader2,
   Monitor,
   Smartphone,
-  X,
 } from "lucide-react";
 import { toJpeg, toPng } from "html-to-image";
 import { toast } from "sonner";
@@ -20,7 +19,6 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
-  DialogClose,
   DialogContent,
   DialogDescription,
   DialogHeader,
@@ -129,7 +127,7 @@ function ExportPreviewFrame({
     <div
       ref={viewportRef}
       className={cn(
-        "flex min-h-0 w-full flex-1 items-start justify-center p-4",
+        "flex min-h-0 w-full flex-1 items-start justify-center p-2 sm:p-4",
         fit === "contain" ? "overflow-hidden" : "overflow-auto",
       )}
     >
@@ -462,7 +460,9 @@ export function DesignExporter({
       : { width: 540, minHeight: 960, height: "auto", borderRadius: 0 };
 
   const bannerPreviewSize =
-    device === "desktop" ? { width: 1200, height: 600 } : { width: 540, height: 960 };
+    device === "desktop"
+      ? { width: 1200, height: 600 }
+      : { width: 540, height: 960 };
   const emailPreviewSize =
     device === "desktop" ? sourceSizes.email : { width: 540, height: 960 };
 
@@ -473,33 +473,33 @@ export function DesignExporter({
         if (!isExporting || nextOpen) onOpenChange(nextOpen);
       }}
     >
-      <DialogContent className="max-w-[1100px] w-[95vw] h-[90vh] bg-surface-1 border-border-strong text-fg-primary shadow-2xl flex flex-col p-0 overflow-hidden gap-0 rounded-2xl">
-        <DialogHeader className="px-6 py-4 border-b border-border-subtle bg-surface-2 flex flex-row items-center justify-between shrink-0">
+      <DialogContent className="flex h-[100dvh] w-screen max-w-none flex-col gap-0 overflow-hidden rounded-none border-border-strong bg-surface-1 p-0 text-fg-primary shadow-[var(--shadow-elevated)] sm:h-[92vh] sm:w-[96vw] sm:max-w-[1120px] sm:rounded-[24px]">
+        <DialogHeader className="flex shrink-0 flex-col gap-3 border-b border-border-subtle bg-surface-1/95 px-4 py-4 pr-14 text-left backdrop-blur-xl sm:flex-row sm:items-center sm:justify-between sm:px-6 sm:py-5 sm:pr-14">
           <div>
-            <DialogTitle className="text-xl font-display">
-              Exportar Design
+            <DialogTitle className="font-display text-lg font-semibold tracking-tight sm:text-xl">
+              Central de exportação
             </DialogTitle>
-            <DialogDescription className="text-sm text-fg-tertiary mt-1">
-              A prévia abaixo corresponde exatamente ao arquivo final.
+            <DialogDescription className="mt-1 text-xs leading-5 text-fg-tertiary sm:text-sm">
+              Confira a peça no formato final antes de baixar.
             </DialogDescription>
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center">
             {activeTab !== "social" && (
-              <div className="flex items-center p-1 bg-surface-3 rounded-lg border border-border-subtle">
+              <div className="grid w-full grid-cols-2 rounded-xl border border-border-subtle bg-surface-2 p-1 sm:w-auto">
                 <Button
                   variant="ghost"
                   size="sm"
                   disabled={isExporting}
                   onClick={() => setDevice("desktop")}
                   className={cn(
-                    "h-8 px-3 rounded-md transition-all",
+                    "h-8 rounded-lg px-3 text-xs transition-all",
                     device === "desktop"
                       ? "bg-surface-1 text-brand shadow-sm"
                       : "text-fg-muted hover:text-fg-primary",
                   )}
                 >
-                  <Monitor className="size-4 mr-2" /> Desktop
+                  <Monitor className="mr-2 size-3.5" /> Desktop
                 </Button>
                 <Button
                   variant="ghost"
@@ -507,26 +507,16 @@ export function DesignExporter({
                   disabled={isExporting}
                   onClick={() => setDevice("mobile")}
                   className={cn(
-                    "h-8 px-3 rounded-md transition-all",
+                    "h-8 rounded-lg px-3 text-xs transition-all",
                     device === "mobile"
                       ? "bg-surface-1 text-brand shadow-sm"
                       : "text-fg-muted hover:text-fg-primary",
                   )}
                 >
-                  <Smartphone className="size-4 mr-2" /> Mobile
+                  <Smartphone className="mr-2 size-3.5" /> Mobile
                 </Button>
               </div>
             )}
-            <DialogClose asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                disabled={isExporting}
-                className="rounded-full text-fg-muted hover:bg-surface-3"
-              >
-                <X className="size-5" />
-              </Button>
-            </DialogClose>
           </div>
         </DialogHeader>
 
@@ -536,22 +526,34 @@ export function DesignExporter({
             onValueChange={(value) => setActiveTab(value as ExportTab)}
             className="flex h-full min-h-0 flex-col"
           >
-            <div className="px-6 pt-4 border-b border-border-subtle bg-surface-1 shrink-0">
-              <TabsList className="bg-surface-2 p-1">
-                <TabsTrigger value="banner" disabled={isExporting}>
+            <div className="shrink-0 border-b border-border-subtle bg-surface-1 px-3 pt-3 sm:px-6 sm:pt-4">
+              <TabsList className="grid h-11 w-full grid-cols-3 rounded-xl bg-surface-2 p-1 sm:w-[360px]">
+                <TabsTrigger
+                  value="banner"
+                  disabled={isExporting || !bannerState}
+                  className="rounded-lg text-xs"
+                >
                   Banner
                 </TabsTrigger>
-                <TabsTrigger value="email" disabled={isExporting}>
+                <TabsTrigger
+                  value="email"
+                  disabled={isExporting || !emailState}
+                  className="rounded-lg text-xs"
+                >
                   E-mail
                 </TabsTrigger>
-                <TabsTrigger value="social" disabled={isExporting}>
-                  Post Social
+                <TabsTrigger
+                  value="social"
+                  disabled={isExporting || !socialState}
+                  className="rounded-lg text-xs"
+                >
+                  Social
                 </TabsTrigger>
               </TabsList>
             </div>
 
             <div
-              className="relative flex min-h-0 w-full flex-1 flex-col items-center justify-start overflow-hidden p-6 custom-scrollbar"
+              className="custom-scrollbar relative flex min-h-0 w-full flex-1 flex-col items-center justify-start overflow-hidden p-2 sm:p-5"
               style={{
                 backgroundImage:
                   "radial-gradient(circle at center, var(--surface-2) 2px, var(--surface-0) 2px)",
@@ -587,11 +589,11 @@ export function DesignExporter({
                     )}
                   </ExportPreviewFrame>
                 </div>
-                <div className="mt-auto pt-4 flex flex-wrap gap-3 w-full justify-center shrink-0">
+                <div className="mt-auto flex w-full shrink-0 flex-col justify-center gap-2 border-t border-border-subtle bg-surface-0/90 pt-3 backdrop-blur sm:flex-row sm:flex-wrap sm:gap-3 sm:pt-4">
                   <Button
                     onClick={() => handleExportImage("png")}
                     disabled={!bannerState || isExporting}
-                    className="bg-brand text-brand-fg hover:brightness-110 shadow-[var(--shadow-brand)]"
+                    className="w-full rounded-xl bg-brand text-brand-fg shadow-[var(--shadow-brand)] hover:brightness-110 sm:w-auto"
                   >
                     {isExporting ? (
                       <Loader2 className="size-4 mr-2 animate-spin" />
@@ -604,7 +606,7 @@ export function DesignExporter({
                     onClick={() => handleExportImage("jpg")}
                     disabled={!bannerState || isExporting}
                     variant="outline"
-                    className="border-border-strong bg-surface-1 text-fg-primary"
+                    className="w-full rounded-xl border-border-strong bg-surface-1 text-fg-primary sm:w-auto"
                   >
                     Baixar compacto (JPG)
                   </Button>
@@ -641,11 +643,11 @@ export function DesignExporter({
                     )}
                   </ExportPreviewFrame>
                 </div>
-                <div className="mt-auto pt-4 flex gap-3 w-full justify-center shrink-0">
+                <div className="mt-auto flex w-full shrink-0 justify-center border-t border-border-subtle bg-surface-0/90 pt-3 backdrop-blur sm:pt-4">
                   <Button
                     onClick={handleExportHtml}
                     disabled={!emailState || isExporting}
-                    className="bg-blue-600 text-white hover:bg-blue-700 shadow-lg shadow-blue-900/20"
+                    className="w-full rounded-xl bg-brand text-white shadow-[var(--shadow-brand)] hover:brightness-110 sm:w-auto"
                   >
                     {isExporting ? (
                       <Loader2 className="size-4 mr-2 animate-spin" />
@@ -690,7 +692,7 @@ export function DesignExporter({
                   </div>
 
                   {socialState && (
-                    <div className="hidden h-full max-h-[450px] w-[300px] bg-surface-1 rounded-xl shadow-2xl border border-border-subtle p-6 lg:flex flex-col self-center shrink-0">
+                    <div className="hidden h-full max-h-[450px] w-[300px] shrink-0 flex-col self-center rounded-2xl border border-border-subtle bg-surface-1 p-5 shadow-[var(--shadow-elevated)] lg:flex">
                       <h4 className="text-sm font-bold text-fg-muted uppercase tracking-widest mb-4 flex items-center gap-2">
                         <FileText className="size-4" /> Legenda
                       </h4>
@@ -700,11 +702,11 @@ export function DesignExporter({
                     </div>
                   )}
                 </div>
-                <div className="mt-auto pt-4 flex flex-wrap gap-3 w-full justify-center shrink-0">
+                <div className="mt-auto flex w-full shrink-0 flex-col justify-center gap-2 border-t border-border-subtle bg-surface-0/90 pt-3 backdrop-blur sm:flex-row sm:flex-wrap sm:gap-3 sm:pt-4">
                   <Button
                     onClick={() => handleExportImage("png")}
                     disabled={!socialState || isExporting}
-                    className="bg-pink-600 text-white hover:bg-pink-700 shadow-lg shadow-pink-900/20"
+                    className="w-full rounded-xl bg-brand text-white shadow-[var(--shadow-brand)] hover:brightness-110 sm:w-auto"
                   >
                     {isExporting ? (
                       <Loader2 className="size-4 mr-2 animate-spin" />
@@ -717,7 +719,7 @@ export function DesignExporter({
                     onClick={handleExportSocialText}
                     disabled={!socialState || isExporting}
                     variant="outline"
-                    className="border-border-strong bg-surface-1"
+                    className="w-full rounded-xl border-border-strong bg-surface-1 sm:w-auto"
                   >
                     <FileText className="size-4 mr-2" /> Salvar legenda (TXT)
                   </Button>

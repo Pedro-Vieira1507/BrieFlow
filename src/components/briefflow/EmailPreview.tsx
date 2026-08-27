@@ -593,12 +593,12 @@ export function EmailPreview({ state: propState, onChange, exportWrapperClass, e
       </div>
 
       {!isExportClone && (
-      <div className="flex items-center justify-between rounded-xl border border-border-subtle bg-surface-2 p-3 shadow-md transition-opacity hover:opacity-100">
-        <div className="min-w-0 flex-1 truncate pr-4 text-[11px] font-bold uppercase tracking-widest text-fg-muted flex items-center gap-2">
+      <div className="editor-toolbar rounded-2xl border border-border-subtle bg-surface-1/85 p-3 shadow-[var(--shadow-soft)] backdrop-blur-xl">
+        <div className="min-w-0 flex-1 truncate text-[10px] font-semibold uppercase tracking-[0.16em] text-fg-muted flex items-center gap-2">
           Peça: <span className="px-2 py-1 rounded bg-brand/10 text-brand">E-MAIL MARKETING</span>
           {analyzingColors && <span className="text-xs text-brand animate-pulse flex items-center gap-1"><Sparkles className="size-3" /> Cores...</span>}
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="editor-toolbar-actions shrink-0">
           
           <Popover>
             <PopoverTrigger asChild>
@@ -606,7 +606,7 @@ export function EmailPreview({ state: propState, onChange, exportWrapperClass, e
                 <Palette className="mr-1.5 size-3.5" /> Design
               </Button>
             </PopoverTrigger>
-            <PopoverContent side="top" align="end" className="w-[340px] bg-surface-1 border-border-strong p-4 shadow-2xl rounded-xl z-50 mb-2">
+            <PopoverContent side="top" align="end" className="mb-2 w-[min(340px,calc(100vw-24px))] rounded-2xl border-border-strong bg-surface-1 p-4 shadow-[var(--shadow-elevated)] z-50">
               <div className="space-y-4">
                 
                 <div className="space-y-2">
@@ -704,7 +704,7 @@ export function EmailPreview({ state: propState, onChange, exportWrapperClass, e
              </Button>
           )}
 
-          <Button size="sm" variant="ghost" className="h-8 text-xs font-bold rounded-lg bg-surface-3 hover:bg-surface-2 text-fg-primary ml-2" onClick={handleRegenerate}>
+          <Button size="sm" variant="ghost" className="h-8 rounded-lg bg-surface-3 text-xs font-bold text-fg-primary hover:bg-surface-2 sm:ml-2" onClick={handleRegenerate}>
             <RefreshCw className="mr-1.5 size-3.5" /> IA
           </Button>
         </div>

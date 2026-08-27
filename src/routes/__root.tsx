@@ -9,6 +9,7 @@ import {
   Scripts,
 } from "@tanstack/react-router";
 import { useEffect, type ReactNode } from "react";
+import { ArrowLeft, RefreshCw, TriangleAlert } from "lucide-react";
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 
@@ -18,19 +19,28 @@ import { useBriefflowStore } from "../store/briefflow";
 
 function NotFoundComponent() {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
-      <div className="max-w-md text-center">
-        <h1 className="text-7xl font-bold text-foreground">404</h1>
-        <h2 className="mt-4 text-xl font-semibold text-foreground">Page not found</h2>
-        <p className="mt-2 text-sm text-muted-foreground">
-          The page you're looking for doesn't exist or has been moved.
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-surface-0 px-4 text-fg-primary">
+      <div
+        aria-hidden
+        className="absolute inset-0 bg-[radial-gradient(circle_at_50%_20%,rgba(124,105,255,0.14),transparent_48%)]"
+      />
+      <div className="relative max-w-md text-center">
+        <div className="mx-auto mb-6 grid size-16 place-items-center rounded-2xl border border-brand/20 bg-brand-muted text-2xl font-bold text-brand">
+          404
+        </div>
+        <h1 className="font-display text-3xl font-semibold tracking-tight">
+          Página não encontrada
+        </h1>
+        <p className="mt-3 text-sm leading-6 text-fg-tertiary">
+          Este endereço não existe ou foi movido. Volte ao estúdio para
+          continuar sua campanha.
         </p>
-        <div className="mt-6">
+        <div className="mt-7">
           <Link
             to="/"
-            className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+            className="inline-flex h-11 items-center justify-center rounded-xl bg-brand px-5 text-sm font-semibold text-brand-fg shadow-[var(--shadow-brand)] transition hover:-translate-y-px hover:brightness-110"
           >
-            Go home
+            <ArrowLeft className="mr-2 size-4" /> Voltar ao estúdio
           </Link>
         </div>
       </div>
@@ -47,13 +57,21 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
   }, [error]);
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
-      <div className="max-w-md text-center">
-        <h1 className="text-xl font-semibold tracking-tight text-foreground">
-          This page didn't load
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-surface-0 px-4 text-fg-primary">
+      <div
+        aria-hidden
+        className="absolute inset-0 bg-[radial-gradient(circle_at_50%_20%,rgba(251,113,133,0.1),transparent_48%)]"
+      />
+      <div className="relative max-w-md text-center">
+        <div className="mx-auto mb-6 grid size-14 place-items-center rounded-2xl border border-rose-400/20 bg-rose-400/10 text-rose-300">
+          <TriangleAlert className="size-6" />
+        </div>
+        <h1 className="font-display text-2xl font-semibold tracking-tight">
+          Não foi possível abrir esta tela
         </h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Something went wrong on our end. You can try refreshing or head back home.
+        <p className="mt-3 text-sm leading-6 text-fg-tertiary">
+          O BrieFlow encontrou um erro inesperado. Tente carregar novamente; sua
+          sessão permanece preservada.
         </p>
         <div className="mt-6 flex flex-wrap justify-center gap-2">
           <button
@@ -61,15 +79,15 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
               router.invalidate();
               reset();
             }}
-            className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+            className="inline-flex h-10 items-center justify-center rounded-xl bg-brand px-4 text-sm font-semibold text-brand-fg transition hover:brightness-110"
           >
-            Try again
+            <RefreshCw className="mr-2 size-4" /> Tentar novamente
           </button>
           <a
             href="/"
-            className="inline-flex items-center justify-center rounded-md border border-input bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent"
+            className="inline-flex h-10 items-center justify-center rounded-xl border border-border-strong bg-surface-1 px-4 text-sm font-semibold text-fg-secondary transition hover:bg-surface-2 hover:text-fg-primary"
           >
-            Go home
+            Voltar ao início
           </a>
         </div>
       </div>
@@ -77,44 +95,55 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
   );
 }
 
-export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
-  head: () => ({
-    meta: [
-      { charSet: "utf-8" },
-      { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "BrieFlow - Agente de Peças de Marketing com IA" },
-      {
-        name: "description",
-        content:
-          "Agente conversacional que analisa seu site e gera banners, posts e e-mails marketing premium no painel lateral.",
-      },
-      { property: "og:title", content: "BrieFlow Creative" },
-      {
-        property: "og:description",
-        content:
-          "Agente conversacional que analisa seu site e gera banners, posts e e-mails marketing premium no painel lateral.",
-      },
-      { property: "og:type", content: "website" },
-      { name: "twitter:card", content: "summary_large_image" },
-    ],
-    links: [
-      { rel: "stylesheet", href: appCss },
-      { rel: "icon", href: "/assets/icone-brieflow.png?v=3", type: "image/png", sizes: "any" },
-      { rel: "apple-touch-icon", href: "/assets/icone-brieflow.png?v=3" },
-      { rel: "preconnect", href: "https://fonts.googleapis.com" },
-      { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
-      {
-        rel: "stylesheet",
-        href: "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Geist:wght@400;500;600;700;800;900&display=swap",
-        crossOrigin: "anonymous",
-      },
-    ],
-  }),
-  shellComponent: RootShell,
-  component: RootComponent,
-  notFoundComponent: NotFoundComponent,
-  errorComponent: ErrorComponent,
-});
+export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
+  {
+    head: () => ({
+      meta: [
+        { charSet: "utf-8" },
+        { name: "viewport", content: "width=device-width, initial-scale=1" },
+        { title: "BrieFlow - Agente de Peças de Marketing com IA" },
+        {
+          name: "description",
+          content:
+            "Agente conversacional que analisa seu site e gera banners, posts e e-mails marketing premium no painel lateral.",
+        },
+        { property: "og:title", content: "BrieFlow Creative" },
+        {
+          property: "og:description",
+          content:
+            "Agente conversacional que analisa seu site e gera banners, posts e e-mails marketing premium no painel lateral.",
+        },
+        { property: "og:type", content: "website" },
+        { name: "twitter:card", content: "summary_large_image" },
+      ],
+      links: [
+        { rel: "stylesheet", href: appCss },
+        {
+          rel: "icon",
+          href: "/assets/icone-brieflow.png?v=3",
+          type: "image/png",
+          sizes: "any",
+        },
+        { rel: "apple-touch-icon", href: "/assets/icone-brieflow.png?v=3" },
+        { rel: "preconnect", href: "https://fonts.googleapis.com" },
+        {
+          rel: "preconnect",
+          href: "https://fonts.gstatic.com",
+          crossOrigin: "anonymous",
+        },
+        {
+          rel: "stylesheet",
+          href: "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Geist:wght@400;500;600;700;800;900&display=swap",
+          crossOrigin: "anonymous",
+        },
+      ],
+    }),
+    shellComponent: RootShell,
+    component: RootComponent,
+    notFoundComponent: NotFoundComponent,
+    errorComponent: ErrorComponent,
+  },
+);
 
 function RootShell({ children }: { children: ReactNode }) {
   return (

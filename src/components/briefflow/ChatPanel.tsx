@@ -3,7 +3,7 @@ import { useBriefflowStore } from "@/store/briefflow";
 import { ChatHeader } from "./chat/ChatHeader";
 import { ChatMessages } from "./chat/ChatMessages";
 import { ChatInput } from "./chat/ChatInput";
-import { CreditsBar } from "./CreditsBar"; 
+import { CreditsBar } from "./CreditsBar";
 
 interface Props {
   onSend: (text: string) => void;
@@ -11,7 +11,8 @@ interface Props {
 
 export function ChatPanel({ onSend }: Props) {
   // Trazemos o user e setAuthOpen para barrar no nível do Painel
-  const { messages, loading, scraping, user, setAuthOpen } = useBriefflowStore();
+  const { messages, loading, scraping, user, setAuthOpen } =
+    useBriefflowStore();
 
   const userTurns = messages.filter((m) => m.role === "user").length;
   const currentStep = Math.min(5, userTurns + 1);
@@ -27,19 +28,17 @@ export function ChatPanel({ onSend }: Props) {
   };
 
   return (
-    <div className="flex h-full flex-col bg-surface-1 text-fg-primary">
+    <div className="flex h-full min-h-0 flex-col bg-transparent text-fg-primary">
       <ChatHeader currentStep={currentStep} showStepper={messages.length > 0} />
-      
       <CreditsBar />
-      
       <ChatMessages
         messages={messages}
         loading={loading}
         scraping={scraping}
         onPickSuggestion={handleProtectedSend} // <-- Agora protegido
       />
-      
-      <ChatInput disabled={busy} onSend={handleProtectedSend} /> {/* <-- Agora protegido */}
+      <ChatInput disabled={busy} onSend={handleProtectedSend} />{" "}
+      {/* <-- Agora protegido */}
     </div>
   );
 }

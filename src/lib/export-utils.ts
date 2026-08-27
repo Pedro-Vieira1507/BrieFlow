@@ -129,7 +129,11 @@ async function waitForImages(
           try {
             await image.decode();
           } catch {
-            if (!image.complete || image.naturalWidth === 0) throw new Error();
+            if (!image.complete || image.naturalWidth === 0) {
+              throw new Error(
+                "Falha ao decodificar imagem: arquivo corrompido ou formato não suportado.",
+              );
+            }
           }
         }),
       );
