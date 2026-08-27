@@ -1,6 +1,7 @@
 // src/lib/aiClient.ts
 import type { ZodType } from "zod";
 import { supabase } from "@/lib/supabase";
+import { getAiRoutingEnvironment, resolveCloudAiRoute, type AiGenerationStage } from "@/lib/aiRouting";
 
 export type AiProviderName = "omniroute" | "ollama" | "groq" | "gemini";
 
@@ -31,6 +32,7 @@ export interface GenerateCompletionOptions<T> {
   requestId?: string;
   signal?: AbortSignal;
   provider?: AiProviderName;
+  stage?: AiGenerationStage;
 }
 
 export class AiClientError extends Error {
@@ -57,7 +59,8 @@ export async function generateCompletion<T = string>(
     timeoutMs = 500_000,
     requestId = (typeof crypto !== "undefined" && "randomUUID" in crypto) ? crypto.randomUUID() : `req_${Date.now()}`,
     signal,
-    provider = "omniroute"
+    provider = "omniroute",
+    stage = "content",
   } = opts;
 
   // 1. VERIFICA E DEDUZ CRÉDITOS DIRETAMENTE NO BANCO DE DADOS
@@ -85,6 +88,7 @@ export async function generateCompletion<T = string>(
   let response: Response | undefined;
   let usedProviderName = provider as string;
   let usedModel = "unknown";
+  let usedFallback = false;
   let lastError: any;
 
   // 2. ROTEAMENTO PARA OLLAMA LOCAL
@@ -116,27 +120,9 @@ export async function generateCompletion<T = string>(
   
   // 3. ROTEAMENTO NUVEM (FALLBACK EM CASCATA)
   else {
-    const fallbackProviders = [
-      {
-        name: "groq",
-        url: "https://api.groq.com/openai/v1/chat/completions",
-        key: import.meta.env.VITE_GROQ_API_KEY,
-        // Atualizado para o modelo ativo recomendado pela Groq!
-        model: "openai/gpt-oss-20b" 
-      },
-      {
-        name: "gemini",
-        url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-        key: import.meta.env.VITE_GEMINI_API_KEY,
-        model: "gemini-1.5-flash"
-      }
-    ];
+    const fallbackProviders = resolveCloudAiRoute(stage, getAiRoutingEnvironment(import.meta.env));
 
-    let hasConfiguredProvider = false;
-
-    for (const p of fallbackProviders) {
-      if (!p.key) continue; 
-      hasConfiguredProvider = true;
+    for (const [index, p] of fallbackProviders.entries()) {
 
       try {
         const payload: any = {
@@ -167,6 +153,7 @@ export async function generateCompletion<T = string>(
         if (response.ok) {
           usedProviderName = p.name;
           usedModel = p.model;
+          usedFallback = index > 0;
           break; // Sucesso! Sai do loop.
         }
 
@@ -184,7 +171,7 @@ export async function generateCompletion<T = string>(
       }
     }
 
-    if (!hasConfiguredProvider) {
+    if (!fallbackProviders.length) {
       clearTimeout(timeout);
       throw new AiClientError("Nenhuma API Key configurada no .env (Groq ou Gemini).", "NO_PROVIDER");
     }
@@ -208,7 +195,7 @@ export async function generateCompletion<T = string>(
     requestId, 
     provider: usedProviderName, 
     model: usedModel, 
-    usedFallback: usedProviderName !== provider, 
+    usedFallback,
     latencyMs: Date.now() - startMs, 
     generatedAt: new Date().toISOString() 
   };

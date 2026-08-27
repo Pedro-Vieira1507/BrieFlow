@@ -13,6 +13,7 @@ import {
 } from "@/lib/marketingPrompts";
 import type { AiAssetType, AiGenerationMeta, AiIntent } from "@/types/ai";
 import { supabase } from "@/lib/supabase";
+import { getAiRoutingEnvironment, resolveCloudAiRoute } from "@/lib/aiRouting";
 
 // ============================================================
 // PROMPTS
@@ -409,30 +410,17 @@ async function callDirectAi(
     return { raw: data.message?.content ?? "", provider: "ollama" };
   } 
   
- // 2. NUVEM COM FALLBACK (GROQ -> GEMINI)
+ // 2. NUVEM COM FALLBACK POR FUNÇÃO (descoberta ou geração final)
   else {
-    const fallbackProviders = [
-      {
-        name: "groq",
-        url: "https://api.groq.com/openai/v1/chat/completions",
-        key: import.meta.env.VITE_GROQ_API_KEY,
-        // Atualizado para o novo modelo super rápido recomendado pela Groq
-        model: "openai/gpt-oss-20b" 
-      },
-      {
-        name: "gemini",
-        url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-        key: import.meta.env.VITE_GEMINI_API_KEY,
-        // Nome limpo do modelo para o endpoint de compatibilidade do Google
-        model: "gemini-1.5-flash" 
-      }
-    ];
+    const fallbackProviders = resolveCloudAiRoute(
+      isExecution ? "content" : "discovery",
+      getAiRoutingEnvironment(import.meta.env),
+    );
 
     let response: Response | undefined;
     let lastError: any;
 
     for (const p of fallbackProviders) {
-      if (!p.key) continue;
 
       try {
         const payload: any = {

@@ -136,7 +136,8 @@ export function useGenerateMaterials(): UseGenerateMaterialsResult {
           user,
           schema,
           signal: controller.signal,
-          provider // <-- Repassa o provedor para API
+          provider,
+          stage: "content",
         });
 
         useCreditsStore.getState().refresh();
