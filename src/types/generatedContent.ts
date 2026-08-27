@@ -3,17 +3,29 @@ import { z } from "zod";
 import type { BuilderState, CtaVariant } from "./builder";
 import type { MaterialType } from "./brief";
 
-const looseString = z.preprocess((value) => {
+function normalizeInlineString(value: unknown): string {
   if (value === null || value === undefined) return "";
   const raw = typeof value === "string" ? value : String(value);
   return raw.replace(/\*\*/g, "").replace(/\r/g, "").replace(/\s+/g, " ").trim();
-}, z.string().catch(""));
+}
 
-const looseText = z.preprocess((value) => {
+function normalizeLongText(value: unknown): string {
   if (value === null || value === undefined) return "";
   const raw = typeof value === "string" ? value : String(value);
   return raw.replace(/\*\*/g, "").replace(/\r/g, "").trim();
-}, z.string().catch(""));
+}
+
+const looseString = z.preprocess(normalizeInlineString, z.string().catch(""));
+const requiredString = z.preprocess(
+  normalizeInlineString,
+  z.string().min(1, "Campo de copy obrigatório vazio."),
+);
+
+const looseText = z.preprocess(normalizeLongText, z.string().catch(""));
+const requiredText = z.preprocess(
+  normalizeLongText,
+  z.string().min(1, "Corpo da copy obrigatório vazio."),
+);
 
 const looseList = z.preprocess((value) => {
   if (value === null || value === undefined) return [];
@@ -51,14 +63,14 @@ const designSchema = z.object({
 });
 
 export const LandingCopySchema = designSchema.extend({
-  headline: looseString,
+  headline: requiredString,
   subheadline: looseString.default(""),
   body: looseText.optional(),
   footerInfo: looseString.optional(),
-  ctaText: looseString,
+  ctaText: requiredString,
   ctaVariant: ctaVariantSchema,
-  keyBenefits: looseList.default([]),
-  objectionsHandled: looseList.default([]),
+  keyBenefits: looseList.transform((items) => items.slice(0, 3)).default([]),
+  objectionsHandled: looseList.transform((items) => items.slice(0, 2)).default([]),
   layoutStyle: z.preprocess((value) => {
     const raw = typeof value === "string" ? value.toLowerCase().trim() : "";
     return ["diagonal", "split", "minimalist", "centered", "reverse"].includes(raw) ? raw : "split";
@@ -72,27 +84,27 @@ export const LandingCopySchema = designSchema.extend({
 });
 
 export const SocialCopySchema = designSchema.extend({
-  hook: looseString.default("Criando conexões autênticas."),
-  body: looseText.default("Nossa marca se conecta com o seu propósito de vida. Descubra mais!"),
-  cta: looseString.default("Acesse o Link"),
-  hashtags: looseList.default([]),
+  hook: requiredString,
+  body: requiredText,
+  cta: requiredString,
+  hashtags: looseList.transform((items) => items.slice(0, 8)).default([]),
 });
 
 export const EmailCopySchema = designSchema.extend({
-  subject: looseString,
+  subject: requiredString,
   preheader: looseString.default(""),
   headline: looseString.default(""),
   subtitle: looseString.default(""),
-  body: looseText,
-  ctaText: looseString,
+  body: requiredText,
+  ctaText: requiredString,
   ctaVariant: ctaVariantSchema,
-  keyBenefits: looseList.default([]),
-  objectionsHandled: looseList.default([]),
+  keyBenefits: looseList.transform((items) => items.slice(0, 4)).default([]),
+  objectionsHandled: looseList.transform((items) => items.slice(0, 2)).default([]),
   heroBadge: looseString.default(""),
   benefitTitle: looseString.default(""),
   secondaryCta: looseString.default(""),
   urgencyText: looseString.default(""),
-  testimonials: looseList.default([]),
+  testimonials: looseList.transform((items) => items.slice(0, 3)).default([]),
   footerInfo: looseString.default(""),
   layoutStyle: z.preprocess((value) => {
     const raw = typeof value === "string" ? value.toLowerCase().trim() : "";
@@ -123,9 +135,9 @@ export const MATERIAL_SCHEMAS = {
 } as const;
 
 export const SCHEMA_HINTS: Record<MaterialType, string> = {
-  banner: `{\n  "headline": "Benefício principal...",\n  "subheadline": "1 frase explicando",\n  "body": "Parágrafo detalhando a oferta ou produto...",\n  "ctaText": "CTA",\n  "ctaVariant": "primary",\n  "badgePrimary": "Destaque curto (ex: 15% OFF)",\n  "badgeSecondary": "Apoio (ex: FRETE GRÁTIS)",\n  "footerInfo": "Informações de rodapé, regras ou nomes técnicos",\n  "keyBenefits": ["Benefício 1", "Benefício 2"],\n  "objectionsHandled": ["Objeção 1"],\n  "layoutStyle": "split",\n  "backgroundShape": "blob",\n  "imagePrompt": "Prompt",\n  "themeColor": "#HEX",\n  "secondaryColor": "#HEX"\n}`,
-  social: `{\n  "hook": "Gancho",\n  "body": "Corpo",\n  "cta": "CTA",\n  "hashtags": ["#tag"],\n  "imagePrompt": "Prompt",\n  "themeColor": "#HEX",\n  "secondaryColor": "#HEX"\n}`,
-  email: `{\n  "subject": "Assunto",\n  "preheader": "Preheader",\n  "headline": "Título dinâmico",\n  "subtitle": "Subtítulo de apoio",\n  "body": "Corpo persuasivo em 2-3 parágrafos",\n  "heroBadge": "Badge (ex: NOVIDADE)",\n  "benefitTitle": "Por que escolher?",\n  "keyBenefits": ["Benefício forte 1", "Benefício 2"],\n  "objectionsHandled": ["Objeção 1"],\n  "urgencyText": "Apenas hoje",\n  "testimonials": ["Nome do Cliente - R$ Resultado Alcançado | 'Citação do cliente aqui'"],\n  "ctaText": "Comprar Agora",\n  "ctaVariant": "primary",\n  "secondaryCta": "Comprar Agora",\n  "footerInfo": "*Regras, validade ou termos legais",\n  "imagePrompt": "Prompt em inglês",\n  "layoutStyle": "minimalist | split | diagonal | centered | editorial | modern | overlap | newsletter",\n  "backgroundShape": "square | curve | arch | pill | blob",\n  "themeColor": "#HEX",\n  "secondaryColor": "#HEX"\n}`
+  banner: `{\n  "headline": "string obrigatória: 3–7 palavras, até 50 caracteres",\n  "subheadline": "string: 5–14 palavras, sem repetir a headline",\n  "body": "string: uma frase de até 28 palavras",\n  "ctaText": "string obrigatória: 1–3 palavras",\n  "ctaVariant": "primary | secondary | urgent | soft",\n  "badgePrimary": "string: somente fato/oferta confirmada; senão vazio",\n  "badgeSecondary": "string: somente fato/oferta confirmada; senão vazio",\n  "footerInfo": "string: condição ou informação factual; senão vazio",\n  "keyBenefits": ["2–3 benefícios curtos e diferentes"],\n  "objectionsHandled": ["0–2 objeções reais e breves"],\n  "layoutStyle": "split | reverse | centered",\n  "backgroundShape": "curve | blob | geometric | frame | diagonal | arch | wave | pill | offset",\n  "imagePrompt": "prompt visual detalhado em inglês, sem texto na imagem",\n  "themeColor": "#RRGGBB",\n  "secondaryColor": "#RRGGBB"\n}`,
+  social: `{\n  "hook": "string obrigatória: até 12 palavras, específica e sem clickbait",\n  "body": "string obrigatória: 70–150 palavras em parágrafos curtos",\n  "cta": "string obrigatória: uma ação clara",\n  "hashtags": ["4–8 hashtags relevantes e não genéricas"],\n  "imagePrompt": "prompt 4:5 detalhado em inglês, sem texto na imagem",\n  "themeColor": "#RRGGBB",\n  "secondaryColor": "#RRGGBB"\n}`,
+  email: `{\n  "subject": "string obrigatória: até 9 palavras e 60 caracteres",\n  "preheader": "string: 40–90 caracteres e sem repetir o assunto",\n  "headline": "string: até 8 palavras",\n  "subtitle": "string: até 16 palavras",\n  "body": "string obrigatória: 110–220 palavras em 3–5 parágrafos",\n  "heroBadge": "string: somente fato confirmado; senão vazio",\n  "benefitTitle": "string curta que introduz os benefícios",\n  "keyBenefits": ["2–4 benefícios distintos"],\n  "objectionsHandled": ["0–2 objeções reais respondidas"],\n  "urgencyText": "string: somente urgência confirmada; senão vazio",\n  "testimonials": ["somente depoimentos literais fornecidos; senão array vazio"],\n  "ctaText": "string obrigatória: ação principal concreta",\n  "ctaVariant": "primary | secondary | urgent | soft",\n  "secondaryCta": "string: mesma intenção da ação principal ou vazio",\n  "footerInfo": "string: condição factual ou vazio",\n  "imagePrompt": "prompt hero horizontal detalhado em inglês, sem texto",\n  "layoutStyle": "minimalist | split | diagonal | centered | editorial | modern | overlap | newsletter",\n  "backgroundShape": "square | curve | arch | pill | blob",\n  "themeColor": "#RRGGBB",\n  "secondaryColor": "#RRGGBB"\n}`
 };
 
 export interface MaterialRenderContext {

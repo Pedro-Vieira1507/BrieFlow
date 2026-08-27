@@ -168,17 +168,28 @@ export function useBriefflowAgent() {
           if (!isAll) {
             const normalizedStr = safeTargetKeys.join(" ").toLowerCase();
             const schemaMap: Record<string, string[]> = {
-              cta: ["cta", "botão", "botao", "button", "chamada", "action", "clique", "link"],
-              title: ["title", "headline", "título", "titulo", "cabeçalho", "header", "principal"],
+              cta: ["cta", "ctatext", "botão", "botao", "button", "chamada", "action", "clique", "link"],
+              title: ["title", "headline", "subject", "assunto", "título", "titulo", "cabeçalho", "header", "principal"],
               subtitle: ["subtitle", "subheadline", "subtítulo", "subtitulo", "descrição", "apoio", "final"],
               body: ["body", "corpo", "parágrafo", "paragrafo", "conteúdo", "mensagem", "texto"],
               caption: ["caption", "legenda", "post", "texto do post"],
+              hook: ["hook", "gancho", "abertura", "primeira linha"],
               hashtags: ["hashtags", "tags", "marcadores", "palavras", "hashtag"],
               imagePrompt: ["imagePrompt", "imagem", "foto", "arte", "fundo", "background", "ilustração", "visual", "prompt"],
               themeColor: ["themeColor", "secondaryColor", "color", "cores", "cor", "paleta", "tom", "visual"],
+              preheader: ["preheader", "pré-header", "pre-header", "texto de prévia", "texto de previa"],
+              keyBenefits: ["keyBenefits", "benefícios", "beneficios", "vantagens", "diferenciais"],
+              objectionsHandled: ["objectionsHandled", "objeções", "objecoes", "dúvidas", "duvidas"],
               heroBadge: ["heroBadge", "badge", "selo", "tag"],
               badgePrimary: ["badgePrimary", "badge", "selo", "destaque", "desconto", "oferta"],
               badgeSecondary: ["badgeSecondary", "badge secundário", "selo secundário"],
+              benefitTitle: ["benefitTitle", "título dos benefícios", "titulo dos beneficios"],
+              secondaryCta: ["secondaryCta", "cta secundário", "cta secundario", "segundo botão", "segundo botao"],
+              urgencyText: ["urgencyText", "urgência", "urgencia", "prazo", "escassez"],
+              testimonials: ["testimonials", "depoimentos", "prova social", "avaliações", "avaliacoes"],
+              footerInfo: ["footerInfo", "rodapé", "rodape", "regras", "termos", "observação", "observacao"],
+              layoutStyle: ["layoutStyle", "layout", "composição", "composicao", "estrutura"],
+              backgroundShape: ["backgroundShape", "forma", "shape", "grafismo"],
             };
 
             for (const [canonicalKey, synonyms] of Object.entries(schemaMap)) {
@@ -217,13 +228,29 @@ export function useBriefflowAgent() {
                 const safeContext: any = {
                   title: c.title,
                   subtitle: c.subtitle,
+                  preheader: c.preheader,
                   cta: c.cta,
+                  ctaVariant: c.ctaVariant,
                   body: c.body,
+                  hook: c.hook,
                   caption: c.caption,
                   hashtags: c.hashtags,
+                  keyBenefits: c.keyBenefits,
+                  objectionsHandled: c.objectionsHandled,
+                  heroBadge: c.heroBadge,
+                  badgePrimary: c.badgePrimary,
+                  badgeSecondary: c.badgeSecondary,
+                  benefitTitle: c.benefitTitle,
+                  secondaryCta: c.secondaryCta,
+                  urgencyText: c.urgencyText,
+                  testimonials: c.testimonials,
+                  footerInfo: c.footerInfo,
                   imagePrompt: c.imagePrompt,
+                  emailHeroImagePrompt: c.emailHeroImagePrompt,
                   themeColor: c.themeColor,
                   secondaryColor: c.secondaryColor,
+                  layoutStyle: c.layoutStyle,
+                  backgroundShape: c.backgroundShape,
                 };
                 currentContentContext = `\n\n=== CONTEÚDO ATUAL DA PEÇA ===\nATENÇÃO: Preserve o texto abaixo exatamente como está para todos os campos que o usuário NÃO pediu para alterar:\n${JSON.stringify(safeContext, null, 2)}`;
               }
@@ -255,13 +282,64 @@ export function useBriefflowAgent() {
             if (isAll || !prevAsset) {
               mergedContent = { ...prevContent, ...content };
             } else {
-              if (allowedKeys.has("cta") && content.cta !== undefined) mergedContent.cta = content.cta;
-              if (allowedKeys.has("title") && content.title !== undefined) mergedContent.title = content.title;
-              if (allowedKeys.has("subtitle") && content.subtitle !== undefined) mergedContent.subtitle = content.subtitle;
-              if (allowedKeys.has("imagePrompt") && content.imagePrompt !== undefined) mergedContent.imagePrompt = content.imagePrompt;
-              if (allowedKeys.has("themeColor") && content.themeColor !== undefined) mergedContent.themeColor = content.themeColor;
-              if (allowedKeys.has("badgePrimary") && content.badgePrimary !== undefined) mergedContent.badgePrimary = content.badgePrimary;
-              if (allowedKeys.has("badgeSecondary") && content.badgeSecondary !== undefined) mergedContent.badgeSecondary = content.badgeSecondary;
+              const assign = (key: keyof BuilderState) => {
+                if (content[key] !== undefined) mergedContent[key] = content[key];
+              };
+
+              if (allowedKeys.has("title")) assign("title");
+              if (allowedKeys.has("subtitle")) assign("subtitle");
+              if (allowedKeys.has("preheader")) assign("preheader");
+              if (allowedKeys.has("body")) assign("body");
+              if (allowedKeys.has("hook")) assign("hook");
+              if (allowedKeys.has("hashtags")) assign("hashtags");
+              if (allowedKeys.has("keyBenefits")) assign("keyBenefits");
+              if (allowedKeys.has("objectionsHandled")) assign("objectionsHandled");
+              if (allowedKeys.has("heroBadge")) assign("heroBadge");
+              if (allowedKeys.has("badgePrimary")) assign("badgePrimary");
+              if (allowedKeys.has("badgeSecondary")) assign("badgeSecondary");
+              if (allowedKeys.has("benefitTitle")) assign("benefitTitle");
+              if (allowedKeys.has("secondaryCta")) assign("secondaryCta");
+              if (allowedKeys.has("urgencyText")) assign("urgencyText");
+              if (allowedKeys.has("testimonials")) assign("testimonials");
+              if (allowedKeys.has("footerInfo")) assign("footerInfo");
+              if (allowedKeys.has("layoutStyle")) assign("layoutStyle");
+              if (allowedKeys.has("backgroundShape")) assign("backgroundShape");
+
+              if (allowedKeys.has("cta")) {
+                assign("cta");
+                assign("ctaVariant");
+              }
+
+              if (allowedKeys.has("caption")) {
+                assign("caption");
+                assign("hook");
+                assign("body");
+                assign("cta");
+              }
+
+              if (allowedKeys.has("imagePrompt")) {
+                assign("imagePrompt");
+                assign("emailHeroImagePrompt");
+              }
+
+              if (allowedKeys.has("themeColor")) {
+                assign("themeColor");
+                assign("secondaryColor");
+              }
+
+              if (
+                channel === "social" &&
+                !allowedKeys.has("caption") &&
+                ["hook", "body", "cta"].some((key) => allowedKeys.has(key))
+              ) {
+                mergedContent.caption = [
+                  mergedContent.hook,
+                  mergedContent.body,
+                  mergedContent.cta,
+                ]
+                  .filter((value) => typeof value === "string" && value.trim())
+                  .join("\n\n");
+              }
             }
 
             return {

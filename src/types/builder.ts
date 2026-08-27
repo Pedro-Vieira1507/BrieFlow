@@ -15,6 +15,8 @@ export interface DiscoveryPlan {
   product?: string;
   audience?: string;
   offer?: string;
+  objective?: string;
+  tone?: string;
   channels?: string[];
   websiteUrl?: string;
   productSku?: string | null;

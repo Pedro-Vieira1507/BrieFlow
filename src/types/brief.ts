@@ -108,14 +108,14 @@ export function toMarketingBrief(input: {
       clean(brandContext.brandName) ??
       clean(brandContext.site?.brandName) ??
       "Sua Marca",
-    objective: clean(plan?.proposedStrategy),
+    objective: clean(plan?.objective) ?? clean(plan?.proposedStrategy),
     context: clean(plan?.detectedContext),
     strategy: clean(plan?.proposedStrategy),
     missingInfo: clean(plan?.missingInfo),
     audience: clean(plan?.audience) ?? clean(brandContext.persona),
     product: clean(plan?.product) ?? clean(brandContext.product),
     offer: clean(plan?.offer) ?? clean(brandContext.offer),
-    tone: clean(brandContext.tone),
+    tone: clean(plan?.tone) ?? clean(brandContext.tone),
     framework: clean(brandContext.framework),
     channels,
     site: brandContext.site ?? null,
