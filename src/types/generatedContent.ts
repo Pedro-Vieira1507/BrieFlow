@@ -36,6 +36,19 @@ const looseList = z.preprocess((value) => {
     .filter((item) => item.length > 0 && item.toLowerCase() !== "null");
 }, z.array(z.string()).catch([]));
 
+function compactBadge(maxCharacters: number, maxWords: number) {
+  return z.preprocess((value) => {
+    const normalized = normalizeInlineString(value);
+    if (
+      normalized.length > maxCharacters ||
+      normalized.split(/\s+/).filter(Boolean).length > maxWords
+    ) {
+      return "";
+    }
+    return normalized;
+  }, z.string().catch(""));
+}
+
 const hexColor = z.preprocess((value) => {
   const raw = typeof value === "string" ? value.trim() : "";
   const colorMap: Record<string, string> = {
@@ -69,14 +82,14 @@ export const LandingCopySchema = designSchema.extend({
   footerInfo: looseString.optional(),
   ctaText: requiredString,
   ctaVariant: ctaVariantSchema,
-  keyBenefits: looseList.transform((items) => items.slice(0, 3)).default([]),
+  keyBenefits: looseList.transform((items) => items.slice(0, 2)).default([]),
   objectionsHandled: looseList.transform((items) => items.slice(0, 2)).default([]),
   layoutStyle: z.preprocess((value) => {
     const raw = typeof value === "string" ? value.toLowerCase().trim() : "";
     return ["diagonal", "split", "minimalist", "centered", "reverse"].includes(raw) ? raw : "split";
   }, z.enum(["diagonal", "split", "minimalist", "centered", "reverse"])).default("split"),
-  badgePrimary: looseString.optional(),
-  badgeSecondary: looseString.optional(),
+  badgePrimary: compactBadge(22, 4).optional(),
+  badgeSecondary: compactBadge(28, 5).optional(),
   backgroundShape: z.preprocess((value) => {
     const raw = typeof value === "string" ? value.toLowerCase().trim() : "";
     return ["diagonal", "curve", "split", "minimalist", "blob", "geometric", "frame", "arch", "wave", "pill", "offset"].includes(raw) ? raw : "curve";
@@ -87,7 +100,7 @@ export const SocialCopySchema = designSchema.extend({
   hook: requiredString,
   body: requiredText,
   cta: requiredString,
-  hashtags: looseList.transform((items) => items.slice(0, 8)).default([]),
+  hashtags: looseList.transform((items) => items.slice(0, 6)).default([]),
 });
 
 export const EmailCopySchema = designSchema.extend({
@@ -98,7 +111,7 @@ export const EmailCopySchema = designSchema.extend({
   body: requiredText,
   ctaText: requiredString,
   ctaVariant: ctaVariantSchema,
-  keyBenefits: looseList.transform((items) => items.slice(0, 4)).default([]),
+  keyBenefits: looseList.transform((items) => items.slice(0, 3)).default([]),
   objectionsHandled: looseList.transform((items) => items.slice(0, 2)).default([]),
   heroBadge: looseString.default(""),
   benefitTitle: looseString.default(""),
@@ -135,9 +148,9 @@ export const MATERIAL_SCHEMAS = {
 } as const;
 
 export const SCHEMA_HINTS: Record<MaterialType, string> = {
-  banner: `{\n  "headline": "string obrigatória: 3–7 palavras, até 50 caracteres",\n  "subheadline": "string: 5–14 palavras, sem repetir a headline",\n  "body": "string: uma frase de até 28 palavras",\n  "ctaText": "string obrigatória: 1–3 palavras",\n  "ctaVariant": "primary | secondary | urgent | soft",\n  "badgePrimary": "string: somente fato/oferta confirmada; senão vazio",\n  "badgeSecondary": "string: somente fato/oferta confirmada; senão vazio",\n  "footerInfo": "string: condição ou informação factual; senão vazio",\n  "keyBenefits": ["2–3 benefícios curtos e diferentes"],\n  "objectionsHandled": ["0–2 objeções reais e breves"],\n  "layoutStyle": "split | reverse | centered",\n  "backgroundShape": "curve | blob | geometric | frame | diagonal | arch | wave | pill | offset",\n  "imagePrompt": "prompt visual detalhado em inglês, sem texto na imagem",\n  "themeColor": "#RRGGBB",\n  "secondaryColor": "#RRGGBB"\n}`,
-  social: `{\n  "hook": "string obrigatória: até 12 palavras, específica e sem clickbait",\n  "body": "string obrigatória: 70–150 palavras em parágrafos curtos",\n  "cta": "string obrigatória: uma ação clara",\n  "hashtags": ["4–8 hashtags relevantes e não genéricas"],\n  "imagePrompt": "prompt 4:5 detalhado em inglês, sem texto na imagem",\n  "themeColor": "#RRGGBB",\n  "secondaryColor": "#RRGGBB"\n}`,
-  email: `{\n  "subject": "string obrigatória: até 9 palavras e 60 caracteres",\n  "preheader": "string: 40–90 caracteres e sem repetir o assunto",\n  "headline": "string: até 8 palavras",\n  "subtitle": "string: até 16 palavras",\n  "body": "string obrigatória: 110–220 palavras em 3–5 parágrafos",\n  "heroBadge": "string: somente fato confirmado; senão vazio",\n  "benefitTitle": "string curta que introduz os benefícios",\n  "keyBenefits": ["2–4 benefícios distintos"],\n  "objectionsHandled": ["0–2 objeções reais respondidas"],\n  "urgencyText": "string: somente urgência confirmada; senão vazio",\n  "testimonials": ["somente depoimentos literais fornecidos; senão array vazio"],\n  "ctaText": "string obrigatória: ação principal concreta",\n  "ctaVariant": "primary | secondary | urgent | soft",\n  "secondaryCta": "string: mesma intenção da ação principal ou vazio",\n  "footerInfo": "string: condição factual ou vazio",\n  "imagePrompt": "prompt hero horizontal detalhado em inglês, sem texto",\n  "layoutStyle": "minimalist | split | diagonal | centered | editorial | modern | overlap | newsletter",\n  "backgroundShape": "square | curve | arch | pill | blob",\n  "themeColor": "#RRGGBB",\n  "secondaryColor": "#RRGGBB"\n}`
+  banner: `{\n  "headline": "string obrigatória: conceito de 3–6 palavras, preferencialmente até 42 caracteres",\n  "subheadline": "string opcional: 4–10 palavras com informação nova ou vazio",\n  "body": "string opcional: uma frase de até 18 palavras ou vazio",\n  "ctaText": "string obrigatória: 2–4 palavras",\n  "ctaVariant": "primary | secondary | urgent | soft",\n  "badgePrimary": "string: número/oferta confirmada, até 22 caracteres e 4 palavras; senão vazio",\n  "badgeSecondary": "string: condição confirmada, até 28 caracteres e 5 palavras; senão vazio",\n  "footerInfo": "string: condição indispensável de até 90 caracteres; senão vazio",\n  "keyBenefits": ["0–2 benefícios de até 5 palavras; prefira []"],\n  "objectionsHandled": ["0–2 objeções reais e breves"],\n  "layoutStyle": "split | reverse | centered",\n  "backgroundShape": "minimalist | split | curve | blob | geometric | frame | diagonal | arch | wave | pill | offset",\n  "imagePrompt": "prompt editorial detalhado em inglês, sem texto na imagem",\n  "themeColor": "#RRGGBB",\n  "secondaryColor": "#RRGGBB"\n}`,
+  social: `{\n  "hook": "string obrigatória: conceito de 4–10 palavras, específico e sem clickbait",\n  "body": "string obrigatória: 60–120 palavras em parágrafos curtos",\n  "cta": "string obrigatória: uma ação clara",\n  "hashtags": ["3–6 hashtags relevantes e não genéricas"],\n  "imagePrompt": "prompt editorial 4:5 detalhado em inglês, sem texto na imagem",\n  "themeColor": "#RRGGBB",\n  "secondaryColor": "#RRGGBB"\n}`,
+  email: `{\n  "subject": "string obrigatória: até 9 palavras e 60 caracteres",\n  "preheader": "string: 40–90 caracteres e sem repetir o assunto",\n  "headline": "string: conceito de 3–8 palavras",\n  "subtitle": "string opcional: até 14 palavras ou vazio",\n  "body": "string obrigatória: 90–170 palavras em 3–5 parágrafos",\n  "heroBadge": "string: somente fato confirmado; senão vazio",\n  "benefitTitle": "string curta que introduz benefícios ou vazio",\n  "keyBenefits": ["0–3 benefícios distintos; use apenas quando ajudarem"],\n  "objectionsHandled": ["0–2 objeções reais respondidas"],\n  "urgencyText": "string: somente urgência confirmada; senão vazio",\n  "testimonials": ["somente depoimentos literais fornecidos; senão array vazio"],\n  "ctaText": "string obrigatória: ação principal concreta",\n  "ctaVariant": "primary | secondary | urgent | soft",\n  "secondaryCta": "string: mesma intenção da ação principal ou vazio",\n  "footerInfo": "string: condição factual ou vazio",\n  "imagePrompt": "prompt hero editorial detalhado em inglês, sem texto",\n  "layoutStyle": "minimalist | split | diagonal | centered | editorial | modern | overlap | newsletter",\n  "backgroundShape": "square | curve | arch | pill | blob",\n  "themeColor": "#RRGGBB",\n  "secondaryColor": "#RRGGBB"\n}`
 };
 
 export interface MaterialRenderContext {

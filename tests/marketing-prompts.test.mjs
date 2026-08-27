@@ -8,6 +8,7 @@ import {
   selectFallbackPalette,
 } from "../src/lib/marketingPromptCore.ts";
 import {
+  LandingCopySchema,
   EmailCopySchema,
   SocialCopySchema,
 } from "../src/types/generatedContent.ts";
@@ -62,7 +63,11 @@ test("editorial prompt forbids fabricated proof and removes random directives", 
   );
 
   assert.match(source, /Nunca invente preço, desconto/);
-  assert.match(source, /três ângulos realmente diferentes/);
+  assert.match(source, /cinco territórios realmente diferentes/);
+  assert.match(source, /UMA IDEIA DE CAMPANHA/);
+  assert.match(source, /teste do outdoor/i);
+  assert.match(source, /no máximo três zonas textuais/i);
+  assert.match(source, /Nunca reutilize vocabulário laboratorial/);
   assert.match(source, /testimonials como \[\]/);
   assert.doesNotMatch(source, /Inclua agressivamente/);
   assert.doesNotMatch(source, /Crie 2 a 3 cards realistas/);
@@ -101,5 +106,37 @@ test("social schema caps hashtag stuffing", () => {
     imagePrompt: "focused editorial product composition, no text",
   });
 
-  assert.equal(parsed.hashtags.length, 8);
+  assert.equal(parsed.hashtags.length, 6);
+});
+
+test("banner schema suppresses oversized promotional badges", () => {
+  const parsed = LandingCopySchema.parse({
+    headline: "Resultados começam na escolha certa",
+    subheadline: "",
+    body: "",
+    ctaText: "Conheça os modelos",
+    keyBenefits: ["Benefício um", "Benefício dois", "Benefício três"],
+    badgePrimary: "Tecnologia que protege todas as vidas",
+    badgeSecondary: "Condição complementar excessivamente longa para um selo",
+    imagePrompt: "editorial product hero, no text",
+  });
+
+  assert.equal(parsed.badgePrimary, "");
+  assert.equal(parsed.badgeSecondary, "");
+  assert.equal(parsed.keyBenefits.length, 2);
+});
+
+test("material prompt adapts the agency method without leaking the reference brand", () => {
+  const source = readFileSync(
+    new URL("../src/lib/marketingPrompts.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(source, /brieflow-creative-director/);
+  assert.match(source, /produto-herói/);
+  assert.match(source, /Prefira omitir a preencher/);
+  assert.match(source, /B2B técnico\/regulado/);
+  assert.match(source, /Varejo\/e-commerce/);
+  assert.match(source, /SaaS\/tecnologia/);
+  assert.doesNotMatch(source, /Forlab/i);
 });
