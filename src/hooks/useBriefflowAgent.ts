@@ -152,6 +152,7 @@ export function useBriefflowAgent() {
       });
 
       let hasErrors = false;
+      let campaignPlatformContext = "";
 
       for (const [index, channel] of channels.entries()) {
         setGeneratingLabel(
@@ -266,7 +267,7 @@ export function useBriefflowAgent() {
             .map((m) => m.content)
             .join("\n\n---\n\n");
 
-          const rawBriefing = recentUserBriefing + currentContentContext;
+          const rawBriefing = recentUserBriefing + campaignPlatformContext + currentContentContext;
 
           const { content } = await generateMaterial({
             brief,
@@ -275,6 +276,28 @@ export function useBriefflowAgent() {
             images: uniqueImages,
             provider,
           });
+
+          if (!only && channel === "banner") {
+            const semanticSpine = [
+              content.title,
+              content.subtitle,
+              content.body,
+              ...(content.keyBenefits ?? []),
+              content.cta,
+              content.badgePrimary,
+              content.badgeSecondary,
+            ]
+              .filter((value): value is string => typeof value === "string" && Boolean(value.trim()))
+              .join(" | ");
+
+            if (semanticSpine) {
+              campaignPlatformContext = `
+
+=== PLATAFORMA CRIATIVA DA CAMPANHA ===
+O banner aprovado definiu esta espinha semântica: ${semanticSpine}
+Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo território verbal. Não copie a headline; desenvolva a ideia conforme o papel do canal e não introduza um novo posicionamento.`;
+            }
+          }
 
           updateCampaignAsset(channel, (prevAsset) => {
             const prevContent = prevAsset?.content || {};
