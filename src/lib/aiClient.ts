@@ -130,11 +130,15 @@ export async function generateCompletion<T = string>(
         const payload: any = {
           model: p.model,
           messages,
-          temperature: temperature ?? 0.7,
           // Reduzimos o limite de resposta para 2000 para a Groq não dar erro 400
           max_tokens: p.name === "groq" ? 2000 : (maxTokens ?? 4096),
           stream: false,
         };
+
+        // Gemini 3.6 não aceita os antigos parâmetros de amostragem.
+        if (p.name === "groq") {
+          payload.temperature = temperature ?? 0.7;
+        }
 
         if (schema) {
           payload.response_format = { type: "json_object" };

@@ -36,7 +36,9 @@ test("clientes de nuvem exigem JSON também da Groq e continuam após saída inv
   const ollama = await readFile(new URL("../src/lib/ollama.ts", import.meta.url), "utf8");
 
   assert.match(aiClient, /if \(schema\) \{\s*payload\.response_format = \{ type: "json_object" \}/);
+  assert.match(aiClient, /if \(p\.name === "groq"\) \{\s*payload\.temperature/);
   assert.match(aiClient, /Saída inválida.*Tentando o próximo/);
   assert.match(ollama, /response_format: \{ type: "json_object" \}/);
+  assert.match(ollama, /if \(p\.name === "groq"\) \{\s*payload\.temperature/);
   assert.match(ollama, /tryParseJson\(content\)/);
 });

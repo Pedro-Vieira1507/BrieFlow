@@ -23,6 +23,7 @@ export interface CloudAiCandidate {
 
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
+const DEFAULT_GEMINI_MODEL = "gemini-3.6-flash";
 
 /**
  * Mantém a decisão de modelo separada do transporte HTTP. Assim, a conversa de
@@ -38,8 +39,8 @@ export function resolveCloudAiRoute(
   const firstFallbackGroqModel = env.groqFirstFallbackModel || "qwen/qwen3.6-27b";
   const secondFallbackGroqModel = env.groqSecondFallbackModel || env.groqModel || "openai/gpt-oss-20b";
   const geminiModel = stage === "content"
-    ? env.geminiContentModel || "gemini-2.5-flash"
-    : env.geminiDiscoveryModel || "gemini-2.5-flash-lite";
+    ? env.geminiContentModel || DEFAULT_GEMINI_MODEL
+    : env.geminiDiscoveryModel || DEFAULT_GEMINI_MODEL;
 
   const gemini: CloudAiCandidate = {
     name: "gemini",

@@ -341,7 +341,7 @@ function normalizeBuilder(response: OllamaResponse, currentPlan: DiscoveryPlan |
 // CHAMADA DIRETA - Roteia entre Ollama e API de Nuvem (Groq/Gemini)
 // ============================================================
 async function callDirectAi(
-  messagesPayload: { role: "system" | "user"; content: string }[],
+  messagesPayload: { role: "system" | "user" | "assistant"; content: string }[],
   options: OllamaGenerationOptions,
   controller: AbortController,
 ): Promise<{ raw: string; provider: "omniroute" | "ollama" }> {
@@ -404,11 +404,15 @@ async function callDirectAi(
         const payload: any = {
           model: p.model,
           messages: messagesPayload,
-          temperature: isExecution ? 0.1 : 0.3,
           max_tokens: isExecution ? 4000 : 2000,
           stream: false, 
           response_format: { type: "json_object" },
         };
+
+        // Gemini 3.6 não aceita os antigos parâmetros de amostragem.
+        if (p.name === "groq") {
+          payload.temperature = isExecution ? 0.1 : 0.3;
+        }
 
         if (p.name === "groq" && supportsReasoningControls(p.model)) {
           payload.reasoning_format = "hidden";

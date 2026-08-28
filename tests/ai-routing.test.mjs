@@ -14,7 +14,7 @@ test("usa Qwen principal para conteúdo final, com duas contingências Groq e Ge
     { name: "groq", model: "qwen/qwen3.8-27b" },
     { name: "groq", model: "qwen/qwen3.6-27b" },
     { name: "groq", model: "openai/gpt-oss-20b" },
-    { name: "gemini", model: "gemini-2.5-flash" },
+    { name: "gemini", model: "gemini-3.6-flash" },
   ]);
 });
 
@@ -23,7 +23,7 @@ test("economiza no onboarding com GPT OSS e preserva Gemini como contingência",
 
   assert.deepEqual(route.map(({ name, model }) => ({ name, model })), [
     { name: "groq", model: "openai/gpt-oss-20b" },
-    { name: "gemini", model: "gemini-2.5-flash-lite" },
+    { name: "gemini", model: "gemini-3.6-flash" },
   ]);
 });
 
