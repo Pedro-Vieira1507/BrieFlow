@@ -85,7 +85,7 @@ export function SocialPreview({ state, onChange, exportWrapperClass, exportWrapp
         }
         return prev;
       });
-    }, 5000);
+    }, 18000);
     return () => clearTimeout(timer);
   }, [activeHeroUrl, useFallback, isProductImage]);
 
