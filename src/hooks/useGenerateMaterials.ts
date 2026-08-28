@@ -7,6 +7,7 @@ import {
   extractChannelBriefing,
   type MaterialPromptOptions,
 } from "@/lib/marketingPrompts";
+import { sanitizeGeneratedCopy } from "@/lib/marketingQuality";
 import {
   MATERIAL_SCHEMAS,
   toBuilderContent,
@@ -140,12 +141,18 @@ export function useGenerateMaterials(): UseGenerateMaterialsResult {
           stage: "content",
         });
 
+        const safeData = sanitizeGeneratedCopy(material, data, brief);
+
         useCreditsStore.getState().refresh();
 
         return {
           material,
-          copy: data,
-          content: toBuilderContent(material, data, toRenderContext(brief, images)),
+          copy: safeData,
+          content: toBuilderContent(
+            material,
+            safeData,
+            toRenderContext(brief, images),
+          ),
           meta,
         };
       } catch (error) {

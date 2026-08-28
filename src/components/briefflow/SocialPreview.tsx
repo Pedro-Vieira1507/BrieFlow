@@ -219,7 +219,7 @@ export function SocialPreview({ state, onChange, exportWrapperClass, exportWrapp
                   <div className="absolute inset-0 z-0 blur-3xl transition-colors duration-500" style={{ backgroundColor: `${themeColor}40` }} />
                   <img
                     src={url}
-                    crossOrigin="anonymous"
+                    crossOrigin={url.startsWith("data:") || url.startsWith("blob:") ? undefined : "anonymous"}
                     alt="Post visual gerado"
                     onLoad={handleImageLoad}
                     onError={handleImageError}

@@ -79,6 +79,9 @@ test("editorial prompt forbids fabricated proof and removes random directives", 
   assert.match(source, /PLATAFORMA CRIATIVA DA CAMPANHA/);
   assert.match(source, /em outro nível/);
   assert.match(source, /teste de substituição/);
+  assert.match(source, /fragmento preposicional/);
+  assert.match(source, /aplicado automaticamente/);
+  assert.match(source, /O body constrói desejo/);
   assert.doesNotMatch(source, /Inclua agressivamente/);
   assert.doesNotMatch(source, /Crie 2 a 3 cards realistas/);
   assert.doesNotMatch(source, /Math\.random/);
@@ -158,7 +161,7 @@ test("material prompt adapts the agency method without leaking the reference bra
     "utf8",
   );
 
-  assert.match(source, /brieflow-creative-director/);
+  assert.match(source, /brieflow-creative-director-2026-08\.5/);
   assert.match(source, /produto-herói/);
   assert.match(source, /Prefira omitir a preencher/);
   assert.match(source, /B2B técnico\/regulado/);
