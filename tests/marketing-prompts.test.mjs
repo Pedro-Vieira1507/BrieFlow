@@ -7,6 +7,7 @@ import {
   extractMaterialBriefing,
   selectFallbackPalette,
 } from "../src/lib/marketingPromptCore.ts";
+import { buildFallbackUrl } from "../src/lib/pollinations.ts";
 import {
   LandingCopySchema,
   EmailCopySchema,
@@ -73,6 +74,11 @@ test("editorial prompt forbids fabricated proof and removes random directives", 
   assert.match(source, /evite banco de imagem literal/);
   assert.match(source, /Nunca reutilize vocabulário laboratorial/);
   assert.match(source, /testimonials como \[\]/);
+  assert.match(source, /CONTRATO FACTUAL DESTA GERAÇÃO/);
+  assert.match(source, /ALEGAÇÕES FACTUAIS BLOQUEADAS/);
+  assert.match(source, /PLATAFORMA CRIATIVA DA CAMPANHA/);
+  assert.match(source, /em outro nível/);
+  assert.match(source, /teste de substituição/);
   assert.doesNotMatch(source, /Inclua agressivamente/);
   assert.doesNotMatch(source, /Crie 2 a 3 cards realistas/);
   assert.doesNotMatch(source, /Math\.random/);
@@ -159,4 +165,22 @@ test("material prompt adapts the agency method without leaking the reference bra
   assert.match(source, /Varejo\/e-commerce/);
   assert.match(source, /SaaS\/tecnologia/);
   assert.doesNotMatch(source, /Forlab/i);
+});
+
+
+test("visual fallback is local, deterministic and never exposes a placeholder label", () => {
+  const first = buildFallbackUrl("editorial coffee subscription", {
+    width: 1080,
+    height: 1350,
+    seed: 42,
+  });
+  const second = buildFallbackUrl("editorial coffee subscription", {
+    width: 1080,
+    height: 1350,
+    seed: 42,
+  });
+
+  assert.equal(first, second);
+  assert.match(first, /^data:image\/svg\+xml/);
+  assert.doesNotMatch(first, /placehold\.co|Arte\+em\+Geracao/i);
 });
