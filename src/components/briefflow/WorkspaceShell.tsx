@@ -17,7 +17,8 @@ import { ProfileSettingsModal } from "./ProfileSettingsModal";
 
 export function WorkspaceShell() {
   const { brandContext, authOpen, setAuthOpen } = useBriefflowStore();
-  const { handleSend, regenerateChannel } = useBriefflowAgent();
+  const { handleSend, generateCampaign, regenerateChannel } =
+    useBriefflowAgent();
   const [mobileChatOpen, setMobileChatOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
@@ -50,7 +51,7 @@ export function WorkspaceShell() {
 
       <section className="relative z-10 flex min-h-0 min-w-0 flex-1 flex-col">
         <PageBuilder
-          onRefine={(prompt) => handleSend(prompt, true)}
+          onGenerateCampaign={generateCampaign}
           onRetry={regenerateChannel}
           onOpenSettings={() => setSettingsOpen(true)}
           onOpenChat={() => setMobileChatOpen(true)}

@@ -43,9 +43,28 @@ test("retry regenerates only the failed channel without another discovery call",
   assert.match(source, /const regenerateChannel = useCallback/);
   assert.match(
     source,
-    /generateCampaignSafely\(history, channel, \["all"\], "omniroute"\)/,
+    /currentChatHistory\(\),\s*channel,\s*\["all"\],\s*"omniroute"/,
   );
   assert.doesNotMatch(source, /A requisição excedeu o tempo limite/);
+});
+
+test("campaign approval starts content generation without a second discovery credit", () => {
+  const agent = readFileSync(
+    new URL("../src/hooks/useBriefflowAgent.ts", import.meta.url),
+    "utf8",
+  );
+  const builder = readFileSync(
+    new URL("../src/components/briefflow/PageBuilder.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(agent, /const generateCampaign = useCallback/);
+  assert.match(
+    agent,
+    /currentChatHistory\(\),\s*undefined,\s*\["all"\],\s*"omniroute"/,
+  );
+  assert.match(builder, /onApprove=\{\(\) => void onGenerateCampaign\(\)\}/);
+  assert.doesNotMatch(builder, /Aprovado\. Gere os materiais/);
 });
 
 test("social preview does not fabricate engagement", () => {

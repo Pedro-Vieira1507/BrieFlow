@@ -15,13 +15,18 @@ import { CampaignTabs } from "./builder/CampaignTabs";
 import type { BuilderState, CampaignAsset } from "@/types/builder";
 
 interface Props {
-  onRefine: (prompt: string) => void;
+  onGenerateCampaign: () => void | Promise<void>;
   onRetry: (channel: CampaignAsset["type"]) => void | Promise<void>;
   onOpenSettings?: () => void;
   onOpenChat?: () => void;
 }
 
-export function PageBuilder({ onRefine, onRetry, onOpenSettings, onOpenChat }: Props) {
+export function PageBuilder({
+  onGenerateCampaign,
+  onRetry,
+  onOpenSettings,
+  onOpenChat,
+}: Props) {
   const {
     user,
     builder,
@@ -136,11 +141,7 @@ export function PageBuilder({ onRefine, onRetry, onOpenSettings, onOpenChat }: P
               plan={builder.discoveryPlan}
               loading={loading}
               onPatch={patchBuilder}
-              onApprove={() =>
-                onRefine(
-                  "Aprovado. Gere os materiais do ecossistema agora. Seja um designer criativo.",
-                )
-              }
+              onApprove={() => void onGenerateCampaign()}
             />
           )}
 

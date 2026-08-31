@@ -675,19 +675,35 @@ Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo terri
     ],
   );
 
-  const regenerateChannel = useCallback(
-    async (channel: CampaignChannel) => {
-      const history: ChatTurn[] = useBriefflowStore
-        .getState()
-        .messages.map((message) => ({
-          role: message.role,
-          content: message.content,
-        }));
-
-      await generateCampaignSafely(history, channel, ["all"], "omniroute");
-    },
-    [generateCampaignSafely],
+  const currentChatHistory = useCallback(
+    (): ChatTurn[] =>
+      useBriefflowStore.getState().messages.map((message) => ({
+        role: message.role,
+        content: message.content,
+      })),
+    [],
   );
 
-  return { handleSend, regenerateChannel };
+  const generateCampaign = useCallback(async () => {
+    await generateCampaignSafely(
+      currentChatHistory(),
+      undefined,
+      ["all"],
+      "omniroute",
+    );
+  }, [currentChatHistory, generateCampaignSafely]);
+
+  const regenerateChannel = useCallback(
+    async (channel: CampaignChannel) => {
+      await generateCampaignSafely(
+        currentChatHistory(),
+        channel,
+        ["all"],
+        "omniroute",
+      );
+    },
+    [currentChatHistory, generateCampaignSafely],
+  );
+
+  return { handleSend, generateCampaign, regenerateChannel };
 }
