@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
+  getBuilderCampaignBrandName,
   getCampaignBrandName,
   getGenerationErrorMessage,
 } from "../src/lib/campaignGeneration.ts";
@@ -47,6 +48,17 @@ test("failed legacy asset inherits the brand from the same campaign", () => {
   );
 });
 
+test("saved campaigns recover their brand from the approved discovery plan", () => {
+  assert.equal(
+    getBuilderCampaignBrandName({
+      type: "campaign",
+      discoveryPlan: { brandName: "Aurora Café" },
+      campaignAssets: [],
+    }),
+    "Aurora Café",
+  );
+});
+
 test("retry regenerates only the failed channel without another discovery call", () => {
   const source = readFileSync(
     new URL("../src/hooks/useBriefflowAgent.ts", import.meta.url),
@@ -78,6 +90,20 @@ test("campaign approval starts content generation without a second discovery cre
   );
   assert.match(builder, /onApprove=\{\(\) => void onGenerateCampaign\(\)\}/);
   assert.doesNotMatch(builder, /Aprovado\. Gere os materiais/);
+});
+
+test("retry keeps the campaign plan and saved image references after library load", () => {
+  const source = readFileSync(
+    new URL("../src/hooks/useBriefflowAgent.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(
+    source,
+    /discoveryPlanRef\.current \?\? builderRef\.current\.discoveryPlan/,
+  );
+  assert.match(source, /savedCampaignImages/);
+  assert.match(source, /builder\.type === "none"/);
 });
 
 test("social preview does not fabricate engagement", () => {

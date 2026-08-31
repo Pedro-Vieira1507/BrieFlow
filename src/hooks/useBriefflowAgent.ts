@@ -1,5 +1,5 @@
 // src/hooks/useBriefflowAgent.ts
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { useBriefflowStore, uid } from "@/store/briefflow";
 import { sendToOllama, type ChatTurn } from "@/lib/ollama";
@@ -62,6 +62,21 @@ export function useBriefflowAgent() {
 
   const builderRef = useRef(builder);
   builderRef.current = builder;
+
+  // Ao abrir uma campanha da biblioteca o hook continua montado, mas seus
+  // refs começam vazios. Espelhar o plano salvo evita que um retry use
+  // "Sua Marca" ou herde dados do briefing anterior após um reset.
+  useEffect(() => {
+    if (builder.type === "none") {
+      discoveryPlanRef.current = undefined;
+      scrapedProductsRef.current = [];
+      return;
+    }
+
+    if (builder.discoveryPlan) {
+      discoveryPlanRef.current = builder.discoveryPlan;
+    }
+  }, [builder.discoveryPlan, builder.type]);
 
   const maybeScrapeUrls = useCallback(
     async (text: string): Promise<SiteBrandData | null> => {
@@ -128,19 +143,22 @@ export function useBriefflowAgent() {
 
   const generateCampaignSafely = useCallback(
     async (baseHistory: ChatTurn[], only?: CampaignChannel, targetKeys: string[] = ["all"], provider: "ollama" | "omniroute" = "omniroute") => {
-      const plan =
-        discoveryPlanRef.current ??
-        (builderRef.current.type === "discovery_plan"
-          ? builderRef.current.discoveryPlan
-          : undefined);
+      const plan = discoveryPlanRef.current ?? builderRef.current.discoveryPlan;
 
       const channels: CampaignChannel[] = only ? [only] : ALL_CHANNELS;
 
       setLoading(true);
 
+      const savedCampaignImages = builderRef.current.type === "campaign"
+        ? (builderRef.current.campaignAssets ?? []).flatMap((asset) => [
+            ...(asset.content.productImages ?? []),
+            asset.content.productImageUrl,
+          ])
+        : [];
       const allImages = [
         ...(uploadedImage ? [uploadedImage] : []),
         ...scrapedProductsRef.current.map((p) => p.imageUrl).filter(Boolean),
+        ...savedCampaignImages,
       ] as string[];
 
       const uniqueImages = Array.from(new Set(allImages));
@@ -590,7 +608,7 @@ Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo terri
         const response = await sendToOllama(
           history,
           brandContextRef.current,
-          discoveryPlanRef.current,
+          discoveryPlanRef.current ?? builderRef.current.discoveryPlan,
           {
             intent: "discovery",
             provider,
@@ -617,7 +635,7 @@ Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo terri
         ) {
           const discoveryPlan = response.builder.discoveryPlan;
           discoveryPlanRef.current = mergeDetectedBriefContext(
-            { ...discoveryPlanRef.current, ...discoveryPlan },
+            { ...discoveryPlanRef.current, ...builderRef.current.discoveryPlan, ...discoveryPlan },
             response.detectedContext,
           );
           if (!inCampaignPhase) {
@@ -625,7 +643,7 @@ Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo terri
           }
         } else {
           discoveryPlanRef.current = mergeDetectedBriefContext(
-            discoveryPlanRef.current,
+            discoveryPlanRef.current ?? builderRef.current.discoveryPlan,
             response.detectedContext,
           );
         }

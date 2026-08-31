@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useBriefflowStore } from "@/store/briefflow";
 import { isSupabaseConfigured, saveAssetToLibrary } from "@/lib/supabase";
+import { getBuilderCampaignBrandName } from "@/lib/campaignGeneration";
 
 import { BuilderHeader } from "./builder/BuilderHeader";
 import { GeneratingBanner } from "./builder/GeneratingBanner";
@@ -70,7 +71,11 @@ export function PageBuilder({
 
     const toastId = toast.loading("Salvando campanha na biblioteca...");
     try {
-      await saveAssetToLibrary("Campanha AI", builder);
+      const brandName = getBuilderCampaignBrandName(builder);
+      await saveAssetToLibrary(
+        brandName ? `Campanha ${brandName}` : "Campanha AI",
+        builder,
+      );
       toast.success("Salvo na biblioteca com sucesso!", { id: toastId });
     } catch (e: any) {
       toast.error(e.message || "Erro ao salvar a campanha", { id: toastId });

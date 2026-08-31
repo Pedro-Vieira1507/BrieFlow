@@ -28,3 +28,19 @@ export function getCampaignBrandName(
     .map(({ content }) => content.brandName?.trim())
     .find((brandName): brandName is string => Boolean(brandName));
 }
+
+/**
+ * Campanhas antigas nem sempre têm `brandName` no estado raiz. A origem mais
+ * confiável é o plano aprovado e, em seguida, as peças já geradas.
+ */
+export function getBuilderCampaignBrandName(
+  state: BuilderState | undefined,
+): string | undefined {
+  const rootBrand = state?.brandName?.trim();
+  if (rootBrand) return rootBrand;
+
+  const planBrand = state?.discoveryPlan?.brandName?.trim();
+  if (planBrand) return planBrand;
+
+  return getCampaignBrandName(state?.campaignAssets ?? []);
+}

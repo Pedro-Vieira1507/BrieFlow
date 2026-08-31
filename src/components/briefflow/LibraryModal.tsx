@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { getBuilderCampaignBrandName } from "@/lib/campaignGeneration";
 import type { BuilderState, CampaignAsset } from "@/types/builder";
 
 export function LibraryModal() {
@@ -180,7 +181,9 @@ export function LibraryModal() {
                       })
                     : "";
                   const brand =
-                    item.content?.brandName || item.name || "Campanha sem nome";
+                    getBuilderCampaignBrandName(item.content) ||
+                    item.name ||
+                    "Campanha sem nome";
 
                   return (
                     <div
@@ -225,7 +228,7 @@ export function LibraryModal() {
                     <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border-subtle pb-4">
                       <div>
                         <h4 className="font-display font-semibold text-lg text-fg-primary">
-                          {selectedState.brandName ||
+                          {getBuilderCampaignBrandName(selectedState) ||
                             selectedItem.name ||
                             "Campanha Salva"}
                         </h4>

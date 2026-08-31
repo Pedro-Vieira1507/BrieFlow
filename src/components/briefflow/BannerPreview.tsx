@@ -71,13 +71,17 @@ function FontSizeControl({ label, value, min, max, step = 1, onChange }: FontSiz
   );
 }
 
-function DraggableBlock({ id, children, className, isExport }: { id: string, children: React.ReactNode, className?: string, isExport?: boolean }) {
-  const cached = useMemo(() => blockCache.get(id) || { x: 0, y: 0 }, [id]);
+function DraggableBlock({ id, children, className, isExport, resetPosition = false }: { id: string, children: React.ReactNode, className?: string, isExport?: boolean, resetPosition?: boolean }) {
+  const cached = useMemo(() => resetPosition ? { x: 0, y: 0 } : blockCache.get(id) || { x: 0, y: 0 }, [id, resetPosition]);
   const [pos, setPos] = useState(cached);
   const [isDragging, setIsDragging] = useState(false);
   const startMousePos = useRef({ x: 0, y: 0 });
   const startPos = useRef({ x: 0, y: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (resetPosition) setPos({ x: 0, y: 0 });
+  }, [resetPosition]);
 
   useEffect(() => {
     if (isExport) return;
@@ -119,8 +123,8 @@ function DraggableBlock({ id, children, className, isExport }: { id: string, chi
   }, [isDragging, isExport]);
 
   useEffect(() => {
-    if (!isExport) blockCache.set(id, pos);
-  }, [pos, id, isExport]);
+    if (!isExport && !resetPosition) blockCache.set(id, pos);
+  }, [pos, id, isExport, resetPosition]);
 
   useLayoutEffect(() => {
     if (isDragging) return;
@@ -561,7 +565,7 @@ export function BannerPreview({ state: propState, onChange, exportWrapperClass, 
               {!isComplexShape && <div className="absolute inset-0 z-10 opacity-70 pointer-events-none transition-colors duration-500" style={{ backgroundColor: themeColor }} />}
 
               <div className="relative z-40 w-full h-full flex flex-col items-center justify-center pointer-events-none">
-                <DraggableBlock id="banner-title-center" isExport={isExportClone} className="banner-mobile-reset pointer-events-auto w-full max-w-[700px] flex flex-col items-center">
+                <DraggableBlock id="banner-title-center" isExport={isExportClone} resetPosition={isMobileLayout} className="banner-mobile-reset pointer-events-auto w-full max-w-[700px] flex flex-col items-center">
                   <div
                     className={cn(
                       "p-10 rounded-[32px] shadow-2xl relative mb-6 w-full [.force-mobile_&]:!p-8 [.force-mobile_&]:!max-w-[95%] transition-all",
@@ -594,7 +598,7 @@ export function BannerPreview({ state: propState, onChange, exportWrapperClass, 
                 )}
 
                 {(badgePrimary || badgeSecondary) && (
-                  <DraggableBlock id="banner-badge-center" isExport={isExportClone} className={cn("absolute z-50 bottom-8 right-8 flex flex-col items-end gap-3 pointer-events-auto [.force-mobile_&]:!bottom-4 [.force-mobile_&]:!right-4", !isExportClone && "max-md:!bottom-4 max-md:!right-4")}>
+                  <DraggableBlock id="banner-badge-center" isExport={isExportClone} resetPosition={isMobileLayout} className={cn("absolute z-50 bottom-8 right-8 flex flex-col items-end gap-3 pointer-events-auto [.force-mobile_&]:!bottom-4 [.force-mobile_&]:!right-4", !isExportClone && "max-md:!bottom-4 max-md:!right-4")}>
                     {badgePrimary && (
                       <div className={cn("rounded-full size-[180px] [.force-mobile_&]:!size-[140px] flex items-center justify-center text-center p-3 shadow-[0_20px_40px_-10px_rgba(0,0,0,0.5)] border border-white/20", !isExportClone && "max-md:!size-[120px]")} style={{ backgroundColor: `${boxColor}F2`, color: textColor }}>
                         <Editable as="span" value={badgePrimary} onChange={(v) => onChange({ badgePrimary: v })} className={cn("banner-badge-primary-text font-black text-[48px] [.force-mobile_&]:!text-[36px] leading-[1.0] tracking-tighter", !isExportClone && "max-md:!text-[36px]")} style={{ color: textColor, fontSize: fontSizes.badgePrimary }} />
@@ -664,7 +668,7 @@ export function BannerPreview({ state: propState, onChange, exportWrapperClass, 
                 cn("[.force-mobile_&]:!w-full [.force-mobile_&]:!h-auto [.force-mobile_&]:!py-12 [.force-mobile_&]:!mt-0 [.force-mobile_&]:!justify-center [.force-mobile_&]:!items-center [.force-mobile_&]:!text-center [.force-mobile_&]:!px-6 [.force-mobile_&]:!m-0", !isExportClone && "max-md:!w-full max-md:!h-auto max-md:!py-12 max-md:!mt-0 max-md:!justify-center max-md:!items-center max-md:!text-center max-md:!px-6 max-md:!m-0")
               )}>
 
-                <DraggableBlock id="banner-text-split" isExport={isExportClone} className={cn(
+                <DraggableBlock id="banner-text-split" isExport={isExportClone} resetPosition={isMobileLayout} className={cn(
                   "banner-mobile-reset pointer-events-auto flex flex-col w-full max-w-[560px]",
                   isReverse ? "items-end" : "items-start",
                   cn("[.force-mobile_&]:!items-center", !isExportClone && "max-md:!items-center")
@@ -712,10 +716,10 @@ export function BannerPreview({ state: propState, onChange, exportWrapperClass, 
               </div>
 
               {(badgePrimary || badgeSecondary) && (
-                <DraggableBlock id="banner-badge-split" isExport={isExportClone} className={cn(
+                <DraggableBlock id="banner-badge-split" isExport={isExportClone} resetPosition={isMobileLayout} className={cn(
                   "banner-mobile-badge banner-mobile-reset absolute z-50 flex flex-col items-center gap-3 pointer-events-auto top-1/2 -translate-y-1/2",
                   isReverse ? "right-[55%] translate-x-1/2" : "left-[55%] -translate-x-1/2",
-                  cn("[.force-mobile_&]:!right-auto [.force-mobile_&]:!left-1/2 [.force-mobile_&]:!-translate-x-1/2 [.force-mobile_&]:!top-[50%]", !isExportClone && "max-md:!right-auto max-md:!left-1/2 max-md:!-translate-x-1/2 max-md:!top-[50%]")
+                  cn("[.force-mobile_&]:!right-auto [.force-mobile_&]:!left-1/2 [.force-mobile_&]:!bottom-[42%] [.force-mobile_&]:!top-auto [.force-mobile_&]:!-translate-x-1/2 [.force-mobile_&]:!translate-y-0", !isExportClone && "max-md:!right-auto max-md:!left-1/2 max-md:!bottom-[42%] max-md:!top-auto max-md:!-translate-x-1/2 max-md:!translate-y-0")
                 )}>
                   {badgePrimary && (
                     <div className={cn("rounded-full size-[180px] [.force-mobile_&]:!size-[140px] flex items-center justify-center text-center p-3 shadow-[0_20px_40px_-10px_rgba(0,0,0,0.5)] border border-white/20", !isExportClone && "max-md:!size-[110px]")} style={{ backgroundColor: `${boxColor}F2`, color: textColor }}>

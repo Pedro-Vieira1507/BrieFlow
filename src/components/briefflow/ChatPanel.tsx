@@ -11,11 +11,12 @@ interface Props {
 
 export function ChatPanel({ onSend }: Props) {
   // Trazemos o user e setAuthOpen para barrar no nível do Painel
-  const { messages, loading, scraping, user, setAuthOpen } =
+  const { messages, builder, loading, scraping, user, setAuthOpen } =
     useBriefflowStore();
 
   const userTurns = messages.filter((m) => m.role === "user").length;
-  const currentStep = Math.min(5, userTurns + 1);
+  const hasCampaign = builder.type === "campaign";
+  const currentStep = hasCampaign ? 5 : Math.min(5, userTurns + 1);
   const busy = loading || scraping;
 
   // Intercepta qualquer envio do chat (seja do input ou das sugestões)
@@ -29,7 +30,10 @@ export function ChatPanel({ onSend }: Props) {
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-transparent text-fg-primary">
-      <ChatHeader currentStep={currentStep} showStepper={messages.length > 0} />
+      <ChatHeader
+        currentStep={currentStep}
+        showStepper={messages.length > 0 || hasCampaign}
+      />
       <CreditsBar />
       <ChatMessages
         messages={messages}
