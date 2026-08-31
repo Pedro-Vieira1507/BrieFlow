@@ -1,4 +1,4 @@
-import type { BuilderState } from "../types/builder";
+import type { BuilderState, CampaignAsset } from "../types/builder";
 
 const LEGACY_ERROR_TITLE = /não consegui gerar este (?:banner|e-mail)/i;
 const LEGACY_ERROR_CAPTION = /não consegui gerar este post/i;
@@ -19,4 +19,12 @@ export function getGenerationErrorMessage(
     content.subtitle?.trim() ||
     "A IA não conseguiu concluir esta peça agora. Tente novamente."
   );
+}
+
+export function getCampaignBrandName(
+  assets: Pick<CampaignAsset, "content">[],
+): string | undefined {
+  return assets
+    .map(({ content }) => content.brandName?.trim())
+    .find((brandName): brandName is string => Boolean(brandName));
 }

@@ -8,7 +8,10 @@ import { SocialPreview } from "@/components/briefflow/SocialPreview";
 import { cn } from "@/lib/utils";
 import { AlertTriangle, Image, Instagram, Mail, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { getGenerationErrorMessage } from "@/lib/campaignGeneration";
+import {
+  getCampaignBrandName,
+  getGenerationErrorMessage,
+} from "@/lib/campaignGeneration";
 
 interface Props {
   assets: CampaignAsset[];
@@ -39,6 +42,7 @@ export function CampaignTabs({
   onRetry,
 }: Props) {
   const previousAssetIdsRef = useRef<string[]>([]);
+  const campaignBrandName = getCampaignBrandName(assets);
 
   // Ao aparecer um novo asset gerado pela IA, foca automaticamente nele
   useEffect(() => {
@@ -99,7 +103,8 @@ export function CampaignTabs({
                   <AlertTriangle className="size-7" />
                 </div>
                 <p className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">
-                  {asset.content.brandName || "Campanha"} · {channel?.label}
+                  {asset.content.brandName || campaignBrandName || "Campanha"} ·{" "}
+                  {channel?.label}
                 </p>
                 <h3 className="text-2xl font-semibold tracking-tight text-fg-primary">
                   Esta peça não ficou pronta

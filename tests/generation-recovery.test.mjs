@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import { getGenerationErrorMessage } from "../src/lib/campaignGeneration.ts";
+import {
+  getCampaignBrandName,
+  getGenerationErrorMessage,
+} from "../src/lib/campaignGeneration.ts";
 
 test("uses the real provider error and keeps legacy failures recoverable", () => {
   assert.equal(
@@ -31,6 +34,16 @@ test("uses the real provider error and keeps legacy failures recoverable", () =>
       body: "Conteúdo válido.",
     }),
     undefined,
+  );
+});
+
+test("failed legacy asset inherits the brand from the same campaign", () => {
+  assert.equal(
+    getCampaignBrandName([
+      { content: { type: "email", title: "Não consegui gerar este e-mail" } },
+      { content: { type: "banner", brandName: "Aurora Café" } },
+    ]),
+    "Aurora Café",
   );
 });
 
