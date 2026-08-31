@@ -1,0 +1,46 @@
+import type { BuilderState, CampaignAsset } from "../types/builder";
+
+const LEGACY_ERROR_TITLE = /não consegui gerar este (?:banner|e-mail)/i;
+const LEGACY_ERROR_CAPTION = /não consegui gerar este post/i;
+
+export function getGenerationErrorMessage(
+  content: BuilderState,
+): string | undefined {
+  const explicit = content.generationError?.trim();
+  if (explicit) return explicit;
+
+  const legacyError =
+    LEGACY_ERROR_TITLE.test(content.title ?? "") ||
+    LEGACY_ERROR_CAPTION.test(content.caption ?? "");
+  if (!legacyError) return undefined;
+
+  return (
+    content.body?.trim() ||
+    content.subtitle?.trim() ||
+    "A IA não conseguiu concluir esta peça agora. Tente novamente."
+  );
+}
+
+export function getCampaignBrandName(
+  assets: Pick<CampaignAsset, "content">[],
+): string | undefined {
+  return assets
+    .map(({ content }) => content.brandName?.trim())
+    .find((brandName): brandName is string => Boolean(brandName));
+}
+
+/**
+ * Campanhas antigas nem sempre têm `brandName` no estado raiz. A origem mais
+ * confiável é o plano aprovado e, em seguida, as peças já geradas.
+ */
+export function getBuilderCampaignBrandName(
+  state: BuilderState | undefined,
+): string | undefined {
+  const rootBrand = state?.brandName?.trim();
+  if (rootBrand) return rootBrand;
+
+  const planBrand = state?.discoveryPlan?.brandName?.trim();
+  if (planBrand) return planBrand;
+
+  return getCampaignBrandName(state?.campaignAssets ?? []);
+}

@@ -1,48 +1,87 @@
-// src/components/briefflow/builder/BuilderEmptyState.tsx
-import { Sparkles, MessageSquare, Wand2, Download } from "lucide-react";
+import {
+  ArrowRight,
+  Download,
+  MessageSquare,
+  Sparkles,
+  Wand2,
+} from "lucide-react";
 
-export function BuilderEmptyState() {
+import { Button } from "@/components/ui/button";
+
+export function BuilderEmptyState({ onOpenChat }: { onOpenChat?: () => void }) {
+  const steps = [
+    {
+      icon: MessageSquare,
+      index: "01",
+      title: "Contexto",
+      copy: "Compartilhe produto, público e objetivo.",
+    },
+    {
+      icon: Wand2,
+      index: "02",
+      title: "Direção",
+      copy: "Revise a estratégia antes da geração.",
+    },
+    {
+      icon: Download,
+      index: "03",
+      title: "Entrega",
+      copy: "Ajuste no canvas e exporte cada formato.",
+    },
+  ];
+
   return (
-    <div className="flex flex-col items-center justify-center min-h-[60vh] h-full text-center px-4 animate-in fade-in zoom-in-95 duration-700">
-      
-      {/* Ícone de Destaque com Glow */}
-      <div className="relative flex size-24 items-center justify-center rounded-3xl bg-surface-2 border border-border-subtle shadow-[0_0_60px_rgba(99,102,241,0.15)] mb-8">
-        <div className="absolute inset-0 bg-brand/10 rounded-3xl animate-pulse" />
-        <Sparkles className="size-10 text-brand relative z-10" />
+    <div className="mx-auto flex min-h-[calc(100dvh-170px)] max-w-4xl flex-col items-center justify-center px-1 py-8 text-center fade-in-up lg:min-h-[620px]">
+      <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-brand/20 bg-brand-muted px-3 py-1.5 text-[11px] font-semibold text-brand shadow-[0_12px_40px_-18px_var(--brand-glow)]">
+        <span className="size-1.5 rounded-full bg-brand shadow-[0_0_10px_var(--brand-glow)]" />
+        Estúdio de campanhas com IA
       </div>
 
-      <h2 className="font-display text-3xl md:text-4xl font-extrabold text-fg-primary tracking-tight mb-4 drop-shadow-md">
-        Seu ecossistema de campanhas
+      <div className="relative mb-7 grid size-20 place-items-center rounded-[26px] border border-white/8 bg-gradient-to-b from-surface-2 to-surface-1 shadow-[0_24px_80px_-28px_var(--brand-glow)]">
+        <div
+          aria-hidden
+          className="absolute inset-2 rounded-[20px] bg-brand/8 blur-xl"
+        />
+        <Sparkles className="relative size-8 text-brand" />
+      </div>
+
+      <h2 className="max-w-3xl text-balance font-display text-3xl font-semibold tracking-[-0.045em] text-fg-primary sm:text-4xl lg:text-[46px] lg:leading-[1.08]">
+        Uma campanha completa, do briefing ao arquivo final.
       </h2>
-      <p className="text-fg-secondary text-base md:text-lg max-w-lg mb-12 leading-relaxed">
-        O BrieFlow analisa sua marca e cria Banners, E-mails e Posts de alta conversão em minutos.
+      <p className="mt-5 max-w-2xl text-pretty text-sm leading-6 text-fg-secondary sm:text-base sm:leading-7">
+        Descreva o objetivo ou envie o link do produto. O BrieFlow organiza a
+        estratégia e monta banner, e-mail e social em um único fluxo editável.
       </p>
 
-      {/* Cards de Instrução (Passo a Passo) */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-3xl w-full">
-        <div className="flex flex-col items-center p-6 rounded-2xl bg-surface-1/50 border border-border-subtle backdrop-blur-sm">
-          <div className="size-10 rounded-full bg-surface-2 flex items-center justify-center mb-4 text-fg-primary">
-            <MessageSquare className="size-4" />
-          </div>
-          <h3 className="font-semibold text-fg-primary mb-2 text-sm">1. Converse</h3>
-          <p className="text-xs text-fg-tertiary">Envie o link do seu site ou o SKU do produto no chat lateral.</p>
-        </div>
+      <Button
+        onClick={onOpenChat}
+        className="mt-7 h-11 rounded-xl bg-brand px-5 text-sm font-semibold text-brand-fg shadow-[var(--shadow-brand)] transition hover:-translate-y-0.5 hover:brightness-110 lg:hidden"
+      >
+        Começar no assistente <ArrowRight className="ml-2 size-4" />
+      </Button>
 
-        <div className="flex flex-col items-center p-6 rounded-2xl bg-surface-1/50 border border-border-subtle backdrop-blur-sm">
-          <div className="size-10 rounded-full bg-brand/10 flex items-center justify-center mb-4 text-brand">
-            <Wand2 className="size-4" />
+      <div className="mt-10 grid w-full grid-cols-1 overflow-hidden rounded-2xl border border-border-subtle bg-surface-1/55 text-left shadow-[var(--shadow-soft)] backdrop-blur-xl sm:grid-cols-3">
+        {steps.map(({ icon: Icon, index, title, copy }, position) => (
+          <div
+            key={title}
+            className={`group p-5 sm:p-6 ${
+              position
+                ? "border-t border-border-subtle sm:border-l sm:border-t-0"
+                : ""
+            }`}
+          >
+            <div className="mb-5 flex items-center justify-between">
+              <span className="grid size-9 place-items-center rounded-xl border border-border-subtle bg-surface-2 text-fg-secondary transition group-hover:border-brand/25 group-hover:text-brand">
+                <Icon className="size-4" />
+              </span>
+              <span className="font-mono text-[10px] font-semibold text-fg-muted">
+                {index}
+              </span>
+            </div>
+            <h3 className="text-sm font-semibold text-fg-primary">{title}</h3>
+            <p className="mt-1.5 text-xs leading-5 text-fg-tertiary">{copy}</p>
           </div>
-          <h3 className="font-semibold text-fg-primary mb-2 text-sm">2. Aprove</h3>
-          <p className="text-xs text-fg-tertiary">Confirme o briefing gerado pela IA e deixe-a montar os layouts.</p>
-        </div>
-
-        <div className="flex flex-col items-center p-6 rounded-2xl bg-surface-1/50 border border-border-subtle backdrop-blur-sm">
-          <div className="size-10 rounded-full bg-surface-2 flex items-center justify-center mb-4 text-fg-primary">
-            <Download className="size-4" />
-          </div>
-          <h3 className="font-semibold text-fg-primary mb-2 text-sm">3. Exporte</h3>
-          <p className="text-xs text-fg-tertiary">Ajuste os textos se precisar e baixe as artes renderizadas.</p>
-        </div>
+        ))}
       </div>
     </div>
   );

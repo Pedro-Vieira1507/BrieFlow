@@ -1,13 +1,37 @@
 // src/components/briefflow/LibraryModal.tsx
 import { useState, useEffect } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { useBriefflowStore } from "@/store/briefflow";
 import { getSavedAssets, deleteSavedAsset } from "@/lib/supabase";
 import { CampaignTabs } from "@/components/briefflow/builder/CampaignTabs";
-import { Loader2, Trash2, ArrowRight, FolderKanban, Calendar, Sparkles } from "lucide-react";
+import {
+  Loader2,
+  Trash2,
+  ArrowRight,
+  FolderKanban,
+  Calendar,
+  Sparkles,
+} from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { getBuilderCampaignBrandName } from "@/lib/campaignGeneration";
 import type { BuilderState, CampaignAsset } from "@/types/builder";
 
 export function LibraryModal() {
@@ -16,6 +40,11 @@ export function LibraryModal() {
   const [loading, setLoading] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [activeTab, setActiveTab] = useState<CampaignAsset["type"]>("banner");
+  const [pendingDelete, setPendingDelete] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const loadLibrary = async () => {
     if (!user) return;
@@ -25,7 +54,9 @@ export function LibraryModal() {
       setItems(data || []);
       setSelectedIndex(0);
     } catch (err: any) {
-      toast.error("Erro ao carregar a biblioteca", { description: err.message });
+      toast.error("Erro ao carregar a biblioteca", {
+        description: err.message,
+      });
     } finally {
       setLoading(false);
     }
@@ -37,18 +68,31 @@ export function LibraryModal() {
     }
   }, [libraryOpen, user]);
 
-  const handleDelete = async (id: string, e: React.MouseEvent) => {
+  const requestDelete = (id: string, name: string, e: React.MouseEvent) => {
     e.stopPropagation();
+    setPendingDelete({ id, name });
+  };
+
+  const confirmDelete = async () => {
+    if (!pendingDelete || deleting) return;
+    setDeleting(true);
     try {
-      await deleteSavedAsset(id);
+      await deleteSavedAsset(pendingDelete.id);
       toast.success("Campanha removida da biblioteca");
-      const updated = items.filter((item) => item.id !== id);
+      const removedIndex = items.findIndex(
+        (item) => item.id === pendingDelete.id,
+      );
+      const updated = items.filter((item) => item.id !== pendingDelete.id);
       setItems(updated);
-      if (selectedIndex >= updated.length) {
-        setSelectedIndex(Math.max(0, updated.length - 1));
-      }
+      setSelectedIndex((current) => {
+        if (removedIndex >= 0 && removedIndex < current) return current - 1;
+        return Math.min(current, Math.max(0, updated.length - 1));
+      });
+      setPendingDelete(null);
     } catch (err: any) {
       toast.error("Erro ao excluir campanha", { description: err.message });
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -60,140 +104,204 @@ export function LibraryModal() {
 
   const selectedItem = items[selectedIndex];
   const selectedState: BuilderState | undefined = selectedItem?.content;
-  const campaignAssets = selectedState?.type === "campaign" ? selectedState.campaignAssets : undefined;
+  const campaignAssets =
+    selectedState?.type === "campaign"
+      ? selectedState.campaignAssets
+      : undefined;
 
   const handleAssetPatch = (assetId: string, patch: Partial<BuilderState>) => {
     if (!selectedState || !campaignAssets) return;
     const nextAssets = campaignAssets.map((a) =>
-      a.id === assetId ? { ...a, content: { ...a.content, ...patch } } : a
+      a.id === assetId ? { ...a, content: { ...a.content, ...patch } } : a,
     );
-    const nextState: BuilderState = { ...selectedState, campaignAssets: nextAssets };
+    const nextState: BuilderState = {
+      ...selectedState,
+      campaignAssets: nextAssets,
+    };
     const updatedItems = [...items];
     updatedItems[selectedIndex] = { ...selectedItem, content: nextState };
     setItems(updatedItems);
   };
 
   return (
-    <Dialog open={libraryOpen} onOpenChange={setLibraryOpen}>
-      <DialogContent className="sm:max-w-[1000px] w-[95vw] h-[88vh] bg-surface-1 border-border-strong text-fg-primary shadow-2xl p-0 flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
-        <DialogHeader className="p-6 pb-4 border-b border-border-subtle flex flex-row items-center justify-between">
-          <div>
-            <DialogTitle className="font-display text-xl flex items-center gap-2">
-              <FolderKanban className="size-5 text-brand" /> Sua Biblioteca
-            </DialogTitle>
-            <DialogDescription className="text-fg-tertiary mt-1">
-              Visualize suas campanhas salvas separadas por abas e recarregue-as no Canvas quando quiser.
-            </DialogDescription>
-          </div>
-        </DialogHeader>
-
-        {loading ? (
-          <div className="flex-1 flex flex-col items-center justify-center py-20 text-fg-muted">
-            <Loader2 className="size-8 animate-spin text-brand mb-3" />
-            <p className="text-xs uppercase font-bold tracking-widest">Carregando conteúdos salvos...</p>
-          </div>
-        ) : items.length === 0 ? (
-          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center animate-in fade-in duration-500">
-            <div className="size-16 rounded-2xl bg-surface-2 border border-border-subtle flex items-center justify-center mb-4 text-fg-muted">
-              <Sparkles className="size-8" />
+    <>
+      <Dialog open={libraryOpen} onOpenChange={setLibraryOpen}>
+        <DialogContent className="flex h-[100dvh] w-screen max-w-none flex-col overflow-hidden rounded-none border-border-strong bg-surface-1 p-0 text-fg-primary shadow-[var(--shadow-elevated)] sm:h-[90vh] sm:w-[96vw] sm:max-w-[1080px] sm:rounded-[24px]">
+          <DialogHeader className="flex shrink-0 flex-row items-center justify-between border-b border-border-subtle bg-surface-1/95 p-5 pr-14 text-left backdrop-blur-xl sm:p-6 sm:pr-14">
+            <div>
+              <DialogTitle className="flex items-center gap-2.5 font-display text-xl font-semibold tracking-tight">
+                <span className="grid size-9 place-items-center rounded-xl border border-brand/20 bg-brand-muted text-brand">
+                  <FolderKanban className="size-4" />
+                </span>
+                Biblioteca
+              </DialogTitle>
+              <DialogDescription className="mt-2 max-w-2xl text-xs leading-5 text-fg-tertiary sm:text-sm">
+                Revise campanhas salvas e carregue qualquer versão de volta ao
+                canvas.
+              </DialogDescription>
             </div>
-            <h3 className="font-semibold text-lg text-fg-primary mb-1">Nenhuma campanha salva</h3>
-            <p className="text-sm text-fg-tertiary max-w-sm">
-              Crie uma nova campanha no chat e clique em "Salvar na Biblioteca" no topo da tela para guardá-la aqui.
-            </p>
-          </div>
-        ) : (
-          <div className="flex-1 flex flex-col md:flex-row min-h-0 overflow-hidden">
-            {/* PAINEL LATERAL DE CAMPANHAS SALVAS */}
-            <div className="w-full md:w-[280px] shrink-0 border-r border-border-subtle bg-surface-2/40 overflow-y-auto p-3 space-y-2">
-              <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-fg-muted">
-                Campanhas Salvas ({items.length})
+          </DialogHeader>
+
+          {loading ? (
+            <div className="flex-1 flex flex-col items-center justify-center py-20 text-fg-muted">
+              <Loader2 className="size-8 animate-spin text-brand mb-3" />
+              <p className="text-xs font-medium text-fg-tertiary">
+                Carregando campanhas...
+              </p>
+            </div>
+          ) : items.length === 0 ? (
+            <div className="flex-1 flex flex-col items-center justify-center p-8 text-center animate-in fade-in duration-500">
+              <div className="size-16 rounded-2xl bg-surface-2 border border-border-subtle flex items-center justify-center mb-4 text-fg-muted">
+                <Sparkles className="size-8" />
               </div>
-              {items.map((item, idx) => {
-                const isSelected = idx === selectedIndex;
-                const dateStr = item.created_at
-                  ? new Date(item.created_at).toLocaleDateString("pt-BR", {
-                      day: "2-digit",
-                      month: "2-digit",
-                      year: "2-digit",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })
-                  : "";
-                const brand = item.content?.brandName || item.name || "Campanha sem nome";
-
-                return (
-                  <div
-                    key={item.id}
-                    onClick={() => setSelectedIndex(idx)}
-                    // UX: Efeito tátil de clique (active:scale-[0.98])
-                    className={cn(
-                      "group relative p-3 rounded-xl border transition-all duration-200 cursor-pointer flex flex-col gap-1.5 active:scale-[0.98]",
-                      isSelected
-                        ? "bg-surface-3 border-brand shadow-md"
-                        : "bg-surface-2/80 border-border-subtle hover:border-border-strong hover:bg-surface-3/50"
-                    )}
-                  >
-                    <div className="flex justify-between items-start">
-                      <span className="font-semibold text-xs text-fg-primary truncate max-w-[170px]">
-                        {brand}
-                      </span>
-                      <button
-                        onClick={(e) => handleDelete(item.id, e)}
-                        className="text-fg-muted hover:text-rose-400 p-1 rounded-md hover:bg-rose-500/10 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
-                        title="Excluir da biblioteca"
-                      >
-                        <Trash2 className="size-3.5" />
-                      </button>
-                    </div>
-                    <div className="flex items-center gap-1.5 text-[10px] text-fg-tertiary">
-                      <Calendar className="size-3" />
-                      <span>{dateStr}</span>
-                    </div>
-                  </div>
-                );
-              })}
+              <h3 className="font-semibold text-lg text-fg-primary mb-1">
+                Nenhuma campanha salva
+              </h3>
+              <p className="text-sm text-fg-tertiary max-w-sm">
+                Crie uma nova campanha no chat e clique em "Salvar na
+                Biblioteca" no topo da tela para guardá-la aqui.
+              </p>
             </div>
+          ) : (
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden md:flex-row">
+              {/* PAINEL LATERAL DE CAMPANHAS SALVAS */}
+              <div className="flex max-h-52 w-full shrink-0 gap-2 overflow-x-auto border-b border-border-subtle bg-surface-2/35 p-3 md:max-h-none md:w-[286px] md:flex-col md:overflow-x-hidden md:overflow-y-auto md:border-b-0 md:border-r">
+                <div className="hidden px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-fg-muted md:block">
+                  Campanhas Salvas ({items.length})
+                </div>
+                {items.map((item, idx) => {
+                  const isSelected = idx === selectedIndex;
+                  const dateStr = item.created_at
+                    ? new Date(item.created_at).toLocaleDateString("pt-BR", {
+                        day: "2-digit",
+                        month: "2-digit",
+                        year: "2-digit",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })
+                    : "";
+                  const brand =
+                    getBuilderCampaignBrandName(item.content) ||
+                    item.name ||
+                    "Campanha sem nome";
 
-            {/* ÁREA DE VISUALIZAÇÃO COM ABAS */}
-            <div className="flex-1 flex flex-col min-w-0 bg-surface-0 overflow-y-auto p-6 relative">
-              {selectedState && campaignAssets && campaignAssets.length > 0 ? (
-                <div className="space-y-6 pb-20 animate-in fade-in slide-in-from-bottom-4 duration-300">
-                  <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border-subtle pb-4">
-                    <div>
-                      <h4 className="font-display font-semibold text-lg text-fg-primary">
-                        {selectedState.brandName || selectedItem.name || "Campanha Salva"}
-                      </h4>
-                      <p className="text-xs text-fg-muted mt-0.5">
-                        Alterne entre as abas para ver cada peça ou recarregue no Canvas para editar.
-                      </p>
-                    </div>
-                    <Button
-                      size="sm"
-                      onClick={() => handleApplyToCanvas(selectedState)}
-                      className="bg-brand text-brand-fg hover:brightness-110 shadow-[var(--shadow-brand)] text-xs font-semibold transition-all duration-200 active:scale-95"
+                  return (
+                    <div
+                      key={item.id}
+                      onClick={() => setSelectedIndex(idx)}
+                      // UX: Efeito tátil de clique (active:scale-[0.98])
+                      className={cn(
+                        "group relative flex min-w-[220px] cursor-pointer flex-col gap-1.5 rounded-xl border p-3 transition-all duration-200 active:scale-[0.98] md:min-w-0",
+                        isSelected
+                          ? "bg-surface-3 border-brand shadow-md"
+                          : "bg-surface-2/80 border-border-subtle hover:border-border-strong hover:bg-surface-3/50",
+                      )}
                     >
-                      Carregar no Canvas <ArrowRight className="ml-1.5 size-4" />
-                    </Button>
-                  </div>
+                      <div className="flex justify-between items-start">
+                        <span className="font-semibold text-xs text-fg-primary truncate max-w-[170px]">
+                          {brand}
+                        </span>
+                        <button
+                          onClick={(e) => requestDelete(item.id, brand, e)}
+                          className="rounded-md p-1 text-fg-muted opacity-100 transition-colors hover:bg-rose-500/10 hover:text-rose-400 md:opacity-0 md:group-hover:opacity-100 md:focus:opacity-100"
+                          title="Excluir da biblioteca"
+                          aria-label={`Excluir ${brand}`}
+                        >
+                          <Trash2 className="size-3.5" />
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-1.5 text-[10px] text-fg-tertiary">
+                        <Calendar className="size-3" />
+                        <span>{dateStr}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
 
-                  {/* PREVIEW SEPARADO POR ABAS */}
-                  <CampaignTabs
-                    assets={campaignAssets}
-                    onAssetChange={handleAssetPatch}
-                    activeTab={activeTab}
-                    onTabChange={setActiveTab}
-                  />
-                </div>
-              ) : (
-                <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-fg-muted">
-                  <p className="text-sm">Selecione uma campanha à esquerda para visualizar.</p>
-                </div>
-              )}
+              {/* ÁREA DE VISUALIZAÇÃO COM ABAS */}
+              <div className="relative flex min-w-0 flex-1 flex-col overflow-y-auto bg-surface-0 p-4 sm:p-6">
+                {selectedState &&
+                campaignAssets &&
+                campaignAssets.length > 0 ? (
+                  <div className="space-y-6 pb-20 animate-in fade-in slide-in-from-bottom-4 duration-300">
+                    <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border-subtle pb-4">
+                      <div>
+                        <h4 className="font-display font-semibold text-lg text-fg-primary">
+                          {getBuilderCampaignBrandName(selectedState) ||
+                            selectedItem.name ||
+                            "Campanha Salva"}
+                        </h4>
+                        <p className="text-xs text-fg-muted mt-0.5">
+                          Alterne entre as abas para ver cada peça ou recarregue
+                          no Canvas para editar.
+                        </p>
+                      </div>
+                      <Button
+                        size="sm"
+                        onClick={() => handleApplyToCanvas(selectedState)}
+                        className="w-full rounded-xl bg-brand text-xs font-semibold text-brand-fg shadow-[var(--shadow-brand)] transition-all duration-200 hover:brightness-110 active:scale-[0.98] sm:w-auto"
+                      >
+                        Carregar no Canvas{" "}
+                        <ArrowRight className="ml-1.5 size-4" />
+                      </Button>
+                    </div>
+
+                    {/* PREVIEW SEPARADO POR ABAS */}
+                    <CampaignTabs
+                      assets={campaignAssets}
+                      onAssetChange={handleAssetPatch}
+                      activeTab={activeTab}
+                      onTabChange={setActiveTab}
+                    />
+                  </div>
+                ) : (
+                  <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-fg-muted">
+                    <p className="text-sm">
+                      Selecione uma campanha à esquerda para visualizar.
+                    </p>
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-        )}
-      </DialogContent>
-    </Dialog>
+          )}
+        </DialogContent>
+      </Dialog>
+      <AlertDialog
+        open={Boolean(pendingDelete)}
+        onOpenChange={(open) => {
+          if (!open && !deleting) setPendingDelete(null);
+        }}
+      >
+        <AlertDialogContent className="w-[calc(100vw-24px)] max-w-[430px] rounded-[22px] border-border-strong bg-surface-1 text-fg-primary shadow-[var(--shadow-elevated)]">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir campanha?</AlertDialogTitle>
+            <AlertDialogDescription className="leading-6 text-fg-tertiary">
+              “{pendingDelete?.name}” será removida permanentemente da
+              biblioteca. Esta ação não pode ser desfeita.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="mt-3 gap-2">
+            <AlertDialogCancel
+              disabled={deleting}
+              className="rounded-xl border-border-strong bg-surface-2 text-fg-secondary hover:bg-surface-3 hover:text-fg-primary"
+            >
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={deleting}
+              onClick={(event) => {
+                event.preventDefault();
+                void confirmDelete();
+              }}
+              className="rounded-xl bg-rose-600 text-white hover:bg-rose-500"
+            >
+              {deleting && <Loader2 className="mr-2 size-4 animate-spin" />}
+              Excluir campanha
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }

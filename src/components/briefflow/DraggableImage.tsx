@@ -5,11 +5,12 @@ import { cn } from "@/lib/utils";
 
 const positionCache = new Map<string, { x: number; y: number; scale: number }>();
 
-export function DraggableImage({ src, type = "default", isExport = false }: { src: string; type?: string; isExport?: boolean }) {
+export function DraggableImage({ src, type = "default", isExport = false }: { src?: string | null; type?: string; isExport?: boolean }) {
+  const safeSrc = typeof src === "string" ? src : "";
   const cacheKey = useMemo(() => {
-    const hash = src.length > 100 ? `${src.length}-${src.substring(src.length - 50)}` : src;
+    const hash = safeSrc.length > 100 ? `${safeSrc.length}-${safeSrc.substring(safeSrc.length - 50)}` : safeSrc;
     return `${type}-v10-${hash}`;
-  }, [src, type]);
+  }, [safeSrc, type]);
 
   const cached = useMemo(() => positionCache.get(cacheKey) || { x: 0, y: 0, scale: 1 }, [cacheKey]);
   const [pos, setPos] = useState({ x: cached.x, y: cached.y });
@@ -23,20 +24,20 @@ export function DraggableImage({ src, type = "default", isExport = false }: { sr
   const containerRef = useRef<HTMLDivElement>(null);
 
   const isExternal =
-    !!src &&
-    src.startsWith("http") &&
-    !src.includes("wsrv.nl") &&
-    !src.includes("picsum.photos");
+    !!safeSrc &&
+    safeSrc.startsWith("http") &&
+    !safeSrc.includes("wsrv.nl") &&
+    !safeSrc.includes("picsum.photos");
 
   const proxy1 = isExternal
-    ? `https://wsrv.nl/?url=${encodeURIComponent(src)}&output=webp&w=1200&q=95`
-    : src;
+    ? `https://wsrv.nl/?url=${encodeURIComponent(safeSrc)}&output=webp&w=1200&q=95`
+    : safeSrc;
   const proxy2 = isExternal
-    ? `https://api.allorigins.win/raw?url=${encodeURIComponent(src)}`
+    ? `https://api.allorigins.win/raw?url=${encodeURIComponent(safeSrc)}`
     : "";
 
   const [imgSrc, setImgSrc] = useState<string | undefined>(() => {
-    return src.startsWith('blob:') ? undefined : proxy1;
+    return safeSrc.startsWith('blob:') ? undefined : proxy1;
   });
   
   const [proxyLevel, setProxyLevel] = useState(0);
@@ -44,8 +45,8 @@ export function DraggableImage({ src, type = "default", isExport = false }: { sr
 
   useEffect(() => {
     let isMounted = true;
-    if (src.startsWith('blob:')) {
-      fetch(src)
+    if (safeSrc.startsWith('blob:')) {
+      fetch(safeSrc)
         .then(r => r.blob())
         .then(blob => {
           const reader = new FileReader();
@@ -64,7 +65,7 @@ export function DraggableImage({ src, type = "default", isExport = false }: { sr
     setProxyLevel(0);
     setFailed(false);
     return () => { isMounted = false; };
-  }, [src, proxy1]);
+  }, [safeSrc, proxy1]);
 
   useEffect(() => {
     const currentCache = positionCache.get(cacheKey);
@@ -131,7 +132,7 @@ export function DraggableImage({ src, type = "default", isExport = false }: { sr
       window.removeEventListener("mousemove", handleMove);
       window.removeEventListener("touchmove", handleMove);
       window.removeEventListener("mouseup", handleUp);
-      window.removeEventListener("touchmove", handleUp);
+      window.removeEventListener("touchend", handleUp);
       document.removeEventListener("mousedown", handleClickOutside);
       document.removeEventListener("touchstart", handleClickOutside);
     };
@@ -174,7 +175,7 @@ export function DraggableImage({ src, type = "default", isExport = false }: { sr
       setImgSrc(proxy2);
     } else if (isExternal && proxyLevel === 1) {
       setProxyLevel(2);
-      setImgSrc(src);
+      setImgSrc(safeSrc);
     } else {
       setFailed(true);
     }
@@ -235,7 +236,7 @@ export function DraggableImage({ src, type = "default", isExport = false }: { sr
           className="pointer-events-none w-full h-auto select-none rounded-xl bg-transparent object-contain"
           draggable={false}
           onError={handleImgError}
-          style={{ imageRendering: "high-quality" }}
+          style={{ imageRendering: "auto" }}
         />
       )}
       

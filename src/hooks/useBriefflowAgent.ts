@@ -1,5 +1,5 @@
 // src/hooks/useBriefflowAgent.ts
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { useBriefflowStore, uid } from "@/store/briefflow";
 import { sendToOllama, type ChatTurn } from "@/lib/ollama";
@@ -20,6 +20,7 @@ import type {
   BuilderState,
 } from "@/types/builder";
 import { analyzeImageWithVisionFn } from "@/lib/vision-api";
+import { mergeDetectedBriefContext } from "@/lib/discoveryContext";
 
 type CampaignChannel = "banner" | "email" | "social";
 
@@ -62,6 +63,21 @@ export function useBriefflowAgent() {
   const builderRef = useRef(builder);
   builderRef.current = builder;
 
+  // Ao abrir uma campanha da biblioteca o hook continua montado, mas seus
+  // refs começam vazios. Espelhar o plano salvo evita que um retry use
+  // "Sua Marca" ou herde dados do briefing anterior após um reset.
+  useEffect(() => {
+    if (builder.type === "none") {
+      discoveryPlanRef.current = undefined;
+      scrapedProductsRef.current = [];
+      return;
+    }
+
+    if (builder.discoveryPlan) {
+      discoveryPlanRef.current = builder.discoveryPlan;
+    }
+  }, [builder.discoveryPlan, builder.type]);
+
   const maybeScrapeUrls = useCallback(
     async (text: string): Promise<SiteBrandData | null> => {
       const urls = extractUrlsFromText(text);
@@ -89,22 +105,29 @@ export function useBriefflowAgent() {
   );
 
   const buildErrorAsset = useCallback(
-    (channel: CampaignChannel, productImages: string[]): CampaignAsset => {
+    (
+      channel: CampaignChannel,
+      productImages: string[],
+      brandName: string,
+      errorMessage: string,
+    ): CampaignAsset => {
       const errorContent: BuilderState = {
         type: channel,
+        brandName,
+        generationError: errorMessage,
         productImages,
       } as BuilderState;
 
       if (channel === "banner") {
         errorContent.title = "Não consegui gerar este banner";
-        errorContent.subtitle = "A resposta da IA foi interrompida. Peça para gerar novamente.";
+        errorContent.subtitle = errorMessage;
         errorContent.cta = "Tentar novamente";
       } else if (channel === "email") {
         errorContent.title = "Não consegui gerar este e-mail";
-        errorContent.body = "A requisição excedeu o tempo limite. Tente novamente.";
+        errorContent.body = errorMessage;
         errorContent.cta = "Tentar novamente";
       } else {
-        errorContent.caption = "Não consegui gerar este post. Peça para regenerar.";
+        errorContent.caption = `Não consegui gerar este post. ${errorMessage}`;
         errorContent.hashtags = [];
       }
 
@@ -120,22 +143,39 @@ export function useBriefflowAgent() {
 
   const generateCampaignSafely = useCallback(
     async (baseHistory: ChatTurn[], only?: CampaignChannel, targetKeys: string[] = ["all"], provider: "ollama" | "omniroute" = "omniroute") => {
-      const plan =
-        discoveryPlanRef.current ??
-        (builderRef.current.type === "discovery_plan"
-          ? builderRef.current.discoveryPlan
-          : undefined);
+      const plan = discoveryPlanRef.current ?? builderRef.current.discoveryPlan;
 
       const channels: CampaignChannel[] = only ? [only] : ALL_CHANNELS;
 
       setLoading(true);
 
+      const savedCampaignImages = builderRef.current.type === "campaign"
+        ? (builderRef.current.campaignAssets ?? []).flatMap((asset) => [
+            ...(asset.content.productImages ?? []),
+            asset.content.productImageUrl,
+          ])
+        : [];
       const allImages = [
         ...(uploadedImage ? [uploadedImage] : []),
         ...scrapedProductsRef.current.map((p) => p.imageUrl).filter(Boolean),
-      ] as string[];
+        ...savedCampaignImages,
+      ].filter(
+        (image): image is string =>
+          typeof image === "string" && image.trim().length > 0,
+      );
 
       const uniqueImages = Array.from(new Set(allImages));
+
+      const campaignBrief = toMarketingBrief({
+        brandContext: brandContextRef.current,
+        plan,
+        product: {
+          productUrl: scrapedProductsRef.current[0]?.productUrl ?? null,
+          productImageUrl: uniqueImages[0] ?? null,
+          productTitle: scrapedProductsRef.current[0]?.name ?? null,
+        },
+        availableImageUrls: uniqueImages,
+      });
 
       if (!only) {
         patchCampaignAssets([]);
@@ -151,6 +191,7 @@ export function useBriefflowAgent() {
       });
 
       let hasErrors = false;
+      let campaignPlatformContext = "";
 
       for (const [index, channel] of channels.entries()) {
         setGeneratingLabel(
@@ -168,17 +209,28 @@ export function useBriefflowAgent() {
           if (!isAll) {
             const normalizedStr = safeTargetKeys.join(" ").toLowerCase();
             const schemaMap: Record<string, string[]> = {
-              cta: ["cta", "botão", "botao", "button", "chamada", "action", "clique", "link"],
-              title: ["title", "headline", "título", "titulo", "cabeçalho", "header", "principal"],
+              cta: ["cta", "ctatext", "botão", "botao", "button", "chamada", "action", "clique", "link"],
+              title: ["title", "headline", "subject", "assunto", "título", "titulo", "cabeçalho", "header", "principal"],
               subtitle: ["subtitle", "subheadline", "subtítulo", "subtitulo", "descrição", "apoio", "final"],
               body: ["body", "corpo", "parágrafo", "paragrafo", "conteúdo", "mensagem", "texto"],
               caption: ["caption", "legenda", "post", "texto do post"],
+              hook: ["hook", "gancho", "abertura", "primeira linha"],
               hashtags: ["hashtags", "tags", "marcadores", "palavras", "hashtag"],
               imagePrompt: ["imagePrompt", "imagem", "foto", "arte", "fundo", "background", "ilustração", "visual", "prompt"],
               themeColor: ["themeColor", "secondaryColor", "color", "cores", "cor", "paleta", "tom", "visual"],
+              preheader: ["preheader", "pré-header", "pre-header", "texto de prévia", "texto de previa"],
+              keyBenefits: ["keyBenefits", "benefícios", "beneficios", "vantagens", "diferenciais"],
+              objectionsHandled: ["objectionsHandled", "objeções", "objecoes", "dúvidas", "duvidas"],
               heroBadge: ["heroBadge", "badge", "selo", "tag"],
               badgePrimary: ["badgePrimary", "badge", "selo", "destaque", "desconto", "oferta"],
               badgeSecondary: ["badgeSecondary", "badge secundário", "selo secundário"],
+              benefitTitle: ["benefitTitle", "título dos benefícios", "titulo dos beneficios"],
+              secondaryCta: ["secondaryCta", "cta secundário", "cta secundario", "segundo botão", "segundo botao"],
+              urgencyText: ["urgencyText", "urgência", "urgencia", "prazo", "escassez"],
+              testimonials: ["testimonials", "depoimentos", "prova social", "avaliações", "avaliacoes"],
+              footerInfo: ["footerInfo", "rodapé", "rodape", "regras", "termos", "observação", "observacao"],
+              layoutStyle: ["layoutStyle", "layout", "composição", "composicao", "estrutura"],
+              backgroundShape: ["backgroundShape", "forma", "shape", "grafismo"],
             };
 
             for (const [canonicalKey, synonyms] of Object.entries(schemaMap)) {
@@ -187,17 +239,6 @@ export function useBriefflowAgent() {
               }
             }
           }
-
-          const brief = toMarketingBrief({
-            brandContext: brandContextRef.current,
-            plan,
-            product: {
-              productUrl: scrapedProductsRef.current[0]?.productUrl ?? null,
-              productImageUrl: uniqueImages[0] ?? null,
-              productTitle: scrapedProductsRef.current[0]?.name ?? null,
-            },
-            availableImageUrls: uniqueImages,
-          });
 
           const existingAsset = builderRef.current.type === "campaign"
             ? builderRef.current.campaignAssets?.find((a) => a.type === channel)
@@ -217,13 +258,29 @@ export function useBriefflowAgent() {
                 const safeContext: any = {
                   title: c.title,
                   subtitle: c.subtitle,
+                  preheader: c.preheader,
                   cta: c.cta,
+                  ctaVariant: c.ctaVariant,
                   body: c.body,
+                  hook: c.hook,
                   caption: c.caption,
                   hashtags: c.hashtags,
+                  keyBenefits: c.keyBenefits,
+                  objectionsHandled: c.objectionsHandled,
+                  heroBadge: c.heroBadge,
+                  badgePrimary: c.badgePrimary,
+                  badgeSecondary: c.badgeSecondary,
+                  benefitTitle: c.benefitTitle,
+                  secondaryCta: c.secondaryCta,
+                  urgencyText: c.urgencyText,
+                  testimonials: c.testimonials,
+                  footerInfo: c.footerInfo,
                   imagePrompt: c.imagePrompt,
+                  emailHeroImagePrompt: c.emailHeroImagePrompt,
                   themeColor: c.themeColor,
                   secondaryColor: c.secondaryColor,
+                  layoutStyle: c.layoutStyle,
+                  backgroundShape: c.backgroundShape,
                 };
                 currentContentContext = `\n\n=== CONTEÚDO ATUAL DA PEÇA ===\nATENÇÃO: Preserve o texto abaixo exatamente como está para todos os campos que o usuário NÃO pediu para alterar:\n${JSON.stringify(safeContext, null, 2)}`;
               }
@@ -238,30 +295,104 @@ export function useBriefflowAgent() {
             .map((m) => m.content)
             .join("\n\n---\n\n");
 
-          const rawBriefing = recentUserBriefing + currentContentContext;
+          const rawBriefing = recentUserBriefing + campaignPlatformContext + currentContentContext;
 
           const { content } = await generateMaterial({
-            brief,
+            brief: campaignBrief,
             material: channel,
             rawBriefing: rawBriefing,
             images: uniqueImages,
             provider,
           });
 
+          if (!only && channel === "banner") {
+            const semanticSpine = [
+              content.title,
+              content.subtitle,
+              content.body,
+              ...(content.keyBenefits ?? []),
+              content.cta,
+              content.badgePrimary,
+              content.badgeSecondary,
+            ]
+              .filter((value): value is string => typeof value === "string" && Boolean(value.trim()))
+              .join(" | ");
+
+            if (semanticSpine) {
+              campaignPlatformContext = `
+
+=== PLATAFORMA CRIATIVA DA CAMPANHA ===
+O banner aprovado definiu esta espinha semântica: ${semanticSpine}
+Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo território verbal. Não copie a headline; desenvolva a ideia conforme o papel do canal e não introduza um novo posicionamento.`;
+            }
+          }
+
           updateCampaignAsset(channel, (prevAsset) => {
-            const prevContent = prevAsset?.content || {};
+            const { generationError: _discardedError, ...prevContent } =
+              prevAsset?.content || {};
             let mergedContent: any = { ...prevContent };
 
             if (isAll || !prevAsset) {
               mergedContent = { ...prevContent, ...content };
             } else {
-              if (allowedKeys.has("cta") && content.cta !== undefined) mergedContent.cta = content.cta;
-              if (allowedKeys.has("title") && content.title !== undefined) mergedContent.title = content.title;
-              if (allowedKeys.has("subtitle") && content.subtitle !== undefined) mergedContent.subtitle = content.subtitle;
-              if (allowedKeys.has("imagePrompt") && content.imagePrompt !== undefined) mergedContent.imagePrompt = content.imagePrompt;
-              if (allowedKeys.has("themeColor") && content.themeColor !== undefined) mergedContent.themeColor = content.themeColor;
-              if (allowedKeys.has("badgePrimary") && content.badgePrimary !== undefined) mergedContent.badgePrimary = content.badgePrimary;
-              if (allowedKeys.has("badgeSecondary") && content.badgeSecondary !== undefined) mergedContent.badgeSecondary = content.badgeSecondary;
+              const assign = (key: keyof BuilderState) => {
+                if (content[key] !== undefined) mergedContent[key] = content[key];
+              };
+
+              if (allowedKeys.has("title")) assign("title");
+              if (allowedKeys.has("subtitle")) assign("subtitle");
+              if (allowedKeys.has("preheader")) assign("preheader");
+              if (allowedKeys.has("body")) assign("body");
+              if (allowedKeys.has("hook")) assign("hook");
+              if (allowedKeys.has("hashtags")) assign("hashtags");
+              if (allowedKeys.has("keyBenefits")) assign("keyBenefits");
+              if (allowedKeys.has("objectionsHandled")) assign("objectionsHandled");
+              if (allowedKeys.has("heroBadge")) assign("heroBadge");
+              if (allowedKeys.has("badgePrimary")) assign("badgePrimary");
+              if (allowedKeys.has("badgeSecondary")) assign("badgeSecondary");
+              if (allowedKeys.has("benefitTitle")) assign("benefitTitle");
+              if (allowedKeys.has("secondaryCta")) assign("secondaryCta");
+              if (allowedKeys.has("urgencyText")) assign("urgencyText");
+              if (allowedKeys.has("testimonials")) assign("testimonials");
+              if (allowedKeys.has("footerInfo")) assign("footerInfo");
+              if (allowedKeys.has("layoutStyle")) assign("layoutStyle");
+              if (allowedKeys.has("backgroundShape")) assign("backgroundShape");
+
+              if (allowedKeys.has("cta")) {
+                assign("cta");
+                assign("ctaVariant");
+              }
+
+              if (allowedKeys.has("caption")) {
+                assign("caption");
+                assign("hook");
+                assign("body");
+                assign("cta");
+              }
+
+              if (allowedKeys.has("imagePrompt")) {
+                assign("imagePrompt");
+                assign("emailHeroImagePrompt");
+              }
+
+              if (allowedKeys.has("themeColor")) {
+                assign("themeColor");
+                assign("secondaryColor");
+              }
+
+              if (
+                channel === "social" &&
+                !allowedKeys.has("caption") &&
+                ["hook", "body", "cta"].some((key) => allowedKeys.has(key))
+              ) {
+                mergedContent.caption = [
+                  mergedContent.hook,
+                  mergedContent.body,
+                  mergedContent.cta,
+                ]
+                  .filter((value) => typeof value === "string" && value.trim())
+                  .join("\n\n");
+              }
             }
 
             return {
@@ -277,10 +408,16 @@ export function useBriefflowAgent() {
             };
           });
         } catch (err) {
-          console.error(`Erro ao gerar ${channel}:`, describeAiError(err), err);
+          const errorMessage = describeAiError(err);
+          console.error(`Erro ao gerar ${channel}:`, errorMessage, err);
           hasErrors = true;
           updateCampaignAsset(channel, () =>
-            buildErrorAsset(channel, uniqueImages),
+            buildErrorAsset(
+              channel,
+              uniqueImages,
+              campaignBrief.brandName,
+              errorMessage,
+            ),
           );
         }
       }
@@ -474,7 +611,7 @@ export function useBriefflowAgent() {
         const response = await sendToOllama(
           history,
           brandContextRef.current,
-          discoveryPlanRef.current,
+          discoveryPlanRef.current ?? builderRef.current.discoveryPlan,
           {
             intent: "discovery",
             provider,
@@ -492,16 +629,6 @@ export function useBriefflowAgent() {
           updateMessage(assistantId, { content: response.chat });
         }
 
-        const extractedSku = response.detectedContext?.productSku || response.builder.discoveryPlan?.productSku;
-        if (extractedSku && extractedSku !== discoveryPlanRef.current?.productSku) {
-          discoveryPlanRef.current = {
-            ...(discoveryPlanRef.current || { detectedContext: "", missingInfo: "", proposedStrategy: "" }),
-            ...response.detectedContext,
-            productSku: extractedSku,
-          } as DiscoveryPlan;
-          await tryScrapeProduct(extractedSku, isHiddenAction);
-        }
-
         const currentPhase = builderRef.current.type;
         const inCampaignPhase = currentPhase === "campaign";
 
@@ -510,10 +637,23 @@ export function useBriefflowAgent() {
           response.builder.discoveryPlan
         ) {
           const discoveryPlan = response.builder.discoveryPlan;
-          discoveryPlanRef.current = { ...discoveryPlanRef.current, ...discoveryPlan };
+          discoveryPlanRef.current = mergeDetectedBriefContext(
+            { ...discoveryPlanRef.current, ...builderRef.current.discoveryPlan, ...discoveryPlan },
+            response.detectedContext,
+          );
           if (!inCampaignPhase) {
             setBuilder({ type: "discovery_plan", discoveryPlan: discoveryPlanRef.current });
           }
+        } else {
+          discoveryPlanRef.current = mergeDetectedBriefContext(
+            discoveryPlanRef.current ?? builderRef.current.discoveryPlan,
+            response.detectedContext,
+          );
+        }
+
+        const extractedSku = discoveryPlanRef.current?.productSku;
+        if (extractedSku) {
+          await tryScrapeProduct(extractedSku, isHiddenAction);
         }
 
         const action = response.action || "discovery_continue";
@@ -556,5 +696,35 @@ export function useBriefflowAgent() {
     ],
   );
 
-  return { handleSend };
+  const currentChatHistory = useCallback(
+    (): ChatTurn[] =>
+      useBriefflowStore.getState().messages.map((message) => ({
+        role: message.role,
+        content: message.content,
+      })),
+    [],
+  );
+
+  const generateCampaign = useCallback(async () => {
+    await generateCampaignSafely(
+      currentChatHistory(),
+      undefined,
+      ["all"],
+      "omniroute",
+    );
+  }, [currentChatHistory, generateCampaignSafely]);
+
+  const regenerateChannel = useCallback(
+    async (channel: CampaignChannel) => {
+      await generateCampaignSafely(
+        currentChatHistory(),
+        channel,
+        ["all"],
+        "omniroute",
+      );
+    },
+    [currentChatHistory, generateCampaignSafely],
+  );
+
+  return { handleSend, generateCampaign, regenerateChannel };
 }

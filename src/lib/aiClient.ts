@@ -1,6 +1,8 @@
 // src/lib/aiClient.ts
 import type { ZodType } from "zod";
 import { supabase } from "@/lib/supabase";
+import { getAiRoutingEnvironment, resolveCloudAiRoute, type AiGenerationStage } from "@/lib/aiRouting";
+import { parseStructuredJson, supportsReasoningControls } from "@/lib/structuredOutput";
 
 export type AiProviderName = "omniroute" | "ollama" | "groq" | "gemini";
 
@@ -31,6 +33,7 @@ export interface GenerateCompletionOptions<T> {
   requestId?: string;
   signal?: AbortSignal;
   provider?: AiProviderName;
+  stage?: AiGenerationStage;
 }
 
 export class AiClientError extends Error {
@@ -57,7 +60,8 @@ export async function generateCompletion<T = string>(
     timeoutMs = 500_000,
     requestId = (typeof crypto !== "undefined" && "randomUUID" in crypto) ? crypto.randomUUID() : `req_${Date.now()}`,
     signal,
-    provider = "omniroute"
+    provider = "omniroute",
+    stage = "content",
   } = opts;
 
   // 1. VERIFICA E DEDUZ CRÉDITOS DIRETAMENTE NO BANCO DE DADOS
@@ -85,7 +89,9 @@ export async function generateCompletion<T = string>(
   let response: Response | undefined;
   let usedProviderName = provider as string;
   let usedModel = "unknown";
+  let usedFallback = false;
   let lastError: any;
+  let acceptedCloudResponse = false;
 
   // 2. ROTEAMENTO PARA OLLAMA LOCAL
   if (provider === "ollama") {
@@ -116,42 +122,30 @@ export async function generateCompletion<T = string>(
   
   // 3. ROTEAMENTO NUVEM (FALLBACK EM CASCATA)
   else {
-    const fallbackProviders = [
-      {
-        name: "groq",
-        url: "https://api.groq.com/openai/v1/chat/completions",
-        key: import.meta.env.VITE_GROQ_API_KEY,
-        // Atualizado para o modelo ativo recomendado pela Groq!
-        model: "openai/gpt-oss-20b" 
-      },
-      {
-        name: "gemini",
-        url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-        key: import.meta.env.VITE_GEMINI_API_KEY,
-        model: "gemini-1.5-flash"
-      }
-    ];
+    const fallbackProviders = resolveCloudAiRoute(stage, getAiRoutingEnvironment(import.meta.env));
 
-    let hasConfiguredProvider = false;
-
-    for (const p of fallbackProviders) {
-      if (!p.key) continue; 
-      hasConfiguredProvider = true;
+    for (const [index, p] of fallbackProviders.entries()) {
 
       try {
         const payload: any = {
           model: p.model,
           messages,
-          temperature: temperature ?? 0.7,
           // Reduzimos o limite de resposta para 2000 para a Groq não dar erro 400
           max_tokens: p.name === "groq" ? 2000 : (maxTokens ?? 4096),
           stream: false,
         };
 
-        // Deixamos a exigência estrita de JSON apenas para o Gemini
-        // A Groq se comporta melhor apenas com as instruções do prompt
-        if (p.name === "gemini" && schema) {
+        // Gemini 3.6 não aceita os antigos parâmetros de amostragem.
+        if (p.name === "groq") {
+          payload.temperature = temperature ?? 0.7;
+        }
+
+        if (schema) {
           payload.response_format = { type: "json_object" };
+        }
+
+        if (p.name === "groq" && supportsReasoningControls(p.model)) {
+          payload.reasoning_format = "hidden";
         }
 
         response = await fetch(p.url, {
@@ -165,8 +159,31 @@ export async function generateCompletion<T = string>(
         });
 
         if (response.ok) {
+          if (schema) {
+            const candidateJson = await response.clone().json();
+            const candidateRaw = candidateJson.choices?.[0]?.message?.content;
+            const candidateParsed = typeof candidateRaw === "string"
+              ? parseStructuredJson(candidateRaw)
+              : null;
+            const candidateValidation = candidateParsed === null
+              ? null
+              : schema.safeParse(candidateParsed);
+
+            if (!candidateValidation?.success) {
+              lastError = new Error(
+                candidateParsed === null
+                  ? `${p.name}/${p.model} retornou JSON inválido.`
+                  : `${p.name}/${p.model} não cumpriu o schema solicitado.`,
+              );
+              console.warn(`[Fallback] Saída inválida em ${p.name}/${p.model}. Tentando o próximo...`);
+              continue;
+            }
+          }
+
           usedProviderName = p.name;
           usedModel = p.model;
+          usedFallback = index > 0;
+          acceptedCloudResponse = true;
           break; // Sucesso! Sai do loop.
         }
 
@@ -184,12 +201,12 @@ export async function generateCompletion<T = string>(
       }
     }
 
-    if (!hasConfiguredProvider) {
+    if (!fallbackProviders.length) {
       clearTimeout(timeout);
       throw new AiClientError("Nenhuma API Key configurada no .env (Groq ou Gemini).", "NO_PROVIDER");
     }
 
-    if (!response || !response.ok) {
+    if (!acceptedCloudResponse || !response || !response.ok) {
       clearTimeout(timeout);
       throw new AiClientError(`Todos os provedores de nuvem falharam.`, "PROVIDER_FAILED", lastError);
     }
@@ -208,7 +225,7 @@ export async function generateCompletion<T = string>(
     requestId, 
     provider: usedProviderName, 
     model: usedModel, 
-    usedFallback: usedProviderName !== provider, 
+    usedFallback,
     latencyMs: Date.now() - startMs, 
     generatedAt: new Date().toISOString() 
   };
@@ -222,13 +239,9 @@ export async function generateCompletion<T = string>(
   }
 
   // Tratamento de segurança para extrair JSON caso o modelo escreva marcações de markdown (ex: ```json ... ```)
-  const jsonStr = raw.match(/```(?:json)?\s*([\s\S]*?)```/)?.[1]?.trim() || raw.trim();
-  
-  let parsed: unknown;
-  try {
-     parsed = JSON.parse(jsonStr);
-  } catch {
-     throw new AiClientError("O modelo não retornou um JSON válido.", "INVALID_OUTPUT");
+  const parsed = parseStructuredJson(raw);
+  if (parsed === null) {
+    throw new AiClientError("O modelo não retornou um JSON válido.", "INVALID_OUTPUT");
   }
 
   const result = schema.safeParse(parsed);

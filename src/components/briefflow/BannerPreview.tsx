@@ -1,11 +1,11 @@
 // src/components/briefflow/BannerPreview.tsx
-import { useEffect, useMemo, useState, useRef } from "react";
+import { useEffect, useLayoutEffect, useMemo, useState, useRef } from "react";
 import { Editable } from "./Editable";
 import { DraggableImage } from "./DraggableImage";
-import type { BuilderState } from "@/types/builder";
+import type { BannerFontSizes, BuilderState } from "@/types/builder";
 import { buildPollinationsUrl, buildFallbackUrl } from "@/lib/pollinations";
 import { Button } from "@/components/ui/button";
-import { Upload, ImagePlus, RefreshCw, ArrowUpRight, Trash2, Sparkles, Palette, LayoutTemplate, Type, Layers, Move } from "lucide-react";
+import { Upload, ImagePlus, RefreshCw, ArrowUpRight, Trash2, Sparkles, Palette, LayoutTemplate, Type, Layers, Move, Minus, Plus, RotateCcw } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { cleanText, isEmptyLike } from "@/lib/sanitize";
@@ -23,13 +23,65 @@ interface Props {
 
 const blockCache = new Map<string, { x: number; y: number }>();
 
-function DraggableBlock({ id, children, className, isExport }: { id: string, children: React.ReactNode, className?: string, isExport?: boolean }) {
-  const cached = useMemo(() => blockCache.get(id) || { x: 0, y: 0 }, [id]);
+type BannerFontSizeKey = keyof BannerFontSizes;
+
+interface FontSizeControlProps {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step?: number;
+  onChange: (value: number) => void;
+}
+
+function FontSizeControl({ label, value, min, max, step = 1, onChange }: FontSizeControlProps) {
+  const update = (nextValue: number) => onChange(Math.min(max, Math.max(min, nextValue)));
+
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-lg border border-border-subtle bg-surface-2 px-2 py-1.5">
+      <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-fg-secondary">{label}</span>
+      <div className="flex shrink-0 items-center gap-1">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="size-7 rounded-md"
+          disabled={value <= min}
+          aria-label={`Diminuir ${label.toLowerCase()}`}
+          title={`Diminuir ${label.toLowerCase()}`}
+          onClick={() => update(value - step)}
+        >
+          <Minus className="size-3.5" />
+        </Button>
+        <span className="w-12 text-center text-[11px] font-bold tabular-nums text-fg-primary">{value}px</span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="size-7 rounded-md"
+          disabled={value >= max}
+          aria-label={`Aumentar ${label.toLowerCase()}`}
+          title={`Aumentar ${label.toLowerCase()}`}
+          onClick={() => update(value + step)}
+        >
+          <Plus className="size-3.5" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function DraggableBlock({ id, children, className, isExport, resetPosition = false }: { id: string, children: React.ReactNode, className?: string, isExport?: boolean, resetPosition?: boolean }) {
+  const cached = useMemo(() => resetPosition ? { x: 0, y: 0 } : blockCache.get(id) || { x: 0, y: 0 }, [id, resetPosition]);
   const [pos, setPos] = useState(cached);
   const [isDragging, setIsDragging] = useState(false);
   const startMousePos = useRef({ x: 0, y: 0 });
   const startPos = useRef({ x: 0, y: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (resetPosition) setPos({ x: 0, y: 0 });
+  }, [resetPosition]);
 
   useEffect(() => {
     if (isExport) return;
@@ -40,8 +92,9 @@ function DraggableBlock({ id, children, className, isExport }: { id: string, chi
       const clientY = e instanceof MouseEvent ? e.clientY : e.touches[0].clientY;
 
       const parent = containerRef.current?.closest('#banner-export-node, #email-export-node');
-      const pWidth = parent ? parent.clientWidth : window.innerWidth;
-      const pHeight = parent ? parent.clientHeight : window.innerHeight;
+      const parentRect = parent?.getBoundingClientRect();
+      const pWidth = parentRect?.width || window.innerWidth;
+      const pHeight = parentRect?.height || window.innerHeight;
 
       const deltaX = ((clientX - startMousePos.current.x) / pWidth) * 100;
       const deltaY = ((clientY - startMousePos.current.y) / pHeight) * 100;
@@ -65,13 +118,49 @@ function DraggableBlock({ id, children, className, isExport }: { id: string, chi
       window.removeEventListener("mousemove", handleMove);
       window.removeEventListener("touchmove", handleMove);
       window.removeEventListener("mouseup", handleUp);
-      window.removeEventListener("touchmove", handleUp);
+      window.removeEventListener("touchend", handleUp);
     };
   }, [isDragging, isExport]);
 
   useEffect(() => {
-    blockCache.set(id, pos);
-  }, [pos, id]);
+    if (!isExport && !resetPosition) blockCache.set(id, pos);
+  }, [pos, id, isExport, resetPosition]);
+
+  useLayoutEffect(() => {
+    if (isDragging) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      const element = containerRef.current;
+      const parent = element?.closest<HTMLElement>('#banner-export-node, #email-export-node');
+      if (!element || !parent) return;
+
+      const elementRect = element.getBoundingClientRect();
+      const parentRect = parent.getBoundingClientRect();
+      let correctionX = 0;
+      let correctionY = 0;
+
+      if (elementRect.left < parentRect.left) {
+        correctionX = parentRect.left - elementRect.left;
+      } else if (elementRect.right > parentRect.right) {
+        correctionX = parentRect.right - elementRect.right;
+      }
+
+      if (elementRect.top < parentRect.top) {
+        correctionY = parentRect.top - elementRect.top;
+      } else if (elementRect.bottom > parentRect.bottom) {
+        correctionY = parentRect.bottom - elementRect.bottom;
+      }
+
+      if (Math.abs(correctionX) > 0.5 || Math.abs(correctionY) > 0.5) {
+        setPos((current) => ({
+          x: current.x + (correctionX / parentRect.width) * 100,
+          y: current.y + (correctionY / parentRect.height) * 100,
+        }));
+      }
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [isDragging]);
 
   const onPointerDown = (e: React.PointerEvent | React.MouseEvent | React.TouchEvent) => {
     if (isExport) return;
@@ -111,7 +200,30 @@ function DraggableBlock({ id, children, className, isExport }: { id: string, chi
 export function BannerPreview({ state: propState, onChange, exportWrapperClass, exportWrapperStyle }: Props) {
   const { builder } = useBriefflowStore();
   const isExportClone = !!exportWrapperClass;
+  const previewFrameRef = useRef<HTMLDivElement>(null);
+  const [previewWidth, setPreviewWidth] = useState(1200);
   const state = propState;
+
+  useLayoutEffect(() => {
+    if (isExportClone) return;
+    const frame = previewFrameRef.current;
+    if (!frame) return;
+
+    const updateWidth = () => setPreviewWidth(Math.max(1, frame.clientWidth));
+    const resizeObserver = new ResizeObserver(updateWidth);
+    resizeObserver.observe(frame);
+    updateWidth();
+    return () => resizeObserver.disconnect();
+  }, [isExportClone]);
+
+  const isMobileLayout =
+    exportWrapperClass?.includes("force-mobile") ||
+    (!isExportClone && previewWidth < 640);
+  const canvasWidth = isMobileLayout ? 540 : 1200;
+  const canvasHeight = isMobileLayout ? 960 : 600;
+  const previewScale = isExportClone
+    ? 1
+    : Math.min(1, previewWidth / canvasWidth);
 
   const [imageStatus, setImageStatus] = useState<"loading" | "loaded" | "error">("loading");
   const [useFallback, setUseFallback] = useState(false);
@@ -145,7 +257,9 @@ export function BannerPreview({ state: propState, onChange, exportWrapperClass, 
   const layoutStyle = state.layoutStyle || "split";
   const hasSubtitle = !isEmptyLike(subtitle);
 
-  const draggableImages = Array.from(new Set(state.productImages || []));
+  const draggableImages = Array.from(new Set(state.productImages || [])).filter(
+    (src): src is string => typeof src === "string" && src.trim().length > 0,
+  );
 
   const heroUrl = useMemo(() => {
     if (!prompt) return null;
@@ -180,7 +294,7 @@ export function BannerPreview({ state: propState, onChange, exportWrapperClass, 
     return () => { isMounted = false; };
   }, [activeBgUrl]);
 
-  const isSafeOriginBg = safeBgUrl?.startsWith("data:") || safeBgUrl?.startsWith("blob:") || safeBgUrl?.startsWith("http");
+  const isLocalBg = safeBgUrl?.startsWith("data:") || safeBgUrl?.startsWith("blob:");
 
   useEffect(() => {
     if (!heroUrl) return;
@@ -281,6 +395,55 @@ export function BannerPreview({ state: propState, onChange, exportWrapperClass, 
   const isCentered = layoutStyle === "centered" || layoutStyle === "minimalist";
   const isComplexShape = isFrame || isBlob || isGeometric || isArch || isPill || isOffset;
 
+  const defaultFontSizes: Required<BannerFontSizes> = {
+    title: isCentered ? 56 : 64,
+    subtitle: 28,
+    body: 20,
+    benefits: 14,
+    footer: isCentered ? 16 : 14,
+    badgePrimary: 48,
+    badgeSecondary: 18,
+  };
+  const fontSizes: Required<BannerFontSizes> = {
+    ...defaultFontSizes,
+    ...state.bannerFontSizes,
+  };
+  const mobileDefaultFontSizes: Required<BannerFontSizes> = {
+    title: 40,
+    subtitle: 22,
+    body: 16,
+    benefits: 12,
+    footer: isCentered ? 12 : 14,
+    badgePrimary: 36,
+    badgeSecondary: 16,
+  };
+  const mobileFontSize = (key: BannerFontSizeKey) =>
+    Math.max(8, Math.round(fontSizes[key] * (mobileDefaultFontSizes[key] / defaultFontSizes[key])));
+  const bannerFontVariables = {
+    "--banner-title-size": `${fontSizes.title}px`,
+    "--banner-subtitle-size": `${fontSizes.subtitle}px`,
+    "--banner-body-size": `${fontSizes.body}px`,
+    "--banner-benefits-size": `${fontSizes.benefits}px`,
+    "--banner-footer-size": `${fontSizes.footer}px`,
+    "--banner-badge-primary-size": `${fontSizes.badgePrimary}px`,
+    "--banner-badge-secondary-size": `${fontSizes.badgeSecondary}px`,
+    "--banner-title-mobile-size": `${mobileFontSize("title")}px`,
+    "--banner-subtitle-mobile-size": `${mobileFontSize("subtitle")}px`,
+    "--banner-body-mobile-size": `${mobileFontSize("body")}px`,
+    "--banner-benefits-mobile-size": `${mobileFontSize("benefits")}px`,
+    "--banner-footer-mobile-size": `${mobileFontSize("footer")}px`,
+    "--banner-badge-primary-mobile-size": `${mobileFontSize("badgePrimary")}px`,
+    "--banner-badge-secondary-mobile-size": `${mobileFontSize("badgeSecondary")}px`,
+  } as React.CSSProperties;
+  const updateFontSize = (key: BannerFontSizeKey, value: number) => {
+    onChange({
+      bannerFontSizes: {
+        ...state.bannerFontSizes,
+        [key]: value,
+      },
+    });
+  };
+
   let shapeClass = "";
   if (isCurve) {
     shapeClass = isReverse
@@ -309,11 +472,34 @@ export function BannerPreview({ state: propState, onChange, exportWrapperClass, 
   return (
     <div className="mx-auto flex w-full flex-col space-y-4" data-testid="banner-preview">
       <div
+        ref={previewFrameRef}
+        className="relative flex w-full justify-center overflow-hidden"
+        style={{ height: canvasHeight * previewScale }}
+      >
+        <div
+          className="relative shrink-0"
+          style={{
+            height: canvasHeight * previewScale,
+            width: canvasWidth * previewScale,
+          }}
+        >
+          <div
+            className="absolute left-0 top-0 origin-top-left"
+            style={{
+              height: canvasHeight,
+              transform: `scale(${previewScale})`,
+              transformOrigin: "top left",
+              width: canvasWidth,
+            }}
+          >
+      <div
         id="banner-export-node"
+        data-export-node="banner"
         className={cn(
           "relative overflow-hidden shadow-[0_24px_50px_-12px_rgba(0,0,0,0.6)] flex transition-colors duration-500 bg-black",
           exportWrapperClass,
-          !isExportClone && "w-full rounded-[24px] aspect-[2/1] max-md:aspect-[4/5] max-md:min-h-[500px] min-h-[380px]",
+          isMobileLayout && "force-mobile",
+          !isExportClone && "rounded-[24px]",
           isCentered ? "flex-col" : cn("[.force-mobile_&]:!flex-col-reverse", !isExportClone && "max-md:!flex-col-reverse"),
           fontClass
         )}
@@ -322,8 +508,10 @@ export function BannerPreview({ state: propState, onChange, exportWrapperClass, 
           borderColor: `${textColor}1A`,
           borderWidth: '1px',
           fontFamily: baseFontFamily,
-          width: isExportClone ? '1200px' : '100%',
-          ...exportWrapperStyle 
+          ...exportWrapperStyle,
+          ...bannerFontVariables,
+          height: canvasHeight,
+          width: canvasWidth,
         }}
       >
 
@@ -331,7 +519,7 @@ export function BannerPreview({ state: propState, onChange, exportWrapperClass, 
           {safeBgUrl && (
             <img
               src={safeBgUrl}
-              crossOrigin={isSafeOriginBg ? undefined : "anonymous"}
+              crossOrigin={isLocalBg ? undefined : "anonymous"}
               className={cn(
                 "w-full h-full object-cover transition-opacity duration-1000",
                 (!state.productImageUrl && imageStatus === "loading") ? "opacity-0 scale-105" : "opacity-90 scale-100"
@@ -343,19 +531,19 @@ export function BannerPreview({ state: propState, onChange, exportWrapperClass, 
           <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent pointer-events-none" />
         </div>
 
-        <div className="absolute inset-0 z-30 pointer-events-none [&>*]:pointer-events-auto" style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 30 }}>
+        <div className="banner-product-layer absolute inset-0 z-30 pointer-events-none [&>*]:pointer-events-auto" style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 30 }}>
           {draggableImages.length > 0 && draggableImages.map((src, i) => (
             <DraggableImage key={`banner-img-${i}`} src={src} type="banner" isExport={isExportClone} />
           ))}
         </div>
 
         <div className={cn(
-          "relative z-10 w-full h-full flex flex-1 overflow-hidden z-10 flex-row",
+          "banner-layout relative z-10 w-full h-full flex flex-1 overflow-hidden z-10 flex-row",
           "[.force-mobile_&]:!flex-col-reverse [.force-mobile_&]:!overflow-visible",
           !isExportClone && "max-md:!flex-col-reverse max-md:!overflow-visible"
         )}>
           {isCentered ? (
-            <div className={cn("relative w-full h-full flex flex-col items-center justify-center p-12 text-center [.force-mobile_&]:!p-8 z-10 pointer-events-none", !isExportClone && "max-md:!p-8")}>
+            <div className={cn("banner-centered-pane relative w-full h-full flex flex-col items-center justify-center p-12 text-center [.force-mobile_&]:!p-8 z-10 pointer-events-none", !isExportClone && "max-md:!p-8")}>
 
               <div className={cn(
                 "absolute inset-0 z-0 transition-all duration-500 pointer-events-none",
@@ -379,7 +567,7 @@ export function BannerPreview({ state: propState, onChange, exportWrapperClass, 
               {!isComplexShape && <div className="absolute inset-0 z-10 opacity-70 pointer-events-none transition-colors duration-500" style={{ backgroundColor: themeColor }} />}
 
               <div className="relative z-40 w-full h-full flex flex-col items-center justify-center pointer-events-none">
-                <DraggableBlock id="banner-title-center" isExport={isExportClone} className="pointer-events-auto w-full max-w-[700px] flex flex-col items-center">
+                <DraggableBlock id="banner-title-center" isExport={isExportClone} resetPosition={isMobileLayout} className="banner-mobile-reset pointer-events-auto w-full max-w-[700px] flex flex-col items-center">
                   <div
                     className={cn(
                       "p-10 rounded-[32px] shadow-2xl relative mb-6 w-full [.force-mobile_&]:!p-8 [.force-mobile_&]:!max-w-[95%] transition-all",
@@ -389,16 +577,16 @@ export function BannerPreview({ state: propState, onChange, exportWrapperClass, 
                     )}
                     style={{ backgroundColor: isComplexShape ? 'transparent' : `${boxColor}E6`, color: textColor }}
                   >
-                    <Editable as="h2" value={title} onChange={(v) => onChange({ title: v })} className={cn("font-extrabold text-[56px] [.force-mobile_&]:!text-[46px] leading-[1.1] tracking-tighter break-words text-balance", !isExportClone && "max-md:!text-[36px]")} style={{ color: textColor }} />
+                    <Editable as="h2" value={title} onChange={(v) => onChange({ title: v })} className={cn("banner-title-text font-extrabold text-[56px] [.force-mobile_&]:!text-[46px] leading-[1.1] tracking-tighter break-words text-balance", !isExportClone && "max-md:!text-[36px]")} style={{ color: textColor, fontSize: fontSizes.title }} />
 
-                    {hasSubtitle && <Editable as="p" multiline value={subtitle} onChange={(v) => onChange({ subtitle: v })} className={cn("font-medium opacity-90 text-[28px] [.force-mobile_&]:!text-[22px] leading-relaxed max-w-[90%] mx-auto mt-4 break-words pointer-events-auto", !isComplexShape && "drop-shadow-sm", !isExportClone && "max-md:!text-[18px]")} style={{ color: textColor }} />}
+                    {hasSubtitle && <Editable as="p" multiline value={subtitle} onChange={(v) => onChange({ subtitle: v })} className={cn("banner-subtitle-text font-medium opacity-90 text-[28px] [.force-mobile_&]:!text-[22px] leading-relaxed max-w-[90%] mx-auto mt-4 break-words pointer-events-auto", !isComplexShape && "drop-shadow-sm", !isExportClone && "max-md:!text-[18px]")} style={{ color: textColor, fontSize: fontSizes.subtitle }} />}
 
-                    {bodyText && <Editable as="p" multiline value={bodyText} onChange={(v) => onChange({ body: v })} className={cn("font-normal opacity-80 text-[20px] [.force-mobile_&]:!text-[18px] leading-relaxed max-w-[90%] mx-auto mt-3 break-words pointer-events-auto block [.force-mobile_&]:!hidden", !isComplexShape && "drop-shadow-sm", !isExportClone && "max-md:!text-[14px] max-md:!hidden")} style={{ color: textColor }} />}
+                    {bodyText && <Editable as="p" multiline value={bodyText} onChange={(v) => onChange({ body: v })} className={cn("banner-body-text font-normal opacity-80 text-[20px] [.force-mobile_&]:!text-[16px] leading-relaxed max-w-[90%] mx-auto mt-3 break-words pointer-events-auto block", !isComplexShape && "drop-shadow-sm", !isExportClone && "max-md:!text-[14px]")} style={{ color: textColor, fontSize: fontSizes.body }} />}
 
                     {benefits.length > 0 && (
                       <div className="flex flex-wrap justify-center gap-2 mt-6">
                         {benefits.map((ben, i) => (
-                          <span key={i} className={cn("border border-white/10 text-[14px] [.force-mobile_&]:!text-[12px] uppercase tracking-widest font-bold px-4 py-2 rounded-xl shadow-inner", !isExportClone && "max-md:!text-[11px]")} style={{ color: textColor, backgroundColor: `${boxColor}40` }}>{ben}</span>
+                          <span key={i} className={cn("banner-benefit-text border border-white/10 text-[14px] [.force-mobile_&]:!text-[12px] uppercase tracking-widest font-bold px-4 py-2 rounded-xl shadow-inner", !isExportClone && "max-md:!text-[11px]")} style={{ color: textColor, backgroundColor: `${boxColor}40`, fontSize: fontSizes.benefits }}>{ben}</span>
                         ))}
                       </div>
                     )}
@@ -407,20 +595,20 @@ export function BannerPreview({ state: propState, onChange, exportWrapperClass, 
 
                 {footerInfo && (
                   <div className="mt-auto pt-6 pointer-events-auto">
-                    <Editable as="p" value={footerInfo} onChange={(v) => onChange({ footerInfo: v })} className={cn("font-medium opacity-60 text-[16px] [.force-mobile_&]:!text-[12px] uppercase tracking-widest break-words", !isExportClone && "max-md:!text-[12px]")} style={{ color: textColor }} />
+                    <Editable as="p" value={footerInfo} onChange={(v) => onChange({ footerInfo: v })} className={cn("banner-footer-text font-medium opacity-60 text-[16px] [.force-mobile_&]:!text-[12px] uppercase tracking-widest break-words", !isExportClone && "max-md:!text-[12px]")} style={{ color: textColor, fontSize: fontSizes.footer }} />
                   </div>
                 )}
 
                 {(badgePrimary || badgeSecondary) && (
-                  <DraggableBlock id="banner-badge-center" isExport={isExportClone} className={cn("absolute z-50 bottom-8 right-8 flex flex-col items-end gap-3 pointer-events-auto [.force-mobile_&]:!bottom-4 [.force-mobile_&]:!right-4", !isExportClone && "max-md:!bottom-4 max-md:!right-4")}>
+                  <DraggableBlock id="banner-badge-center" isExport={isExportClone} resetPosition={isMobileLayout} className={cn("absolute z-50 bottom-8 right-8 flex flex-col items-end gap-3 pointer-events-auto [.force-mobile_&]:!bottom-4 [.force-mobile_&]:!right-4", !isExportClone && "max-md:!bottom-4 max-md:!right-4")}>
                     {badgePrimary && (
                       <div className={cn("rounded-full size-[180px] [.force-mobile_&]:!size-[140px] flex items-center justify-center text-center p-3 shadow-[0_20px_40px_-10px_rgba(0,0,0,0.5)] border border-white/20", !isExportClone && "max-md:!size-[120px]")} style={{ backgroundColor: `${boxColor}F2`, color: textColor }}>
-                        <Editable as="span" value={badgePrimary} onChange={(v) => onChange({ badgePrimary: v })} className={cn("font-black text-[48px] [.force-mobile_&]:!text-[36px] leading-[1.0] tracking-tighter", !isExportClone && "max-md:!text-[36px]")} style={{ color: textColor }} />
+                        <Editable as="span" value={badgePrimary} onChange={(v) => onChange({ badgePrimary: v })} className={cn("banner-badge-primary-text font-black text-[48px] [.force-mobile_&]:!text-[36px] leading-[1.0] tracking-tighter", !isExportClone && "max-md:!text-[36px]")} style={{ color: textColor, fontSize: fontSizes.badgePrimary }} />
                       </div>
                     )}
                     {badgeSecondary && (
                       <div className="rounded-full px-5 py-2.5 text-center shadow-lg border border-white/20 relative z-10" style={{ backgroundColor: themeColor, color: textColor }}>
-                        <Editable as="span" value={badgeSecondary} onChange={(v) => onChange({ badgeSecondary: v })} className={cn("font-bold text-[18px] [.force-mobile_&]:!text-[16px] tracking-wide leading-tight", !isExportClone && "max-md:!text-[14px]")} style={{ color: textColor }} />
+                        <Editable as="span" value={badgeSecondary} onChange={(v) => onChange({ badgeSecondary: v })} className={cn("banner-badge-secondary-text font-bold text-[18px] [.force-mobile_&]:!text-[16px] tracking-wide leading-tight", !isExportClone && "max-md:!text-[14px]")} style={{ color: textColor, fontSize: fontSizes.badgeSecondary }} />
                       </div>
                     )}
                   </DraggableBlock>
@@ -431,7 +619,7 @@ export function BannerPreview({ state: propState, onChange, exportWrapperClass, 
             <>
               {/* Bloco da Imagem - Mobile vira a parte de baixo (h-auto livre!) */}
               <div className={cn(
-                "absolute inset-y-0 z-0 flex items-center justify-center w-[60%] transition-all duration-500 pointer-events-none",
+                "banner-visual-pane absolute inset-y-0 z-0 flex items-center justify-center w-[60%] transition-all duration-500 pointer-events-none",
                 "[.force-mobile_&]:!relative [.force-mobile_&]:!h-auto [.force-mobile_&]:!aspect-square max-md:!relative max-md:!aspect-square",
                 isReverse ? "left-0" : "right-0",
                 isFrame ? "m-6 rounded-t-[60px] rounded-b-3xl border border-white/20 shadow-2xl overflow-hidden" :
@@ -457,7 +645,7 @@ export function BannerPreview({ state: propState, onChange, exportWrapperClass, 
               {!isComplexShape && (
                 <>
                   <div className={cn(
-                    "absolute inset-y-0 w-[65%] z-10 shadow-[-20px_0_60px_rgba(0,0,0,0.5)] pointer-events-none transition-all duration-700 border-white/10 [.force-mobile_&]:!absolute max-md:!absolute",
+                    "banner-shape-panel absolute inset-y-0 w-[65%] z-10 shadow-[-20px_0_60px_rgba(0,0,0,0.5)] pointer-events-none transition-all duration-700 border-white/10 [.force-mobile_&]:!absolute max-md:!absolute",
                     isReverse ? "right-0 border-l" : "left-0 border-r",
                     shapeClass,
                     cn("[.force-mobile_&]:!inset-auto [.force-mobile_&]:!top-0 [.force-mobile_&]:!left-0 [.force-mobile_&]:!w-full [.force-mobile_&]:!h-full [.force-mobile_&]:!border-none", !isExportClone && "max-md:!inset-auto max-md:!top-0 max-md:!left-0 max-md:!w-full max-md:!h-full max-md:!border-none")
@@ -475,15 +663,15 @@ export function BannerPreview({ state: propState, onChange, exportWrapperClass, 
 
               {/* Bloco de Texto - Mobile vira a parte de cima (h-auto livre!) */}
               <div className={cn(
-                "relative z-40 w-[50%] h-full flex flex-col justify-center py-8 pointer-events-none",
+                "banner-text-pane relative z-40 w-[50%] h-full flex flex-col justify-center py-8 pointer-events-none",
                 isReverse ? cn("pr-14 pl-4 items-end text-right [.force-mobile_&]:!pr-8", !isExportClone && "max-md:!pr-8") : cn("pl-14 pr-4 items-start text-left [.force-mobile_&]:!pl-8", !isExportClone && "max-md:!pl-8"),
                 isComplexShape ? (isReverse ? cn("pr-16 [.force-mobile_&]:!pr-10", !isExportClone && "max-md:!pr-10") : cn("pl-16 [.force-mobile_&]:!pl-10", !isExportClone && "max-md:!pl-10")) : "",
                 isOffset ? (isReverse ? "-mr-16 z-40" : "-ml-16 z-40") : "",
                 cn("[.force-mobile_&]:!w-full [.force-mobile_&]:!h-auto [.force-mobile_&]:!py-12 [.force-mobile_&]:!mt-0 [.force-mobile_&]:!justify-center [.force-mobile_&]:!items-center [.force-mobile_&]:!text-center [.force-mobile_&]:!px-6 [.force-mobile_&]:!m-0", !isExportClone && "max-md:!w-full max-md:!h-auto max-md:!py-12 max-md:!mt-0 max-md:!justify-center max-md:!items-center max-md:!text-center max-md:!px-6 max-md:!m-0")
               )}>
 
-                <DraggableBlock id="banner-text-split" isExport={isExportClone} className={cn(
-                  "pointer-events-auto flex flex-col w-full max-w-[560px]",
+                <DraggableBlock id="banner-text-split" isExport={isExportClone} resetPosition={isMobileLayout} className={cn(
+                  "banner-mobile-reset pointer-events-auto flex flex-col w-full max-w-[560px]",
                   isReverse ? "items-end" : "items-start",
                   cn("[.force-mobile_&]:!items-center", !isExportClone && "max-md:!items-center")
                 )}>
@@ -500,7 +688,7 @@ export function BannerPreview({ state: propState, onChange, exportWrapperClass, 
                       color: textColor
                     }}
                   >
-                    <Editable as="h2" value={title} onChange={(v) => onChange({ title: v })} className={cn("font-extrabold text-[64px] [.force-mobile_&]:!text-[46px] leading-[1.05] tracking-tighter break-words text-balance", !isOffset && "drop-shadow-lg", !isExportClone && "max-md:!text-[36px]")} style={{ color: textColor }} />
+                    <Editable as="h2" value={title} onChange={(v) => onChange({ title: v })} className={cn("banner-title-text font-extrabold text-[64px] [.force-mobile_&]:!text-[46px] leading-[1.05] tracking-tighter break-words text-balance", !isOffset && "drop-shadow-lg", !isExportClone && "max-md:!text-[36px]")} style={{ color: textColor, fontSize: fontSizes.title }} />
 
                     {!isComplexShape && !isExportClone && (
                       <div className={cn("absolute top-6 opacity-30", isReverse ? "left-6" : "right-6", "[.force-mobile_&]:!hidden", !isExportClone && "max-md:!hidden")}>
@@ -509,40 +697,40 @@ export function BannerPreview({ state: propState, onChange, exportWrapperClass, 
                     )}
                   </div>
 
-                  {hasSubtitle && <Editable as="p" multiline value={subtitle} onChange={(v) => onChange({ subtitle: v })} className={cn("font-semibold opacity-95 text-[28px] [.force-mobile_&]:!text-[22px] leading-relaxed max-w-[95%] break-words mb-3", (!isComplexShape || isOffset) && "drop-shadow-md", !isExportClone && "max-md:!text-[18px]")} style={{ color: textColor }} />}
+                  {hasSubtitle && <Editable as="p" multiline value={subtitle} onChange={(v) => onChange({ subtitle: v })} className={cn("banner-subtitle-text font-semibold opacity-95 text-[28px] [.force-mobile_&]:!text-[22px] leading-relaxed max-w-[95%] break-words mb-3", (!isComplexShape || isOffset) && "drop-shadow-md", !isExportClone && "max-md:!text-[18px]")} style={{ color: textColor, fontSize: fontSizes.subtitle }} />}
 
-                  {bodyText && <Editable as="p" multiline value={bodyText} onChange={(v) => onChange({ body: v })} className={cn("font-normal opacity-80 text-[20px] [.force-mobile_&]:!text-[18px] leading-relaxed max-w-[95%] break-words mb-5 block [.force-mobile_&]:!hidden", (!isComplexShape || isOffset) && "drop-shadow-md", !isExportClone && "max-md:!text-[14px] max-md:!hidden")} style={{ color: textColor }} />}
+                  {bodyText && <Editable as="p" multiline value={bodyText} onChange={(v) => onChange({ body: v })} className={cn("banner-body-text font-normal opacity-80 text-[20px] [.force-mobile_&]:!text-[16px] leading-relaxed max-w-[95%] break-words mb-5 block", (!isComplexShape || isOffset) && "drop-shadow-md", !isExportClone && "max-md:!text-[14px]")} style={{ color: textColor, fontSize: fontSizes.body }} />}
 
                   {benefits.length > 0 && (
                     <div className={cn("flex flex-wrap gap-2 mt-4", isReverse ? "justify-end" : "justify-start", "[.force-mobile_&]:!justify-center", !isExportClone && "max-md:!justify-center")}>
                       {benefits.map((ben, i) => (
-                        <span key={i} className={cn("border border-white/10 text-[14px] [.force-mobile_&]:!text-[12px] uppercase tracking-widest font-bold px-4 py-2 rounded-xl shadow-inner", !isExportClone && "max-md:!text-[10px]")} style={{ color: isComplexShape ? boxColor : textColor, backgroundColor: isComplexShape ? themeColor : `${boxColor}40` }}>{ben}</span>
+                        <span key={i} className={cn("banner-benefit-text border border-white/10 text-[14px] [.force-mobile_&]:!text-[12px] uppercase tracking-widest font-bold px-4 py-2 rounded-xl shadow-inner", !isExportClone && "max-md:!text-[10px]")} style={{ color: isComplexShape ? boxColor : textColor, backgroundColor: isComplexShape ? themeColor : `${boxColor}40`, fontSize: fontSizes.benefits }}>{ben}</span>
                       ))}
                     </div>
                   )}
                 </DraggableBlock>
 
                 {footerInfo && (
-                  <div className={cn("mt-auto pt-8 pointer-events-auto block [.force-mobile_&]:!hidden", !isExportClone && "max-md:!hidden")}>
-                    <Editable as="p" value={footerInfo} onChange={(v) => onChange({ footerInfo: v })} className={cn("font-medium opacity-60 text-[14px] uppercase tracking-widest break-words drop-shadow-sm")} style={{ color: textColor }} />
+                  <div className={cn("mt-auto pt-8 pointer-events-auto block [.force-mobile_&]:!pt-4", !isExportClone && "max-md:!pt-4")}>
+                    <Editable as="p" value={footerInfo} onChange={(v) => onChange({ footerInfo: v })} className={cn("banner-footer-text font-medium opacity-60 text-[14px] uppercase tracking-widest break-words drop-shadow-sm")} style={{ color: textColor, fontSize: fontSizes.footer }} />
                   </div>
                 )}
               </div>
 
               {(badgePrimary || badgeSecondary) && (
-                <DraggableBlock id="banner-badge-split" isExport={isExportClone} className={cn(
-                  "absolute z-50 flex flex-col items-center gap-3 pointer-events-auto top-1/2 -translate-y-1/2",
+                <DraggableBlock id="banner-badge-split" isExport={isExportClone} resetPosition={isMobileLayout} className={cn(
+                  "banner-mobile-badge banner-mobile-reset absolute z-50 flex flex-col items-center gap-3 pointer-events-auto top-1/2 -translate-y-1/2",
                   isReverse ? "right-[55%] translate-x-1/2" : "left-[55%] -translate-x-1/2",
-                  cn("[.force-mobile_&]:!right-auto [.force-mobile_&]:!left-1/2 [.force-mobile_&]:!-translate-x-1/2 [.force-mobile_&]:!top-[50%]", !isExportClone && "max-md:!right-auto max-md:!left-1/2 max-md:!-translate-x-1/2 max-md:!top-[50%]")
+                  cn("[.force-mobile_&]:!right-auto [.force-mobile_&]:!left-1/2 [.force-mobile_&]:!bottom-[42%] [.force-mobile_&]:!top-auto [.force-mobile_&]:!-translate-x-1/2 [.force-mobile_&]:!translate-y-0", !isExportClone && "max-md:!right-auto max-md:!left-1/2 max-md:!bottom-[42%] max-md:!top-auto max-md:!-translate-x-1/2 max-md:!translate-y-0")
                 )}>
                   {badgePrimary && (
                     <div className={cn("rounded-full size-[180px] [.force-mobile_&]:!size-[140px] flex items-center justify-center text-center p-3 shadow-[0_20px_40px_-10px_rgba(0,0,0,0.5)] border border-white/20", !isExportClone && "max-md:!size-[110px]")} style={{ backgroundColor: `${boxColor}F2`, color: textColor }}>
-                      <Editable as="span" value={badgePrimary} onChange={(v) => onChange({ badgePrimary: v })} className={cn("font-black text-[48px] [.force-mobile_&]:!text-[36px] leading-[1.0] tracking-tighter", !isExportClone && "max-md:!text-[28px]")} style={{ color: textColor }} />
+                      <Editable as="span" value={badgePrimary} onChange={(v) => onChange({ badgePrimary: v })} className={cn("banner-badge-primary-text font-black text-[48px] [.force-mobile_&]:!text-[36px] leading-[1.0] tracking-tighter", !isExportClone && "max-md:!text-[28px]")} style={{ color: textColor, fontSize: fontSizes.badgePrimary }} />
                     </div>
                   )}
                   {badgeSecondary && (
                     <div className="rounded-full px-5 py-2.5 text-center shadow-lg border border-white/20 relative z-10" style={{ backgroundColor: themeColor, color: textColor }}>
-                      <Editable as="span" value={badgeSecondary} onChange={(v) => onChange({ badgeSecondary: v })} className={cn("font-bold text-[18px] [.force-mobile_&]:!text-[16px] tracking-wide leading-tight", !isExportClone && "max-md:!text-[13px]")} style={{ color: textColor }} />
+                      <Editable as="span" value={badgeSecondary} onChange={(v) => onChange({ badgeSecondary: v })} className={cn("banner-badge-secondary-text font-bold text-[18px] [.force-mobile_&]:!text-[16px] tracking-wide leading-tight", !isExportClone && "max-md:!text-[13px]")} style={{ color: textColor, fontSize: fontSizes.badgeSecondary }} />
                     </div>
                   )}
                 </DraggableBlock>
@@ -552,22 +740,25 @@ export function BannerPreview({ state: propState, onChange, exportWrapperClass, 
           )}
         </div>
       </div>
+          </div>
+        </div>
+      </div>
 
       {!isExportClone && (
-        <div className="flex items-center justify-between rounded-xl border border-border-subtle bg-surface-2 p-3 shadow-md transition-opacity hover:opacity-100 mt-3">
-          <div className="min-w-0 flex-1 truncate pr-4 text-[11px] font-bold uppercase tracking-widest text-fg-muted flex items-center gap-2">
+        <div className="editor-toolbar mt-3 rounded-2xl border border-border-subtle bg-surface-1/85 p-3 shadow-[var(--shadow-soft)] backdrop-blur-xl">
+          <div className="min-w-0 flex-1 truncate text-[10px] font-semibold uppercase tracking-[0.16em] text-fg-muted flex items-center gap-2">
             Peça: <span className="px-2 py-1 rounded bg-brand/10 text-brand">BANNER</span>
             {analyzingColors && <span className="text-xs text-brand animate-pulse flex items-center gap-1"><Sparkles className="size-3" /> Extraindo Cores...</span>}
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="editor-toolbar-actions shrink-0">
             <Popover>
               <PopoverTrigger asChild>
                 <Button size="sm" variant="outline" className="h-8 text-xs font-bold rounded-lg border-border-strong text-fg-primary hover:bg-surface-3">
                   <Palette className="mr-1.5 size-3.5" /> Design
                 </Button>
               </PopoverTrigger>
-              <PopoverContent side="top" align="end" className="w-[340px] bg-surface-1 border-border-strong p-4 shadow-2xl rounded-xl z-50 mb-2">
+              <PopoverContent side="top" align="end" className="mb-2 max-h-[calc(100vh-96px)] w-[min(380px,calc(100vw-24px))] overflow-y-auto rounded-2xl border-border-strong bg-surface-1 p-4 shadow-[var(--shadow-elevated)] z-50">
                 <div className="space-y-4">
 
                   <div className="space-y-2">
@@ -594,7 +785,7 @@ export function BannerPreview({ state: propState, onChange, exportWrapperClass, 
                       <Button size="sm" variant={backgroundShape === 'arch' ? 'default' : 'outline'} onClick={() => onChange({ backgroundShape: 'arch', layoutStyle: layoutStyle === 'centered' ? 'split' : layoutStyle })} className="h-7 text-[11px]">Arco</Button>
                       <Button size="sm" variant={backgroundShape === 'pill' ? 'default' : 'outline'} onClick={() => onChange({ backgroundShape: 'pill', layoutStyle: layoutStyle === 'centered' ? 'split' : layoutStyle })} className="h-7 text-[11px]">Pílula</Button>
                       <Button size="sm" variant={backgroundShape === 'blob' ? 'default' : 'outline'} onClick={() => onChange({ backgroundShape: 'blob', layoutStyle: layoutStyle === 'centered' ? 'split' : layoutStyle })} className="h-7 text-[11px]">Orgânico</Button>
-                      <Button size="sm" variant={backgroundShape === 'grid' ? 'default' : 'outline'} onClick={() => onChange({ backgroundShape: 'geometric', layoutStyle: layoutStyle === 'centered' ? 'split' : layoutStyle })} className="h-7 text-[11px]">Grid</Button>
+                      <Button size="sm" variant={backgroundShape === 'geometric' ? 'default' : 'outline'} onClick={() => onChange({ backgroundShape: 'geometric', layoutStyle: layoutStyle === 'centered' ? 'split' : layoutStyle })} className="h-7 text-[11px]">Grid</Button>
                       <Button size="sm" variant={backgroundShape === 'frame' ? 'default' : 'outline'} onClick={() => onChange({ backgroundShape: 'frame', layoutStyle: layoutStyle === 'centered' ? 'split' : layoutStyle })} className="h-7 text-[11px]">Moldura</Button>
                       <Button size="sm" variant={backgroundShape === 'offset' ? 'default' : 'outline'} onClick={() => onChange({ backgroundShape: 'offset', layoutStyle: layoutStyle === 'centered' ? 'split' : layoutStyle })} className="h-7 text-[11px]">Editorial</Button>
                     </div>
@@ -638,6 +829,35 @@ export function BannerPreview({ state: propState, onChange, exportWrapperClass, 
                       <Button size="sm" variant={state.fontFamily === 'serif' ? 'default' : 'outline'} onClick={() => onChange({ fontFamily: 'serif' })} className="h-7 text-[11px] font-serif">Classic (Serif)</Button>
                       <Button size="sm" variant={state.fontFamily === 'mono' ? 'default' : 'outline'} onClick={() => onChange({ fontFamily: 'mono' })} className="h-7 text-[11px] font-mono">Tech (Mono)</Button>
                     </div>
+
+                    <div className="mt-3 border-t border-border-subtle pt-3">
+                      <div className="mb-2 flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-[10px] font-bold uppercase tracking-widest text-fg-muted">Tamanho por linha</p>
+                          <p className="mt-0.5 text-[10px] text-fg-muted">O mobile acompanha a proporção automaticamente.</p>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 shrink-0 px-2 text-[10px] text-fg-secondary"
+                          disabled={!state.bannerFontSizes}
+                          onClick={() => onChange({ bannerFontSizes: undefined })}
+                        >
+                          <RotateCcw className="mr-1 size-3" /> Restaurar
+                        </Button>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <FontSizeControl label="Título" value={fontSizes.title} min={24} max={96} step={2} onChange={(value) => updateFontSize("title", value)} />
+                        <FontSizeControl label="Subtítulo" value={fontSizes.subtitle} min={12} max={48} step={2} onChange={(value) => updateFontSize("subtitle", value)} />
+                        <FontSizeControl label="Descrição" value={fontSizes.body} min={10} max={36} onChange={(value) => updateFontSize("body", value)} />
+                        <FontSizeControl label="Benefícios" value={fontSizes.benefits} min={8} max={24} onChange={(value) => updateFontSize("benefits", value)} />
+                        <FontSizeControl label="Rodapé" value={fontSizes.footer} min={8} max={24} onChange={(value) => updateFontSize("footer", value)} />
+                        <FontSizeControl label="Selo principal" value={fontSizes.badgePrimary} min={16} max={72} step={2} onChange={(value) => updateFontSize("badgePrimary", value)} />
+                        <FontSizeControl label="Selo auxiliar" value={fontSizes.badgeSecondary} min={8} max={28} onChange={(value) => updateFontSize("badgeSecondary", value)} />
+                      </div>
+                    </div>
                   </div>
 
                 </div>
@@ -667,7 +887,7 @@ export function BannerPreview({ state: propState, onChange, exportWrapperClass, 
                </Button>
             )}
 
-            <Button size="sm" variant="ghost" className="h-8 text-xs font-bold rounded-lg bg-surface-3 hover:bg-surface-2 text-fg-primary ml-2" onClick={handleRegenerate}>
+            <Button size="sm" variant="ghost" className="h-8 rounded-lg bg-surface-3 text-xs font-bold text-fg-primary hover:bg-surface-2 sm:ml-2" onClick={handleRegenerate}>
               <RefreshCw className="mr-1.5 size-3.5" /> IA
             </Button>
           </div>
