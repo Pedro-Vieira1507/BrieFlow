@@ -159,7 +159,10 @@ export function useBriefflowAgent() {
         ...(uploadedImage ? [uploadedImage] : []),
         ...scrapedProductsRef.current.map((p) => p.imageUrl).filter(Boolean),
         ...savedCampaignImages,
-      ] as string[];
+      ].filter(
+        (image): image is string =>
+          typeof image === "string" && image.trim().length > 0,
+      );
 
       const uniqueImages = Array.from(new Set(allImages));
 

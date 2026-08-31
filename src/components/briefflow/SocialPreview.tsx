@@ -57,7 +57,9 @@ export function SocialPreview({ state, onChange, exportWrapperClass, exportWrapp
     offerStr && offerStr !== "null" && offerStr.trim() !== "" && offerStr.toLowerCase() !== "nenhum",
   );
 
-  const draggableImages = Array.from(new Set(state.productImages || []));
+  const draggableImages = Array.from(new Set(state.productImages || [])).filter(
+    (src): src is string => typeof src === "string" && src.trim().length > 0,
+  );
 
   const url = useMemo(() => {
     if (!prompt) return null;

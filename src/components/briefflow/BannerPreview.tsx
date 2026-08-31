@@ -257,7 +257,9 @@ export function BannerPreview({ state: propState, onChange, exportWrapperClass, 
   const layoutStyle = state.layoutStyle || "split";
   const hasSubtitle = !isEmptyLike(subtitle);
 
-  const draggableImages = Array.from(new Set(state.productImages || []));
+  const draggableImages = Array.from(new Set(state.productImages || [])).filter(
+    (src): src is string => typeof src === "string" && src.trim().length > 0,
+  );
 
   const heroUrl = useMemo(() => {
     if (!prompt) return null;

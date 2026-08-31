@@ -106,6 +106,20 @@ test("retry keeps the campaign plan and saved image references after library loa
   assert.match(source, /builder\.type === "none"/);
 });
 
+test("retry filters legacy empty image references before rendering the campaign", () => {
+  const agent = readFileSync(
+    new URL("../src/hooks/useBriefflowAgent.ts", import.meta.url),
+    "utf8",
+  );
+  const draggableImage = readFileSync(
+    new URL("../src/components/briefflow/DraggableImage.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(agent, /typeof image === "string" && image\.trim\(\)\.length > 0/);
+  assert.match(draggableImage, /const safeSrc = typeof src === "string" \? src : ""/);
+});
+
 test("social preview does not fabricate engagement", () => {
   const source = readFileSync(
     new URL("../src/components/briefflow/SocialPreview.tsx", import.meta.url),
