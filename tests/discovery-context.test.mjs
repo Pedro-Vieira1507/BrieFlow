@@ -40,3 +40,38 @@ test("cria resumo factual quando o modelo não devolve texto acumulado", () => {
   assert.match(merged.detectedContext, /Produto\/serviço: Clube de café/);
   assert.match(merged.detectedContext, /Objetivo: Novas assinaturas/);
 });
+
+test("remove exclusividade inventada da estratégia de descoberta", () => {
+  const merged = mergeDetectedBriefContext(
+    {
+      detectedContext: "Assinatura mensal de microlotes brasileiros.",
+      missingInfo: "",
+      proposedStrategy:
+        "Promessa central: café em casa; ângulo: simplicidade e exclusividade; ação: assinar",
+    },
+    {
+      brandName: "Aurora Café",
+      productName: "Assinatura de microlotes brasileiros",
+      tone: "Premium, caloroso e sem elitismo",
+    },
+  );
+
+  assert.equal(
+    merged.proposedStrategy,
+    "Promessa central: café em casa; ângulo: simplicidade; ação: assinar",
+  );
+});
+
+test("preserva exclusividade quando ela é um fato confirmado", () => {
+  const merged = mergeDetectedBriefContext(
+    {
+      detectedContext: "Clube exclusivo para membros.",
+      missingInfo: "",
+      proposedStrategy: "Ângulo: acesso exclusivo",
+      product: "Clube exclusivo para membros",
+    },
+    undefined,
+  );
+
+  assert.equal(merged.proposedStrategy, "Ângulo: acesso exclusivo");
+});

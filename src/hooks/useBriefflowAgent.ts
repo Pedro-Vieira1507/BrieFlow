@@ -90,22 +90,29 @@ export function useBriefflowAgent() {
   );
 
   const buildErrorAsset = useCallback(
-    (channel: CampaignChannel, productImages: string[]): CampaignAsset => {
+    (
+      channel: CampaignChannel,
+      productImages: string[],
+      brandName: string,
+      errorMessage: string,
+    ): CampaignAsset => {
       const errorContent: BuilderState = {
         type: channel,
+        brandName,
+        generationError: errorMessage,
         productImages,
       } as BuilderState;
 
       if (channel === "banner") {
         errorContent.title = "Não consegui gerar este banner";
-        errorContent.subtitle = "A resposta da IA foi interrompida. Peça para gerar novamente.";
+        errorContent.subtitle = errorMessage;
         errorContent.cta = "Tentar novamente";
       } else if (channel === "email") {
         errorContent.title = "Não consegui gerar este e-mail";
-        errorContent.body = "A requisição excedeu o tempo limite. Tente novamente.";
+        errorContent.body = errorMessage;
         errorContent.cta = "Tentar novamente";
       } else {
-        errorContent.caption = "Não consegui gerar este post. Peça para regenerar.";
+        errorContent.caption = `Não consegui gerar este post. ${errorMessage}`;
         errorContent.hashtags = [];
       }
 
@@ -137,6 +144,17 @@ export function useBriefflowAgent() {
       ] as string[];
 
       const uniqueImages = Array.from(new Set(allImages));
+
+      const campaignBrief = toMarketingBrief({
+        brandContext: brandContextRef.current,
+        plan,
+        product: {
+          productUrl: scrapedProductsRef.current[0]?.productUrl ?? null,
+          productImageUrl: uniqueImages[0] ?? null,
+          productTitle: scrapedProductsRef.current[0]?.name ?? null,
+        },
+        availableImageUrls: uniqueImages,
+      });
 
       if (!only) {
         patchCampaignAssets([]);
@@ -201,17 +219,6 @@ export function useBriefflowAgent() {
             }
           }
 
-          const brief = toMarketingBrief({
-            brandContext: brandContextRef.current,
-            plan,
-            product: {
-              productUrl: scrapedProductsRef.current[0]?.productUrl ?? null,
-              productImageUrl: uniqueImages[0] ?? null,
-              productTitle: scrapedProductsRef.current[0]?.name ?? null,
-            },
-            availableImageUrls: uniqueImages,
-          });
-
           const existingAsset = builderRef.current.type === "campaign"
             ? builderRef.current.campaignAssets?.find((a) => a.type === channel)
             : undefined;
@@ -270,7 +277,7 @@ export function useBriefflowAgent() {
           const rawBriefing = recentUserBriefing + campaignPlatformContext + currentContentContext;
 
           const { content } = await generateMaterial({
-            brief,
+            brief: campaignBrief,
             material: channel,
             rawBriefing: rawBriefing,
             images: uniqueImages,
@@ -300,7 +307,8 @@ Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo terri
           }
 
           updateCampaignAsset(channel, (prevAsset) => {
-            const prevContent = prevAsset?.content || {};
+            const { generationError: _discardedError, ...prevContent } =
+              prevAsset?.content || {};
             let mergedContent: any = { ...prevContent };
 
             if (isAll || !prevAsset) {
@@ -379,10 +387,16 @@ Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo terri
             };
           });
         } catch (err) {
-          console.error(`Erro ao gerar ${channel}:`, describeAiError(err), err);
+          const errorMessage = describeAiError(err);
+          console.error(`Erro ao gerar ${channel}:`, errorMessage, err);
           hasErrors = true;
           updateCampaignAsset(channel, () =>
-            buildErrorAsset(channel, uniqueImages),
+            buildErrorAsset(
+              channel,
+              uniqueImages,
+              campaignBrief.brandName,
+              errorMessage,
+            ),
           );
         }
       }
@@ -661,5 +675,19 @@ Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo terri
     ],
   );
 
-  return { handleSend };
+  const regenerateChannel = useCallback(
+    async (channel: CampaignChannel) => {
+      const history: ChatTurn[] = useBriefflowStore
+        .getState()
+        .messages.map((message) => ({
+          role: message.role,
+          content: message.content,
+        }));
+
+      await generateCampaignSafely(history, channel, ["all"], "omniroute");
+    },
+    [generateCampaignSafely],
+  );
+
+  return { handleSend, regenerateChannel };
 }

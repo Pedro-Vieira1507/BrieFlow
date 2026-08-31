@@ -132,6 +132,27 @@ test("removes a repeated social offer paragraph when CTA already carries it", ()
   );
 });
 
+test("removes unsupported personalization disguised as curation", () => {
+  const sanitized = sanitizeGeneratedCopy(
+    "banner",
+    {
+      headline: "Seu café, da fazenda pra casa",
+      subheadline: "Microlotes brasileiros escolhidos para você",
+      body: "Assinatura mensal para preparar café em casa.",
+      ctaText: "Conhecer assinatura",
+      ctaVariant: "primary",
+      keyBenefits: [],
+      objectionsHandled: [],
+      layoutStyle: "split",
+      backgroundShape: "curve",
+      imagePrompt: "coffee served in a cup, no text",
+    },
+    { ...baseBrief, context: "Assinatura mensal de microlotes brasileiros" },
+  );
+
+  assert.equal(sanitized.subheadline, "");
+});
+
 test("social fallback omits CORS mode for local data images", () => {
   const source = readFileSync(
     new URL("../src/components/briefflow/SocialPreview.tsx", import.meta.url),

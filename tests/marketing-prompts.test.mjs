@@ -161,15 +161,16 @@ test("material prompt adapts the agency method without leaking the reference bra
     "utf8",
   );
 
-  assert.match(source, /brieflow-creative-director-2026-08\.5/);
+  assert.match(source, /brieflow-creative-director-2026-08\.6/);
   assert.match(source, /produto-herói/);
   assert.match(source, /Prefira omitir a preencher/);
   assert.match(source, /B2B técnico\/regulado/);
   assert.match(source, /Varejo\/e-commerce/);
   assert.match(source, /SaaS\/tecnologia/);
+  assert.match(source, /recipiente vazio/);
+  assert.match(source, /estratégia é direção criativa, não fonte de prova/i);
   assert.doesNotMatch(source, /Forlab/i);
 });
-
 
 test("visual fallback is local, deterministic and never exposes a placeholder label", () => {
   const first = buildFallbackUrl("editorial coffee subscription", {

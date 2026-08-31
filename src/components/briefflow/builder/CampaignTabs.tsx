@@ -6,7 +6,9 @@ import { EmailPreview } from "@/components/briefflow/EmailPreview";
 import { BannerPreview } from "@/components/briefflow/BannerPreview";
 import { SocialPreview } from "@/components/briefflow/SocialPreview";
 import { cn } from "@/lib/utils";
-import { Image, Instagram, Mail } from "lucide-react";
+import { AlertTriangle, Image, Instagram, Mail, RefreshCw } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { getGenerationErrorMessage } from "@/lib/campaignGeneration";
 
 interface Props {
   assets: CampaignAsset[];
@@ -14,6 +16,8 @@ interface Props {
   // NOVAS PROPS: Comunicação direta com o PageBuilder
   activeTab: CampaignAsset["type"];
   onTabChange: (tab: CampaignAsset["type"]) => void;
+  loading?: boolean;
+  onRetry?: (channel: CampaignAsset["type"]) => void | Promise<void>;
 }
 
 const CHANNELS: Array<{
@@ -31,6 +35,8 @@ export function CampaignTabs({
   onAssetChange,
   activeTab,
   onTabChange,
+  loading = false,
+  onRetry,
 }: Props) {
   const previousAssetIdsRef = useRef<string[]>([]);
 
@@ -77,32 +83,64 @@ export function CampaignTabs({
         </TabsList>
       </div>
 
-      {assets.map((asset) => (
-        <TabsContent
-          key={asset.id}
-          value={asset.type}
-          className="mt-0 outline-none animate-in fade-in slide-in-from-bottom-2 duration-300"
-        >
-          {asset.type === "banner" && (
-            <BannerPreview
-              state={asset.content}
-              onChange={(patch) => onAssetChange(asset.id, patch)}
-            />
-          )}
-          {asset.type === "email" && (
-            <EmailPreview
-              state={asset.content}
-              onChange={(patch) => onAssetChange(asset.id, patch)}
-            />
-          )}
-          {asset.type === "social" && (
-            <SocialPreview
-              state={asset.content}
-              onChange={(patch) => onAssetChange(asset.id, patch)}
-            />
-          )}
-        </TabsContent>
-      ))}
+      {assets.map((asset) => {
+        const generationError = getGenerationErrorMessage(asset.content);
+        const channel = CHANNELS.find(({ key }) => key === asset.type);
+
+        return (
+          <TabsContent
+            key={asset.id}
+            value={asset.type}
+            className="mt-0 outline-none animate-in fade-in slide-in-from-bottom-2 duration-300"
+          >
+            {generationError ? (
+              <div className="mx-auto flex min-h-[420px] max-w-2xl flex-col items-center justify-center rounded-[28px] border border-amber-400/20 bg-surface-1/90 px-8 py-12 text-center shadow-[var(--shadow-elevated)]">
+                <div className="mb-5 grid size-14 place-items-center rounded-2xl bg-amber-400/10 text-amber-300">
+                  <AlertTriangle className="size-7" />
+                </div>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">
+                  {asset.content.brandName || "Campanha"} · {channel?.label}
+                </p>
+                <h3 className="text-2xl font-semibold tracking-tight text-fg-primary">
+                  Esta peça não ficou pronta
+                </h3>
+                <p className="mt-3 max-w-lg text-sm leading-6 text-fg-secondary">
+                  {generationError}
+                </p>
+                <Button
+                  type="button"
+                  className="mt-7 rounded-xl"
+                  disabled={loading}
+                  onClick={() => void onRetry?.(asset.type)}
+                >
+                  <RefreshCw
+                    className={cn("mr-2 size-4", loading && "animate-spin")}
+                  />
+                  {loading ? "Gerando novamente..." : "Tentar novamente"}
+                </Button>
+                <p className="mt-4 text-xs text-fg-muted">
+                  As outras peças da campanha serão preservadas.
+                </p>
+              </div>
+            ) : asset.type === "banner" ? (
+              <BannerPreview
+                state={asset.content}
+                onChange={(patch) => onAssetChange(asset.id, patch)}
+              />
+            ) : asset.type === "email" ? (
+              <EmailPreview
+                state={asset.content}
+                onChange={(patch) => onAssetChange(asset.id, patch)}
+              />
+            ) : (
+              <SocialPreview
+                state={asset.content}
+                onChange={(patch) => onAssetChange(asset.id, patch)}
+              />
+            )}
+          </TabsContent>
+        );
+      })}
     </Tabs>
   );
 }

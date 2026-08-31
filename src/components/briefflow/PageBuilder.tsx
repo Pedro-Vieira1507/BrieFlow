@@ -16,11 +16,12 @@ import type { BuilderState, CampaignAsset } from "@/types/builder";
 
 interface Props {
   onRefine: (prompt: string) => void;
+  onRetry: (channel: CampaignAsset["type"]) => void | Promise<void>;
   onOpenSettings?: () => void;
   onOpenChat?: () => void;
 }
 
-export function PageBuilder({ onRefine, onOpenSettings, onOpenChat }: Props) {
+export function PageBuilder({ onRefine, onRetry, onOpenSettings, onOpenChat }: Props) {
   const {
     user,
     builder,
@@ -124,6 +125,8 @@ export function PageBuilder({ onRefine, onOpenSettings, onOpenChat }: Props) {
                 onAssetChange={handleAssetPatch}
                 activeTab={activeTab}
                 onTabChange={setActiveTab}
+                loading={loading}
+                onRetry={onRetry}
               />
             </div>
           )}

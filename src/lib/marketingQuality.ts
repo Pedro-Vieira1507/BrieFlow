@@ -15,13 +15,20 @@ const CLAIM_RULES: ClaimRule[] = [
   },
   {
     id: "exclusive",
-    claim: /\bexclusiv(?:o|a|os|as)\b/i,
-    evidence: /\bexclusiv(?:o|a|os|as)\b/i,
+    claim: /\bexclusiv(?:o|a|os|as|idade|idades)\b/i,
+    evidence: /\bexclusiv(?:o|a|os|as|idade|idades)\b/i,
   },
   {
     id: "unique",
     claim: /\b[uú]nic(?:o|a|os|as)\b/i,
     evidence: /\b[uú]nic(?:o|a|os|as)\b/i,
+  },
+  {
+    id: "curated_for_you",
+    claim:
+      /\b(?:selecionad(?:o|a|os|as)|escolhid(?:o|a|os|as))\s+para\s+(?:voc[eê]|seu|sua)(?=\s|[.,!?;:]|$)/i,
+    evidence:
+      /\b(?:curadoria|selecionad(?:o|a|os|as)|escolhid(?:o|a|os|as)|personalizad(?:o|a|os|as))\b/i,
   },
   {
     id: "leader",
@@ -125,7 +132,6 @@ function collectConfirmedEvidence(brief: MarketingBrief): string {
     brief.objective,
     brief.offer,
     brief.tone,
-    brief.strategy,
     brief.context,
     brief.productTitle,
     brief.productDescription,

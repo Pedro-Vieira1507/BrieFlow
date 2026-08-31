@@ -286,8 +286,8 @@ export function SocialPreview({ state, onChange, exportWrapperClass, exportWrapp
           </div>
 
           <div className="px-5 pb-5 pt-1">
-            <p className="text-[14px] font-semibold mb-2.5" style={{ color: textColor }}>
-              Curtido por milhares de pessoas
+            <p className="text-[12px] font-medium mb-2.5" style={{ color: textColor, opacity: 0.55 }}>
+              Prévia da publicação patrocinada
             </p>
             <div className="text-[14px] leading-relaxed break-words" style={{ color: textColor, opacity: 0.9 }}>
               <span className="font-semibold mr-2" style={{ color: textColor }}>{brandName}</span>

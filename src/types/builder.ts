@@ -99,6 +99,7 @@ export interface BannerFontSizes {
 
 export interface BuilderState {
   type: BuilderType;
+  generationError?: string;
   title?: string;
   subtitle?: string;
   body?: string;
