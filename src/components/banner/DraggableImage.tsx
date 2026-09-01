@@ -1,12 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Upload, AlertCircle, Move } from 'lucide-react';
-import type { BannerImageData, ObjectFit, Position } from './types';
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Upload, AlertCircle, Move } from "lucide-react";
+import type { BannerImageData, ObjectFit, Position } from "./types";
 
 export interface DraggableImageProps {
   image: BannerImageData | null;
   onChange: (image: BannerImageData | null) => void;
   onUpload: () => void;
-  containerRef: React.RefObject<HTMLElement>;
+  containerRef: React.RefObject<HTMLElement | null>;
   /** True when rendering for image export — disables all interactive UI */
   isExport?: boolean;
   /** True when this instance is the export clone — strips responsive classes */
@@ -34,12 +34,16 @@ export default function DraggableImage({
   containerRef,
   isExport,
   isExportClone,
-  objectFit = 'contain',
+  objectFit = "contain",
 }: DraggableImageProps) {
   const isExportMode = useExportMode(isExport, isExportClone);
   const nodeRef = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
-  const dragStart = useRef<{ mouseX: number; mouseY: number; pos: Position } | null>(null);
+  const dragStart = useRef<{
+    mouseX: number;
+    mouseY: number;
+    pos: Position;
+  } | null>(null);
 
   const handlePointerDown = useCallback(
     (e: React.PointerEvent) => {
@@ -75,8 +79,14 @@ export default function DraggableImage({
       onChange({
         ...image,
         pos: {
-          x: Math.min(100, Math.max(0, start.pos.x + (deltaX / rect.width) * 100)),
-          y: Math.min(100, Math.max(0, start.pos.y + (deltaY / rect.height) * 100)),
+          x: Math.min(
+            100,
+            Math.max(0, start.pos.x + (deltaX / rect.width) * 100),
+          ),
+          y: Math.min(
+            100,
+            Math.max(0, start.pos.y + (deltaY / rect.height) * 100),
+          ),
         },
       });
     };
@@ -86,11 +96,11 @@ export default function DraggableImage({
       dragStart.current = null;
     };
 
-    window.addEventListener('pointermove', handleMove);
-    window.addEventListener('pointerup', handleUp);
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
     return () => {
-      window.removeEventListener('pointermove', handleMove);
-      window.removeEventListener('pointerup', handleUp);
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
     };
   }, [dragging, image, onChange, containerRef]);
 
@@ -107,7 +117,9 @@ export default function DraggableImage({
         className="absolute left-1/2 top-1/2 z-10 flex h-28 w-28 -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center rounded-xl border-2 border-dashed border-white/40 bg-white/10 text-white/70 transition hover:bg-white/20 max-md:h-20 max-md:w-20"
       >
         <Upload className="mb-1 h-5 w-5 max-md:h-4 max-md:w-4" />
-        <span className="text-[10px] font-medium max-md:text-[8px]">Add image</span>
+        <span className="text-[10px] font-medium max-md:text-[8px]">
+          Add image
+        </span>
       </button>
     );
   }
@@ -126,27 +138,23 @@ export default function DraggableImage({
         transform: `translate(-50%, -50%) rotate(${image.rotation}deg)`,
       }}
       className={[
-        'absolute select-none',
+        "absolute select-none",
         // Preview mode only: cursor + resize ring; export mode strips all
-        isExportMode ? '' : dragging ? 'cursor-grabbing' : 'cursor-grab',
-        isExportMode ? '' : 'ring-2 ring-white/30 hover:ring-white/60',
-      ].join(' ')}
+        isExportMode ? "" : dragging ? "cursor-grabbing" : "cursor-grab",
+        isExportMode ? "" : "ring-2 ring-white/30 hover:ring-white/60",
+      ].join(" ")}
     >
       <img
         src={image.src}
         alt=""
         draggable={false}
         style={{
-          width: '100%',
-          height: '100%',
+          width: "100%",
+          height: "100%",
           objectFit,
-          // High-quality rendering hint for all <img> inside the banner
-          // 'high-quality' is valid CSS but TS types don't include it yet
-          imageRendering: 'high-quality' as React.CSSProperties['imageRendering'],
-          // WebKit fallback for Safari
-          WebkitFilter: 'optimize-contrast' as never,
-          pointerEvents: 'none',
-          display: 'block',
+          imageRendering: "auto",
+          pointerEvents: "none",
+          display: "block",
         }}
       />
       {/* Drag handle badge — preview only */}

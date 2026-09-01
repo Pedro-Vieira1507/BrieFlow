@@ -1,6 +1,6 @@
-export type ObjectFit = 'contain' | 'cover';
+export type ObjectFit = "contain" | "cover";
 
-export type BackgroundShape = 'blob' | 'diagonal' | 'curve' | 'solid';
+export type BackgroundShape = "blob" | "diagonal" | "curve" | "solid";
 
 export interface Position {
   x: number;
@@ -14,7 +14,7 @@ export interface BannerTextBlock {
   fontSize: number;
   fontWeight: number;
   color: string;
-  align: 'left' | 'center' | 'right';
+  align: "left" | "center" | "right";
   width: number;
 }
 

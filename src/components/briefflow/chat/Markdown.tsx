@@ -33,8 +33,16 @@ export function Markdown({ text }: { text: string }) {
         url: imageMatch[2],
       };
     }
-    if (boldMatch?.index !== undefined && (!next || boldMatch.index < next.idx)) {
-      next = { idx: boldMatch.index, len: boldMatch[0].length, type: "bold", text: boldMatch[1] };
+    if (
+      boldMatch?.index !== undefined &&
+      (!next || boldMatch.index < next.idx)
+    ) {
+      next = {
+        idx: boldMatch.index,
+        len: boldMatch[0].length,
+        type: "bold",
+        text: boldMatch[1],
+      };
     }
     if (
       italicMatch?.index !== undefined &&

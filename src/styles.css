@@ -3,6 +3,148 @@
 @source "../src";
 @import "tw-animate-css";
 
+.export-rendering,
+.export-rendering * {
+  animation: none !important;
+  caret-color: transparent !important;
+  transition: none !important;
+}
+
+#banner-export-node .banner-title-text {
+  font-size: var(--banner-title-size) !important;
+}
+
+#banner-export-node .banner-subtitle-text {
+  font-size: var(--banner-subtitle-size) !important;
+}
+
+#banner-export-node .banner-body-text {
+  font-size: var(--banner-body-size) !important;
+}
+
+#banner-export-node .banner-benefit-text {
+  font-size: var(--banner-benefits-size) !important;
+}
+
+#banner-export-node .banner-footer-text {
+  font-size: var(--banner-footer-size) !important;
+}
+
+#banner-export-node .banner-badge-primary-text {
+  font-size: var(--banner-badge-primary-size) !important;
+}
+
+#banner-export-node .banner-badge-secondary-text {
+  font-size: var(--banner-badge-secondary-size) !important;
+}
+
+/* Canonical 540×960 mobile composition for banner preview/export. */
+.force-mobile .banner-layout {
+  display: block !important;
+  height: 100% !important;
+  overflow: hidden !important;
+  position: relative !important;
+  width: 100% !important;
+}
+
+.force-mobile .banner-text-pane {
+  align-items: center !important;
+  height: 54% !important;
+  justify-content: center !important;
+  left: 0 !important;
+  margin: 0 !important;
+  padding: 32px 28px 20px !important;
+  position: absolute !important;
+  text-align: center !important;
+  top: 0 !important;
+  width: 100% !important;
+}
+
+.force-mobile .banner-centered-pane {
+  height: 54% !important;
+  left: 0 !important;
+  padding: 28px !important;
+  position: absolute !important;
+  top: 0 !important;
+  width: 100% !important;
+}
+
+.force-mobile .banner-text-pane h2,
+.force-mobile .banner-centered-pane h2 {
+  font-size: 40px !important;
+  line-height: 1.05 !important;
+}
+
+#banner-export-node.force-mobile .banner-title-text {
+  font-size: var(--banner-title-mobile-size) !important;
+}
+
+#banner-export-node.force-mobile .banner-subtitle-text {
+  font-size: var(--banner-subtitle-mobile-size) !important;
+}
+
+#banner-export-node.force-mobile .banner-body-text {
+  font-size: var(--banner-body-mobile-size) !important;
+}
+
+#banner-export-node.force-mobile .banner-benefit-text {
+  font-size: var(--banner-benefits-mobile-size) !important;
+}
+
+#banner-export-node.force-mobile .banner-footer-text {
+  font-size: var(--banner-footer-mobile-size) !important;
+}
+
+#banner-export-node.force-mobile .banner-badge-primary-text {
+  font-size: var(--banner-badge-primary-mobile-size) !important;
+}
+
+#banner-export-node.force-mobile .banner-badge-secondary-text {
+  font-size: var(--banner-badge-secondary-mobile-size) !important;
+}
+
+.force-mobile .banner-mobile-reset {
+  left: 0 !important;
+  top: 0 !important;
+}
+
+.force-mobile .banner-visual-pane,
+.force-mobile .banner-shape-panel {
+  bottom: 0 !important;
+  height: 46% !important;
+  inset: auto 0 0 0 !important;
+  margin: 0 !important;
+  position: absolute !important;
+  top: auto !important;
+  width: 100% !important;
+}
+
+.force-mobile .banner-product-layer > div {
+  bottom: 8% !important;
+  left: 8% !important;
+  top: auto !important;
+  transform: scale(0.9) !important;
+  transform-origin: bottom center !important;
+  width: 34% !important;
+}
+
+.force-mobile .banner-product-layer > div:nth-child(2) {
+  left: 58% !important;
+}
+
+.force-mobile .banner-product-layer > div:nth-child(3) {
+  bottom: 4% !important;
+  left: 33% !important;
+}
+
+.force-mobile .banner-mobile-badge {
+  bottom: 42% !important;
+  left: 50% !important;
+  right: auto !important;
+  top: auto !important;
+  transform: translateX(-50%) !important;
+}
+
 @custom-variant dark (&:is(.dark, .dark *));
 
 @theme inline {
@@ -42,80 +184,208 @@
   --radius-2xl: 24px;
 }
 
-:root, .dark {
-  /* Design: Tons de fundo mais profundos (Midnight em vez de Cinza Puro) */
-  --background: #030305;
-  --foreground: #ffffff;
+:root,
+.dark {
+  --background: #07080c;
+  --foreground: #f8f9fc;
 
-  --surface-0: #030305;
-  --surface-1: #09090b;
-  --surface-2: #121217;
-  --surface-3: #1a1a24;
+  --surface-0: #07080c;
+  --surface-1: #0d0f16;
+  --surface-2: #141722;
+  --surface-3: #1c2030;
 
-  --fg-primary: #ffffff;
-  --fg-secondary: rgba(255, 255, 255, 0.75);
-  --fg-tertiary: rgba(255, 255, 255, 0.55);
-  --fg-muted: rgba(255, 255, 255, 0.35);
+  --fg-primary: #f8f9fc;
+  --fg-secondary: rgba(240, 242, 250, 0.82);
+  --fg-tertiary: rgba(226, 230, 242, 0.62);
+  --fg-muted: rgba(210, 216, 234, 0.42);
 
-  --border: rgba(255, 255, 255, 0.08);
-  --border-subtle: rgba(255, 255, 255, 0.04);
-  --border-strong: rgba(255, 255, 255, 0.12);
+  --border: rgba(226, 230, 242, 0.1);
+  --border-subtle: rgba(226, 230, 242, 0.07);
+  --border-strong: rgba(226, 230, 242, 0.14);
 
-  --input: rgba(255, 255, 255, 0.08);
-  --ring: rgba(99, 102, 241, 0.6);
+  --input: rgba(226, 230, 242, 0.1);
+  --ring: rgba(139, 124, 255, 0.58);
 
-  /* Design: Brand mais vibrante */
-  --brand: #6366f1;
+  --brand: #8b7cff;
   --brand-fg: #ffffff;
-  --brand-muted: rgba(99, 102, 241, 0.15);
-  --brand-glow: rgba(99, 102, 241, 0.4);
+  --brand-muted: rgba(139, 124, 255, 0.13);
+  --brand-glow: rgba(139, 124, 255, 0.42);
 
   --accent-danger: #fb7185;
   --accent-success: #34d399;
 
-  --gradient-brand: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
-  --gradient-radial-brand: radial-gradient(circle at 50% 0%, rgba(99, 102, 241, 0.15), transparent 70%);
+  --gradient-brand: linear-gradient(
+    135deg,
+    #718cff 0%,
+    #9b6cff 55%,
+    #c06cff 100%
+  );
+  --gradient-radial-brand: radial-gradient(
+    circle at 52% -8%,
+    rgba(139, 124, 255, 0.16),
+    transparent 56%
+  );
 
   /* Design: Sombras mais ricas e cinematográficas */
-  --shadow-elevated: 0 24px 60px -12px rgba(0, 0, 0, 0.8), 0 8px 24px -4px rgba(0, 0, 0, 0.5);
-  --shadow-glass: 0 8px 32px -8px rgba(0, 0, 0, 0.6), inset 0 1px 0 0 rgba(255, 255, 255, 0.1);
-  --shadow-brand: 0 12px 30px -10px rgba(99, 102, 241, 0.6), inset 0 1px 0 0 rgba(255,255,255,0.2);
-  --shadow-soft: 0 4px 12px -2px rgba(0, 0, 0, 0.5);
+  --shadow-elevated:
+    0 30px 90px -28px rgba(0, 0, 0, 0.9), 0 12px 36px -18px rgba(0, 0, 0, 0.72);
+  --shadow-glass:
+    0 18px 50px -28px rgba(0, 0, 0, 0.8),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  --shadow-brand:
+    0 16px 36px -18px rgba(139, 124, 255, 0.8),
+    inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  --shadow-soft: 0 16px 40px -30px rgba(0, 0, 0, 0.82);
 }
 
 @layer base {
-  * { border-color: var(--border); }
-  html, body {
+  * {
+    border-color: var(--border);
+  }
+  html,
+  body {
+    min-height: 100%;
     background-color: var(--surface-0);
     color: var(--fg-primary);
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
-  h1, h2, h3, h4, h5 { font-family: var(--font-display); letter-spacing: -0.02em; color: var(--fg-primary); }
-  ::selection { background-color: var(--brand-muted); color: var(--brand); }
-
-  ::-webkit-scrollbar { width: 8px; height: 8px; }
-  ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { 
-    background: rgba(255, 255, 255, 0.1); 
-    border-radius: 999px; 
-    border: 2px solid var(--surface-0); 
+  h1,
+  h2,
+  h3,
+  h4,
+  h5 {
+    font-family: var(--font-display);
+    letter-spacing: -0.02em;
+    color: var(--fg-primary);
   }
-  ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.2); }
+  ::selection {
+    background-color: var(--brand-muted);
+    color: var(--brand);
+  }
+
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]) {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: not-allowed;
+  }
+  :focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--brand) 72%, white);
+    outline-offset: 2px;
+  }
+  input,
+  textarea,
+  select {
+    color-scheme: dark;
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 999px;
+    border: 2px solid var(--surface-0);
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.2);
+  }
+}
+
+.app-ambient {
+  background:
+    radial-gradient(
+      circle at 76% 2%,
+      rgba(113, 140, 255, 0.1),
+      transparent 32%
+    ),
+    radial-gradient(
+      circle at 42% 100%,
+      rgba(155, 108, 255, 0.06),
+      transparent 35%
+    );
+}
+
+.builder-scroll {
+  scrollbar-gutter: stable;
+}
+
+.editor-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.editor-toolbar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 640px) {
+  .editor-toolbar {
+    align-items: flex-start;
+    padding: 0.625rem;
+  }
+
+  .editor-toolbar-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto !important;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 @keyframes shimmer {
-  0% { background-position: -400px 0; }
-  100% { background-position: 400px 0; }
+  0% {
+    background-position: -400px 0;
+  }
+  100% {
+    background-position: 400px 0;
+  }
 }
 @keyframes fade-in-up {
-  from { opacity: 0; transform: translateY(12px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 @keyframes scale-in {
-  from { opacity: 0; transform: scale(0.95); }
-  to { opacity: 1; transform: scale(1); }
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 @utility glass {
@@ -132,7 +402,12 @@
 }
 
 @utility skeleton {
-  background: linear-gradient(90deg, var(--surface-2) 0%, var(--surface-3) 50%, var(--surface-2) 100%);
+  background: linear-gradient(
+    90deg,
+    var(--surface-2) 0%,
+    var(--surface-3) 50%,
+    var(--surface-2) 100%
+  );
   background-size: 800px 100%;
   animation: shimmer 2s infinite linear;
 }
@@ -154,7 +429,10 @@
 
 @utility editable-hover {
   cursor: text;
-  transition: outline-color 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease;
+  transition:
+    outline-color 0.2s ease,
+    background-color 0.2s ease,
+    box-shadow 0.2s ease;
   outline: 2px dashed transparent;
   outline-offset: 4px;
   border-radius: 8px;

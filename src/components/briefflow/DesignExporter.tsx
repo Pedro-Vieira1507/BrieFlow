@@ -1,339 +1,730 @@
-// src/components/briefflow/DesignExporter.tsx
-import React, { useState, useRef } from "react";
-import { Download, Monitor, Smartphone, FileCode, FileText, X, Loader2 } from "lucide-react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogClose } from "@/components/ui/dialog";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
-import { toPng, toJpeg } from "html-to-image";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import {
+  Download,
+  FileCode,
+  FileText,
+  Loader2,
+  Monitor,
+  Smartphone,
+} from "lucide-react";
+import { toJpeg, toPng } from "html-to-image";
 import { toast } from "sonner";
-import { cleanText } from "@/lib/sanitize";
+
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  buildSocialExportText,
+  calculatePreviewScale,
+  downloadBlob,
+  escapeHtml,
+  finishExport,
+  sanitizeFilenamePart,
+  serializeElementWithInlineStyles,
+  triggerDownload,
+  waitForExportAssets,
+} from "@/lib/export-utils";
+import { cn } from "@/lib/utils";
 
 import type { BuilderState } from "@/types/builder";
+import type { CoreMaterialType } from "@/types/brief";
 import { BannerPreview } from "./BannerPreview";
 import { EmailPreview } from "./EmailPreview";
 import { SocialPreview } from "./SocialPreview";
+
+type ExportTab = CoreMaterialType;
+type ExportFormat = "png" | "jpg";
+type ExportSize = { width: number; height: number };
+
+const DEFAULT_SOURCE_SIZES: Record<ExportTab, ExportSize> = {
+  banner: { width: 1200, height: 600 },
+  email: { width: 600, height: 800 },
+  social: { width: 420, height: 525 },
+};
+
+interface ExportPreviewFrameProps extends ExportSize {
+  children: ReactNode;
+  fit?: "contain" | "width";
+}
+
+function ExportPreviewFrame({
+  children,
+  fit = "contain",
+  height,
+  width,
+}: ExportPreviewFrameProps) {
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [contentSize, setContentSize] = useState<ExportSize>({ width, height });
+  const [scale, setScale] = useState(1);
+
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current;
+    const content = contentRef.current;
+    if (!viewport || !content) return;
+
+    const updateLayout = () => {
+      const exportNode =
+        content.querySelector<HTMLElement>("[data-export-node]");
+      const nextSize = {
+        width: Math.max(
+          width,
+          exportNode?.offsetWidth ?? 0,
+          exportNode?.scrollWidth ?? 0,
+        ),
+        height: Math.max(
+          height,
+          exportNode?.offsetHeight ?? 0,
+          exportNode?.scrollHeight ?? 0,
+        ),
+      };
+      const availableWidth = Math.max(1, viewport.clientWidth - 32);
+      const availableHeight = Math.max(1, viewport.clientHeight - 32);
+      const nextScale = calculatePreviewScale({
+        availableHeight,
+        availableWidth,
+        contentHeight: nextSize.height,
+        contentWidth: nextSize.width,
+        fitHeight: fit === "contain",
+      });
+
+      setContentSize((current) =>
+        current.width === nextSize.width && current.height === nextSize.height
+          ? current
+          : nextSize,
+      );
+      setScale((current) =>
+        Math.abs(current - nextScale) < 0.001 ? current : nextScale,
+      );
+    };
+
+    const resizeObserver = new ResizeObserver(updateLayout);
+    resizeObserver.observe(viewport);
+    const exportNode = content.querySelector<HTMLElement>("[data-export-node]");
+    if (exportNode) resizeObserver.observe(exportNode);
+    const frame = window.requestAnimationFrame(updateLayout);
+    window.addEventListener("resize", updateLayout);
+
+    return () => {
+      resizeObserver.disconnect();
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener("resize", updateLayout);
+    };
+  }, [fit, height, width]);
+
+  return (
+    <div
+      ref={viewportRef}
+      className={cn(
+        "flex min-h-0 w-full flex-1 items-start justify-center p-2 sm:p-4",
+        fit === "contain" ? "overflow-hidden" : "overflow-auto",
+      )}
+    >
+      <div
+        className="relative shrink-0"
+        style={{
+          height: contentSize.height * scale,
+          width: contentSize.width * scale,
+        }}
+      >
+        <div
+          ref={contentRef}
+          className="absolute left-0 top-0 origin-top-left"
+          style={{
+            minHeight: contentSize.height,
+            pointerEvents: "none",
+            transform: `scale(${scale})`,
+            transformOrigin: "top left",
+            width: contentSize.width,
+          }}
+        >
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 interface DesignExporterProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   state?: BuilderState;
+  initialTab?: ExportTab;
+  onExportingChange?: (isExporting: boolean) => void;
 }
 
-export function DesignExporter({ open, onOpenChange, state }: DesignExporterProps) {
-  const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
-  const [activeTab, setActiveTab] = useState("banner");
-  const [isExporting, setIsExporting] = useState(false);
+function getAssetState(
+  state: BuilderState | undefined,
+  type: ExportTab,
+): BuilderState | undefined {
+  if (!state) return undefined;
+  if (state.type === "campaign") {
+    return state.campaignAssets?.find((asset) => asset.type === type)?.content;
+  }
+  return state.type === type ? state : undefined;
+}
 
-  // Referências para capturar o conteúdo DOM para a foto
+function getInitialTab(
+  state: BuilderState | undefined,
+  requested?: ExportTab,
+): ExportTab {
+  if (requested && getAssetState(state, requested)) return requested;
+  if (
+    state?.type === "banner" ||
+    state?.type === "email" ||
+    state?.type === "social"
+  ) {
+    return state.type;
+  }
+  if (state?.type === "campaign") {
+    const asset = state.campaignAssets?.find((candidate) =>
+      ["banner", "email", "social"].includes(candidate.type),
+    );
+    return asset ? (asset.type as ExportTab) : "banner";
+  }
+  return "banner";
+}
+
+export function DesignExporter({
+  open,
+  onOpenChange,
+  state,
+  initialTab,
+  onExportingChange,
+}: DesignExporterProps) {
+  const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
+  const [activeTab, setActiveTab] = useState<ExportTab>(() =>
+    getInitialTab(state, initialTab),
+  );
+  const [isExporting, setIsExporting] = useState(false);
+  const [sourceSizes, setSourceSizes] = useState(DEFAULT_SOURCE_SIZES);
+
   const bannerRef = useRef<HTMLDivElement>(null);
   const emailRef = useRef<HTMLDivElement>(null);
   const socialRef = useRef<HTMLDivElement>(null);
+  const isExportingRef = useRef(false);
 
-  // Extrair os estados individuais para cada peça de marketing da campanha
-  const campaignAssets = state?.type === "campaign" ? state.campaignAssets : [];
-  const bannerState = campaignAssets?.find(a => a.type === "banner")?.content;
-  const emailState = campaignAssets?.find(a => a.type === "email")?.content;
-  const socialState = campaignAssets?.find(a => a.type === "social")?.content;
+  const bannerState = getAssetState(state, "banner");
+  const emailState = getAssetState(state, "email");
+  const socialState = getAssetState(state, "social");
 
-  const getBrandName = (c: any) => cleanText(c?.brandName, "Marca");
+  useEffect(() => {
+    if (open) setActiveTab(getInitialTab(state, initialTab));
+  }, [initialTab, open, state]);
 
-  // Exportação em Imagem com Qualidade Retina (Para Banner e Social)
-  const handleExportImage = async (format: "png" | "jpg") => {
-    setIsExporting(true);
-    const toastId = toast.loading(`Renderizando ${activeTab} em ${format.toUpperCase()}...`);
+  useLayoutEffect(() => {
+    if (!open) return;
+
+    const measureSourceCanvases = () => {
+      const exportContainers = [
+        bannerRef.current,
+        emailRef.current,
+        socialRef.current,
+      ];
+      const nextSizes = { ...DEFAULT_SOURCE_SIZES };
+
+      (["banner", "email", "social"] as ExportTab[]).forEach((tab) => {
+        const candidates = Array.from(
+          document.querySelectorAll<HTMLElement>(`[data-export-node="${tab}"]`),
+        );
+        const sourceNode = candidates.find(
+          (candidate) =>
+            candidate.offsetParent !== null &&
+            !exportContainers.some((container) =>
+              container?.contains(candidate),
+            ),
+        );
+        if (!sourceNode) return;
+
+        const rect = sourceNode.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) {
+          nextSizes[tab] = {
+            width: Math.round(rect.width),
+            height: Math.round(rect.height),
+          };
+        }
+      });
+
+      setSourceSizes(nextSizes);
+    };
+
+    const frame = window.requestAnimationFrame(measureSourceCanvases);
+    return () => window.cancelAnimationFrame(frame);
+  }, [open, state]);
+
+  const setExporting = (next: boolean) => {
+    isExportingRef.current = next;
+    setIsExporting(next);
+    onExportingChange?.(next);
+  };
+
+  const beginExport = () => {
+    if (isExportingRef.current) return false;
+    setExporting(true);
+    return true;
+  };
+
+  const getExportNode = (tab: ExportTab): HTMLElement | null => {
+    const container =
+      tab === "banner"
+        ? bannerRef.current
+        : tab === "email"
+          ? emailRef.current
+          : socialRef.current;
+    return container?.querySelector<HTMLElement>(`#${tab}-export-node`) ?? null;
+  };
+
+  const handleExportImage = async (format: ExportFormat) => {
+    if (!beginExport()) return;
+
+    const toastId = toast.loading(
+      `Renderizando ${activeTab === "banner" ? "o banner" : "a arte social"} em ${format.toUpperCase()}...`,
+    );
+    let exportNode: HTMLElement | null = null;
 
     try {
-      const container = activeTab === "banner" ? bannerRef.current : socialRef.current;
-      const selector = activeTab === "banner" ? '#banner-export-node' : '#social-export-node';
-      const exportNode = container?.querySelector(selector) as HTMLElement;
+      if (activeTab === "email") {
+        throw new Error("A exportação de e-mail está disponível em HTML.");
+      }
 
-      if (!exportNode) throw new Error("Arte não encontrada na tela. Verifique se o design foi gerado.");
+      exportNode = getExportNode(activeTab);
+      if (!exportNode) {
+        throw new Error(
+          "Arte não encontrada. Verifique se o design foi gerado.",
+        );
+      }
 
-      // CORREÇÃO: Aguardar a imagem e fontes terminarem de renderizar antes da captura real
-      await new Promise(res => setTimeout(res, 300));
+      await waitForExportAssets(exportNode);
 
-      const width = exportNode.offsetWidth;
-      const height = exportNode.offsetHeight;
+      const width = Math.ceil(
+        Math.max(exportNode.offsetWidth, exportNode.scrollWidth),
+      );
+      const height = Math.ceil(
+        Math.max(exportNode.offsetHeight, exportNode.scrollHeight),
+      );
       const currentState = activeTab === "banner" ? bannerState : socialState;
-      const brandName = getBrandName(currentState);
+      const brandSlug = sanitizeFilenamePart(currentState?.brandName);
+      const targetWidth =
+        activeTab === "social"
+          ? 1080
+          : device === "mobile"
+            ? format === "png"
+              ? 1080
+              : 540
+            : format === "png"
+              ? 2400
+              : 1200;
+      const pixelRatio = targetWidth / width;
+      const backgroundColor =
+        currentState?.boxColor || (format === "jpg" ? "#ffffff" : undefined);
 
-      // Travar larguras fixas garante captura total, desativa escalas virtuais de CSS.
-      const options = {
-        pixelRatio: 2,
-        backgroundColor: currentState?.boxColor || (format === "jpg" ? '#ffffff' : null),
-        skipFonts: true,
-        width: width,
-        height: height,
-        style: { transform: 'scale(1)', transformOrigin: 'top left', margin: '0' }
+      const options: NonNullable<Parameters<typeof toPng>[1]> = {
+        width,
+        height,
+        pixelRatio,
+        backgroundColor,
+        cacheBust: true,
+        includeQueryParams: true,
+        quality: format === "jpg" ? 0.88 : undefined,
+        filter: (node) => node.dataset?.exportExclude !== "true",
+        style: {
+          height: `${height}px`,
+          margin: "0",
+          maxHeight: "none",
+          maxWidth: "none",
+          transform: "none",
+          transformOrigin: "top left",
+          width: `${width}px`,
+        },
       };
 
-      const dataUrl = format === "png"
-        ? await toPng(exportNode, options)
-        : await toJpeg(exportNode, options);
+      const dataUrl =
+        format === "png"
+          ? await toPng(exportNode, options)
+          : await toJpeg(exportNode, options);
+      const outputWidth = Math.round(width * pixelRatio);
+      const outputHeight = Math.round(height * pixelRatio);
+      const filename = `${activeTab}_${activeTab === "banner" ? device : "4x5"}_${brandSlug}_${outputWidth}x${outputHeight}.${format}`;
 
-      const a = document.createElement("a");
-      a.href = dataUrl;
-      a.download = `${activeTab}_${device}_${brandName.replace(/\s+/g, '_').toLowerCase()}_${width}x${height}.${format}`;
-      a.click();
-
+      triggerDownload(dataUrl, filename);
       toast.success("Arte exportada com sucesso!", { id: toastId });
-    } catch (error: any) {
-      toast.error(error.message || "Erro ao exportar arte", { id: toastId });
-      console.error(error);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Erro ao exportar arte.";
+      toast.error(message, { id: toastId });
+      console.error("Falha na exportação de imagem:", error);
     } finally {
-      setIsExporting(false);
+      if (exportNode) finishExport(exportNode);
+      setExporting(false);
     }
   };
 
-  // Exportação de E-mail (HTML)
-  const handleExportHTML = () => {
-    if (!emailRef.current || !emailState) return;
-    try {
-      const exportNode = emailRef.current.querySelector('#email-export-node') as HTMLElement;
-      if (!exportNode) throw new Error("E-mail não encontrado na tela.");
+  const handleExportHtml = async () => {
+    if (!emailState || !beginExport()) return;
 
-      const brandName = getBrandName(emailState);
-      const htmlContent = `<!DOCTYPE html>
+    const toastId = toast.loading("Preparando o HTML do e-mail...");
+    let exportNode: HTMLElement | null = null;
+
+    try {
+      exportNode = getExportNode("email");
+      if (!exportNode) throw new Error("E-mail não encontrado na prévia.");
+
+      await waitForExportAssets(exportNode);
+
+      const brandName =
+        String(emailState.brandName ?? "Marca").trim() || "Marca";
+      const renderedEmail = serializeElementWithInlineStyles(exportNode);
+      const htmlContent = `<!doctype html>
 <html lang="pt-BR">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>E-mail Marketing - ${brandName}</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <style>
-    body { margin: 0; padding: 40px; background-color: #1a1a24; display: flex; justify-content: center; align-items: flex-start; min-height: 100vh; }
-    .editable-hover { outline: none !important; cursor: default !important; }
-  </style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="generator" content="BrieFlow">
+  <title>E-mail Marketing - ${escapeHtml(brandName)}</title>
 </head>
-<body>
-  ${exportNode.outerHTML}
+<body style="margin:0;padding:24px;background:#f3f4f6;display:flex;justify-content:center;align-items:flex-start;min-height:100vh;box-sizing:border-box">
+  ${renderedEmail}
 </body>
 </html>`;
 
-      const blobHtml = new Blob([htmlContent], { type: "text/html;charset=utf-8" });
-      const htmlUrl = URL.createObjectURL(blobHtml);
-
-      const aHtml = document.createElement("a");
-      aHtml.href = htmlUrl;
-      aHtml.download = `email_template_${brandName.replace(/\s+/g, "_").toLowerCase()}.html`;
-      aHtml.click();
-      URL.revokeObjectURL(htmlUrl);
-      toast.success("HTML estruturado exportado!");
-    } catch (error: any) {
-      toast.error(error.message || "Erro ao gerar o HTML");
+      downloadBlob(
+        new Blob([htmlContent], { type: "text/html;charset=utf-8" }),
+        `email_${device}_${sanitizeFilenamePart(brandName)}.html`,
+      );
+      toast.success("HTML autônomo exportado com sucesso!", { id: toastId });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Erro ao gerar o HTML.";
+      toast.error(message, { id: toastId });
+      console.error("Falha na exportação de HTML:", error);
+    } finally {
+      if (exportNode) finishExport(exportNode);
+      setExporting(false);
     }
   };
 
-  // Exportação de TXT para Redes Sociais
-  const handleExportSocialTXT = () => {
-    if (!socialState) return;
+  const handleExportSocialText = () => {
+    if (!socialState || !beginExport()) return;
+
     try {
-      const c = socialState as any;
-      const brandName = getBrandName(c);
-      const caption = cleanText(c.caption, "");
-      const captionParts = caption.split(/(#\w+)/g);
-      const textContent = `${brandName}\n\n${caption}\n\n${captionParts.filter((p: string) => p.startsWith("#")).join(" ")}`;
-
-      const textBlob = new Blob([textContent], { type: "text/plain;charset=utf-8" });
-      const textUrl = URL.createObjectURL(textBlob);
-
-      const aText = document.createElement("a");
-      aText.href = textUrl;
-      aText.download = `social_${brandName.replace(/\s+/g, "_").toLowerCase()}_legenda.txt`;
-      aText.click();
-      URL.revokeObjectURL(textUrl);
-
-      toast.success("Legenda (TXT) baixada com sucesso!");
-    } catch (error: any) {
-      toast.error("Erro ao gerar o arquivo TXT");
+      const brandName =
+        String(socialState.brandName ?? "Marca").trim() || "Marca";
+      const textContent = buildSocialExportText(socialState);
+      downloadBlob(
+        new Blob([textContent], { type: "text/plain;charset=utf-8" }),
+        `social_${sanitizeFilenamePart(brandName)}_legenda.txt`,
+      );
+      toast.success("Legenda exportada com sucesso!");
+    } catch (error) {
+      toast.error("Erro ao gerar o arquivo de legenda.");
+      console.error("Falha na exportação de legenda:", error);
+    } finally {
+      setExporting(false);
     }
   };
 
-  // CORREÇÃO: O segredo para não cortar e esticar!
-  // No mobile, a altura (height) agora é "auto" (min-height e h-auto), o que faz o bloco crescer o quanto precisar
-  // ao invés de travar e "espremer" os itens no celular. No desktop é largura de tela larga fixa.
-  const getDeviceStyle = () => {
-    return device === "desktop"
-      ? { width: '1200px', height: '600px', borderRadius: '0px', overflow: 'hidden' }
-      // Deixe o height auto no mobile para as flex-columns empilharem sem cortar
-      : { width: '540px', minHeight: '960px', height: 'max-content', borderRadius: '0px', overflow: 'hidden' };
-  };
+  const bannerStyle: React.CSSProperties =
+    device === "desktop"
+      ? {
+          width: 1200,
+          height: 600,
+          borderRadius: 0,
+          overflow: "hidden",
+        }
+      : {
+          width: 540,
+          height: 960,
+          borderRadius: 0,
+          overflow: "hidden",
+        };
+  const emailStyle: React.CSSProperties =
+    device === "desktop"
+      ? {
+          width: sourceSizes.email.width,
+          minHeight: sourceSizes.email.height,
+          height: "auto",
+          borderRadius: 0,
+        }
+      : { width: 540, minHeight: 960, height: "auto", borderRadius: 0 };
+
+  const bannerPreviewSize =
+    device === "desktop"
+      ? { width: 1200, height: 600 }
+      : { width: 540, height: 960 };
+  const emailPreviewSize =
+    device === "desktop" ? sourceSizes.email : { width: 540, height: 960 };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[1100px] w-[95vw] h-[90vh] bg-surface-1 border-border-strong text-fg-primary shadow-2xl flex flex-col p-0 overflow-hidden gap-0 rounded-2xl">
-        {/* Header */}
-        <DialogHeader className="px-6 py-4 border-b border-border-subtle bg-surface-2 flex flex-row items-center justify-between shrink-0">
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!isExporting || nextOpen) onOpenChange(nextOpen);
+      }}
+    >
+      <DialogContent className="flex h-[100dvh] w-screen max-w-none flex-col gap-0 overflow-hidden rounded-none border-border-strong bg-surface-1 p-0 text-fg-primary shadow-[var(--shadow-elevated)] sm:h-[92vh] sm:w-[96vw] sm:max-w-[1120px] sm:rounded-[24px]">
+        <DialogHeader className="flex shrink-0 flex-col gap-3 border-b border-border-subtle bg-surface-1/95 px-4 py-4 pr-14 text-left backdrop-blur-xl sm:flex-row sm:items-center sm:justify-between sm:px-6 sm:py-5 sm:pr-14">
           <div>
-            <DialogTitle className="text-xl font-display flex items-center gap-2">
-              Exportar Design
+            <DialogTitle className="font-display text-lg font-semibold tracking-tight sm:text-xl">
+              Central de exportação
             </DialogTitle>
-            <DialogDescription className="text-sm text-fg-tertiary mt-1">
-              Baixe seus criativos em alta qualidade (Render real do componente).
+            <DialogDescription className="mt-1 text-xs leading-5 text-fg-tertiary sm:text-sm">
+              Confira a peça no formato final antes de baixar.
             </DialogDescription>
           </div>
 
-          <div className="flex items-center gap-4">
-            <div className="flex items-center p-1 bg-surface-3 rounded-lg border border-border-subtle">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setDevice("desktop")}
-                className={cn(
-                  "h-8 px-3 rounded-md transition-all",
-                  device === "desktop" ? "bg-surface-1 text-brand shadow-sm" : "text-fg-muted hover:text-fg-primary"
-                )}
-              >
-                <Monitor className="size-4 mr-2" />
-                Desktop
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setDevice("mobile")}
-                className={cn(
-                  "h-8 px-3 rounded-md transition-all",
-                  device === "mobile" ? "bg-surface-1 text-brand shadow-sm" : "text-fg-muted hover:text-fg-primary"
-                )}
-              >
-                <Smartphone className="size-4 mr-2" />
-                Mobile
-              </Button>
-            </div>
-            <DialogClose asChild>
-              <Button variant="ghost" size="icon" className="rounded-full text-fg-muted hover:bg-surface-3">
-                <X className="size-5" />
-              </Button>
-            </DialogClose>
+          <div className="flex items-center">
+            {activeTab !== "social" && (
+              <div className="grid w-full grid-cols-2 rounded-xl border border-border-subtle bg-surface-2 p-1 sm:w-auto">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={isExporting}
+                  onClick={() => setDevice("desktop")}
+                  className={cn(
+                    "h-8 rounded-lg px-3 text-xs transition-all",
+                    device === "desktop"
+                      ? "bg-surface-1 text-brand shadow-sm"
+                      : "text-fg-muted hover:text-fg-primary",
+                  )}
+                >
+                  <Monitor className="mr-2 size-3.5" /> Desktop
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={isExporting}
+                  onClick={() => setDevice("mobile")}
+                  className={cn(
+                    "h-8 rounded-lg px-3 text-xs transition-all",
+                    device === "mobile"
+                      ? "bg-surface-1 text-brand shadow-sm"
+                      : "text-fg-muted hover:text-fg-primary",
+                  )}
+                >
+                  <Smartphone className="mr-2 size-3.5" /> Mobile
+                </Button>
+              </div>
+            )}
           </div>
         </DialogHeader>
 
-        {/* Body: Tabs & Preview */}
         <div className="flex-1 flex flex-col min-h-0 bg-surface-0">
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col h-full">
-            <div className="px-6 pt-4 border-b border-border-subtle bg-surface-1 shrink-0">
-              <TabsList className="bg-surface-2 p-1">
-                <TabsTrigger value="banner" className="data-[state=active]:bg-surface-1 data-[state=active]:text-brand">
+          <Tabs
+            value={activeTab}
+            onValueChange={(value) => setActiveTab(value as ExportTab)}
+            className="flex h-full min-h-0 flex-col"
+          >
+            <div className="shrink-0 border-b border-border-subtle bg-surface-1 px-3 pt-3 sm:px-6 sm:pt-4">
+              <TabsList className="grid h-11 w-full grid-cols-3 rounded-xl bg-surface-2 p-1 sm:w-[360px]">
+                <TabsTrigger
+                  value="banner"
+                  disabled={isExporting || !bannerState}
+                  className="rounded-lg text-xs"
+                >
                   Banner
                 </TabsTrigger>
-                <TabsTrigger value="email" className="data-[state=active]:bg-surface-1 data-[state=active]:text-brand">
+                <TabsTrigger
+                  value="email"
+                  disabled={isExporting || !emailState}
+                  className="rounded-lg text-xs"
+                >
                   E-mail
                 </TabsTrigger>
-                <TabsTrigger value="social" className="data-[state=active]:bg-surface-1 data-[state=active]:text-brand">
-                  Post Social
+                <TabsTrigger
+                  value="social"
+                  disabled={isExporting || !socialState}
+                  className="rounded-lg text-xs"
+                >
+                  Social
                 </TabsTrigger>
               </TabsList>
             </div>
 
-            <div className="flex-1 overflow-auto p-6 flex flex-col items-center justify-start relative w-full h-full custom-scrollbar" style={{ backgroundImage: 'radial-gradient(circle at center, var(--surface-2) 2px, var(--surface-0) 2px)', backgroundSize: '24px 24px' }}>
-
-              {/* BANNER TAB */}
-              <TabsContent value="banner" className="w-full h-full m-0 flex flex-col items-center data-[state=inactive]:hidden">
-                <div className="flex-1 w-full flex items-center justify-center py-4 overflow-y-auto" ref={bannerRef}>
-
-                  {/* CORREÇÃO DO SCALE: Escalas ajustadas para não transbordar o Modal visualmente */}
-                  <div className={cn("origin-top transition-transform duration-500 mx-auto", device === "desktop" ? "scale-[0.45] md:scale-[0.55] lg:scale-[0.65]" : "scale-[0.50] md:scale-[0.60]")}>
+            <div
+              className="custom-scrollbar relative flex min-h-0 w-full flex-1 flex-col items-center justify-start overflow-hidden p-2 sm:p-5"
+              style={{
+                backgroundImage:
+                  "radial-gradient(circle at center, var(--surface-2) 2px, var(--surface-0) 2px)",
+                backgroundSize: "24px 24px",
+              }}
+            >
+              <TabsContent
+                value="banner"
+                className="w-full h-full min-h-0 m-0 flex flex-col items-center data-[state=inactive]:hidden"
+              >
+                <div className="flex min-h-0 w-full flex-1" ref={bannerRef}>
+                  <ExportPreviewFrame
+                    width={bannerPreviewSize.width}
+                    height={bannerPreviewSize.height}
+                  >
                     {bannerState ? (
                       <BannerPreview
                         state={bannerState}
-                        onChange={() => { }}
-                        // Adicionado !flex-col-reverse para empilhar o texto em cima e a foto embaixo
-                        exportWrapperClass={device === "mobile" ? "export-mode force-mobile !flex-col-reverse" : "export-mode"}
-                        exportWrapperStyle={getDeviceStyle()}
+                        onChange={() => undefined}
+                        exportWrapperClass={
+                          device === "mobile"
+                            ? "export-mode force-mobile"
+                            : "export-mode"
+                        }
+                        exportWrapperStyle={bannerStyle}
                       />
                     ) : (
                       <div className="w-[800px] h-[400px] flex items-center justify-center border-2 border-dashed border-border-subtle rounded-xl bg-surface-1">
-                        <p className="text-fg-muted font-medium">Nenhum Banner gerado no momento.</p>
+                        <p className="text-fg-muted font-medium">
+                          Nenhum banner gerado.
+                        </p>
                       </div>
                     )}
-                  </div>
+                  </ExportPreviewFrame>
                 </div>
-
-                <div className="mt-auto pt-4 flex gap-3 w-full justify-center shrink-0">
-                  <Button onClick={() => handleExportImage("png")} disabled={!bannerState || isExporting} className="bg-brand text-brand-fg hover:brightness-110 shadow-[var(--shadow-brand)]">
-                    {isExporting ? <Loader2 className="size-4 mr-2 animate-spin" /> : <Download className="size-4 mr-2" />}
-                    Baixar Alta Qualidade (PNG)
+                <div className="mt-auto flex w-full shrink-0 flex-col justify-center gap-2 border-t border-border-subtle bg-surface-0/90 pt-3 backdrop-blur sm:flex-row sm:flex-wrap sm:gap-3 sm:pt-4">
+                  <Button
+                    onClick={() => handleExportImage("png")}
+                    disabled={!bannerState || isExporting}
+                    className="w-full rounded-xl bg-brand text-brand-fg shadow-[var(--shadow-brand)] hover:brightness-110 sm:w-auto"
+                  >
+                    {isExporting ? (
+                      <Loader2 className="size-4 mr-2 animate-spin" />
+                    ) : (
+                      <Download className="size-4 mr-2" />
+                    )}
+                    Baixar alta qualidade (PNG)
                   </Button>
-                  <Button onClick={() => handleExportImage("jpg")} disabled={!bannerState || isExporting} variant="outline" className="border-border-strong bg-surface-1 text-fg-primary">
-                    Baixar Leve (JPG)
+                  <Button
+                    onClick={() => handleExportImage("jpg")}
+                    disabled={!bannerState || isExporting}
+                    variant="outline"
+                    className="w-full rounded-xl border-border-strong bg-surface-1 text-fg-primary sm:w-auto"
+                  >
+                    Baixar compacto (JPG)
                   </Button>
                 </div>
               </TabsContent>
 
-              {/* EMAIL TAB */}
-              <TabsContent value="email" className="w-full h-full m-0 flex flex-col items-center data-[state=inactive]:hidden">
-                <div className="flex-1 w-full flex items-center justify-center py-4" ref={emailRef}>
-                  <div className={cn("origin-top transition-transform duration-500", device === "desktop" ? "scale-[0.55]" : "scale-[0.65]")}>
+              <TabsContent
+                value="email"
+                className="w-full h-full min-h-0 m-0 flex flex-col items-center data-[state=inactive]:hidden"
+              >
+                <div className="flex min-h-0 w-full flex-1" ref={emailRef}>
+                  <ExportPreviewFrame
+                    width={emailPreviewSize.width}
+                    height={emailPreviewSize.height}
+                    fit="width"
+                  >
                     {emailState ? (
                       <EmailPreview
                         state={emailState}
-                        onChange={() => { }}
-                        exportWrapperClass={device === "mobile" ? "export-mode force-mobile" : "export-mode"}
-                        exportWrapperStyle={device === "desktop" ? { width: '800px', height: 'auto', minHeight: '600px', borderRadius: '0px' } : { width: '540px', height: 'auto', minHeight: '960px', borderRadius: '0px' }}
+                        onChange={() => undefined}
+                        exportWrapperClass={
+                          device === "mobile"
+                            ? "export-mode force-mobile"
+                            : "export-mode"
+                        }
+                        exportWrapperStyle={emailStyle}
                       />
                     ) : (
                       <div className="w-[600px] h-[600px] flex items-center justify-center border-2 border-dashed border-border-subtle rounded-xl bg-surface-1">
-                        <p className="text-fg-muted font-medium">Nenhum E-mail gerado no momento.</p>
+                        <p className="text-fg-muted font-medium">
+                          Nenhum e-mail gerado.
+                        </p>
                       </div>
                     )}
-                  </div>
+                  </ExportPreviewFrame>
                 </div>
-                <div className="mt-auto pt-4 flex gap-3 w-full justify-center shrink-0">
-                  <Button onClick={handleExportHTML} disabled={!emailState} className="bg-blue-600 text-white hover:bg-blue-700 shadow-lg shadow-blue-900/20">
-                    <FileCode className="size-4 mr-2" />
-                    Baixar Template HTML
+                <div className="mt-auto flex w-full shrink-0 justify-center border-t border-border-subtle bg-surface-0/90 pt-3 backdrop-blur sm:pt-4">
+                  <Button
+                    onClick={handleExportHtml}
+                    disabled={!emailState || isExporting}
+                    className="w-full rounded-xl bg-brand text-white shadow-[var(--shadow-brand)] hover:brightness-110 sm:w-auto"
+                  >
+                    {isExporting ? (
+                      <Loader2 className="size-4 mr-2 animate-spin" />
+                    ) : (
+                      <FileCode className="size-4 mr-2" />
+                    )}
+                    Baixar HTML autônomo
                   </Button>
                 </div>
               </TabsContent>
 
-              {/* SOCIAL TAB */}
-              <TabsContent value="social" className="w-full h-full m-0 flex flex-col items-center data-[state=inactive]:hidden">
-                <div className="flex-1 w-full flex items-center justify-center gap-12" ref={socialRef}>
-
-                  {/* Arte Visual - Escalada via CSS nativo */}
-                  <div className={cn("origin-top transition-transform duration-500", device === "desktop" ? "scale-[0.60]" : "scale-[0.70]")}>
-                    {socialState ? (
-                      <SocialPreview
-                        state={socialState}
-                        onChange={() => { }}
-                        exportWrapperClass="export-mode"
-                        exportWrapperStyle={{ width: '1080px', height: '1080px', borderRadius: '0px' }}
-                      />
-                    ) : (
-                      <div className="w-[600px] h-[600px] flex items-center justify-center border-2 border-dashed border-border-subtle rounded-xl bg-surface-1">
-                        <p className="text-fg-muted font-medium">Nenhum Post gerado.</p>
-                      </div>
-                    )}
+              <TabsContent
+                value="social"
+                className="w-full h-full min-h-0 m-0 flex flex-col items-center data-[state=inactive]:hidden"
+              >
+                <div
+                  className="flex min-h-0 w-full flex-1 items-stretch justify-center gap-6 overflow-hidden"
+                  ref={socialRef}
+                >
+                  <div className="flex min-h-0 min-w-0 flex-1">
+                    <ExportPreviewFrame
+                      width={sourceSizes.social.width}
+                      height={sourceSizes.social.height}
+                    >
+                      {socialState ? (
+                        <SocialPreview
+                          state={socialState}
+                          onChange={() => undefined}
+                          exportWrapperClass="export-mode"
+                          exportWrapperStyle={{
+                            width: sourceSizes.social.width,
+                          }}
+                        />
+                      ) : (
+                        <div className="w-[600px] h-[600px] flex items-center justify-center border-2 border-dashed border-border-subtle rounded-xl bg-surface-1">
+                          <p className="text-fg-muted font-medium">
+                            Nenhum post gerado.
+                          </p>
+                        </div>
+                      )}
+                    </ExportPreviewFrame>
                   </div>
 
-                  {/* Mostra a Legenda Paralelamente */}
                   {socialState && (
-                    <div className="w-[320px] h-[450px] bg-surface-1 rounded-xl shadow-2xl border border-border-subtle p-6 flex flex-col self-center">
+                    <div className="hidden h-full max-h-[450px] w-[300px] shrink-0 flex-col self-center rounded-2xl border border-border-subtle bg-surface-1 p-5 shadow-[var(--shadow-elevated)] lg:flex">
                       <h4 className="text-sm font-bold text-fg-muted uppercase tracking-widest mb-4 flex items-center gap-2">
                         <FileText className="size-4" /> Legenda
                       </h4>
                       <div className="flex-1 bg-surface-2 rounded-lg p-4 text-sm text-fg-primary overflow-y-auto border border-border-subtle whitespace-pre-wrap">
-                        {(socialState as any).caption || ""}
-                        <br /><br />
-                        {((socialState as any).hashtags || []).map((h: string) => `#${h}`).join(" ")}
+                        {buildSocialExportText(socialState)}
                       </div>
                     </div>
                   )}
-
                 </div>
-                <div className="mt-auto pt-4 flex gap-3 w-full justify-center shrink-0">
-                  <Button onClick={() => handleExportImage("png")} disabled={!socialState || isExporting} className="bg-pink-600 text-white hover:bg-pink-700 shadow-lg shadow-pink-900/20">
-                    {isExporting ? <Loader2 className="size-4 mr-2 animate-spin" /> : <Download className="size-4 mr-2" />}
-                    Baixar Imagem 1:1
+                <div className="mt-auto flex w-full shrink-0 flex-col justify-center gap-2 border-t border-border-subtle bg-surface-0/90 pt-3 backdrop-blur sm:flex-row sm:flex-wrap sm:gap-3 sm:pt-4">
+                  <Button
+                    onClick={() => handleExportImage("png")}
+                    disabled={!socialState || isExporting}
+                    className="w-full rounded-xl bg-brand text-white shadow-[var(--shadow-brand)] hover:brightness-110 sm:w-auto"
+                  >
+                    {isExporting ? (
+                      <Loader2 className="size-4 mr-2 animate-spin" />
+                    ) : (
+                      <Download className="size-4 mr-2" />
+                    )}
+                    Baixar arte 4:5 (PNG)
                   </Button>
-                  <Button onClick={handleExportSocialTXT} disabled={!socialState} variant="outline" className="border-border-strong bg-surface-1">
-                    <FileText className="size-4 mr-2" />
-                    Salvar Legenda (TXT)
+                  <Button
+                    onClick={handleExportSocialText}
+                    disabled={!socialState || isExporting}
+                    variant="outline"
+                    className="w-full rounded-xl border-border-strong bg-surface-1 sm:w-auto"
+                  >
+                    <FileText className="size-4 mr-2" /> Salvar legenda (TXT)
                   </Button>
                 </div>
               </TabsContent>
-
             </div>
           </Tabs>
         </div>

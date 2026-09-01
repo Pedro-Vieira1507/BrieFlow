@@ -6,18 +6,23 @@ export function ChatMessage({ message }: { message: Msg }) {
   const isUser = message.role === "user";
 
   return (
-    <div className={cn("flex fade-in-up", isUser ? "justify-end" : "justify-start")}>
+    <div
+      className={cn(
+        "flex fade-in-up",
+        isUser ? "justify-end" : "justify-start",
+      )}
+    >
       <div
         className={cn(
-          "text-[14px] leading-relaxed",
+          "text-[13px] leading-6 sm:text-[14px]",
           isUser
             ? cn(
-                "max-w-[85%] rounded-2xl rounded-tr-md px-4 py-3",
-                "bg-brand text-brand-fg shadow-[var(--shadow-brand)]",
+                "max-w-[88%] rounded-[18px] rounded-br-md border border-white/8 px-4 py-2.5",
+                "bg-brand text-brand-fg shadow-[0_12px_30px_-18px_var(--brand-glow)]",
               )
             : cn(
-                "max-w-[92%] rounded-2xl rounded-tl-md px-5 py-3.5",
-                "text-fg-secondary",
+                "max-w-[94%] rounded-[18px] rounded-bl-md border border-border-subtle bg-surface-2/60 px-4 py-3",
+                "text-fg-secondary shadow-[0_8px_22px_-18px_rgba(0,0,0,0.8)]",
               ),
         )}
       >

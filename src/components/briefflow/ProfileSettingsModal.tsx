@@ -1,212 +1,340 @@
-// src/components/briefflow/ProfileSettingsModal.tsx
-import { useState, useEffect } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { useBriefflowStore } from "@/store/briefflow";
-import { useCredits, planLabel } from "@/hooks/useCredits";
-import { Bot, CreditCard, Sparkles, ArrowLeft, Check, Zap, Building2 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { useEffect, useState } from "react";
+import {
+  ArrowLeft,
+  Bot,
+  Building2,
+  Check,
+  CreditCard,
+  Loader2,
+  SlidersHorizontal,
+  Sparkles,
+  Zap,
+} from "lucide-react";
 import { toast } from "sonner";
+
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { planLabel, useCredits } from "@/hooks/useCredits";
+import { CONTENT_FORMATS, PLAN_CATALOG, type PlanId } from "@/lib/plans";
+import { invokeEdgeFunction } from "@/lib/supabase";
+import { cn } from "@/lib/utils";
+import { useBriefflowStore } from "@/store/briefflow";
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
 
+const SELLABLE_PLANS = [
+  "basic",
+  "pro",
+  "agency",
+] as const satisfies readonly PlanId[];
+
+const PLAN_COPY: Record<
+  (typeof SELLABLE_PLANS)[number],
+  { description: string; highlights: string[] }
+> = {
+  basic: {
+    description: "Para profissionais que publicam com frequência.",
+    highlights: ["Ficha técnica, blog e WhatsApp", "Biblioteca com 250 itens"],
+  },
+  pro: {
+    description: "Para times com produção audiovisual e comercial.",
+    highlights: ["Reels, vídeos e apresentações", "Até 5 integrantes"],
+  },
+  agency: {
+    description: "Para agências e operações com várias marcas.",
+    highlights: ["Podcast e todos os formatos", "Até 25 integrantes"],
+  },
+};
+
 export function ProfileSettingsModal({ open, onOpenChange }: Props) {
   const { brandContext, setBrandContext, user } = useBriefflowStore();
   const { plan, creditsPercent } = useCredits();
-
   const [persona, setPersona] = useState(brandContext.persona);
   const [tone, setTone] = useState(brandContext.tone);
   const [framework, setFramework] = useState(brandContext.framework);
   const [isUpgrading, setIsUpgrading] = useState(false);
+  const [billingAction, setBillingAction] = useState<string | null>(null);
 
   useEffect(() => {
-    if (open) {
-      setPersona(brandContext.persona);
-      setTone(brandContext.tone);
-      setFramework(brandContext.framework);
-      setIsUpgrading(false); 
-    }
+    if (!open) return;
+    setPersona(brandContext.persona);
+    setTone(brandContext.tone);
+    setFramework(brandContext.framework);
+    setIsUpgrading(false);
+    setBillingAction(null);
   }, [open, brandContext]);
 
   const handleSave = () => {
     setBrandContext({ ...brandContext, persona, tone, framework });
     onOpenChange(false);
+    toast.success("Preferências atualizadas.");
   };
 
-  const handleComingSoon = () => {
-    toast.info("Em Breve!", {
-      description: "O gerenciamento de assinaturas estará disponível em breve.",
-    });
+  const openBilling = async (
+    action: "checkout" | "portal",
+    selectedPlan?: PlanId,
+  ) => {
+    if (!user) {
+      toast.error("Entre na sua conta para gerenciar a assinatura.");
+      return;
+    }
+    const actionKey = `${action}:${selectedPlan ?? "current"}`;
+    setBillingAction(actionKey);
+    try {
+      const response = await invokeEdgeFunction<{ url: string }>("billing", {
+        action,
+        plan: selectedPlan,
+        request_id: crypto.randomUUID(),
+      });
+      if (!response.url) throw new Error("URL de pagamento não recebida.");
+      window.location.assign(response.url);
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível abrir o faturamento.",
+      );
+      setBillingAction(null);
+    }
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className={cn("bg-surface-1 border-border-strong text-fg-primary shadow-2xl transition-all rounded-2xl", isUpgrading ? "sm:max-w-[600px]" : "sm:max-w-[500px]")}>
-        
-        {!isUpgrading && (
-          <DialogHeader className="pb-2">
-            <DialogTitle className="font-display text-2xl flex items-center gap-2">
-              Configurações da Conta
+      <DialogContent
+        className={cn(
+          "max-h-[94dvh] w-[calc(100vw-24px)] overflow-y-auto rounded-[24px] border-border-strong bg-surface-1 text-fg-primary shadow-[var(--shadow-elevated)]",
+          isUpgrading ? "sm:max-w-[820px]" : "sm:max-w-[560px]",
+        )}
+      >
+        {!isUpgrading ? (
+          <DialogHeader className="pb-3 text-left">
+            <div className="mb-3 grid size-10 place-items-center rounded-xl border border-brand/20 bg-brand-muted text-brand">
+              <SlidersHorizontal className="size-4" />
+            </div>
+            <DialogTitle className="font-display text-2xl font-semibold tracking-tight">
+              Configurações
             </DialogTitle>
             <DialogDescription className="text-fg-tertiary">
-              Ajuste suas preferências de geração de IA e acompanhe seu plano.
+              Ajuste a direção padrão e acompanhe seu plano.
             </DialogDescription>
           </DialogHeader>
-        )}
+        ) : null}
 
         {!isUpgrading ? (
-          <Tabs defaultValue="ai" className="mt-2 w-full">
-            <TabsList className="grid w-full grid-cols-2 bg-surface-2 border border-border-subtle rounded-xl p-1 h-12">
-              <TabsTrigger value="ai" className="rounded-lg data-[state=active]:bg-surface-3 data-[state=active]:text-brand data-[state=active]:shadow-sm font-semibold">
-                <Bot className="size-4 mr-2" /> Preferências de IA
+          <Tabs defaultValue="ai" className="mt-1 w-full">
+            <TabsList className="grid h-12 w-full grid-cols-2 rounded-xl border border-border-subtle bg-surface-2 p-1">
+              <TabsTrigger
+                value="ai"
+                className="rounded-lg text-xs font-semibold sm:text-sm"
+              >
+                <Bot className="mr-2 size-4" /> Preferências de IA
               </TabsTrigger>
-              <TabsTrigger value="billing" className="rounded-lg data-[state=active]:bg-surface-3 data-[state=active]:text-brand data-[state=active]:shadow-sm font-semibold">
-                <CreditCard className="size-4 mr-2" /> Assinatura
+              <TabsTrigger
+                value="billing"
+                className="rounded-lg text-xs font-semibold sm:text-sm"
+              >
+                <CreditCard className="mr-2 size-4" /> Assinatura
               </TabsTrigger>
             </TabsList>
 
-            <TabsContent value="ai" className="space-y-5 mt-6 px-1">
-              <div className="space-y-2">
-                <Label className="text-fg-secondary font-semibold">Persona Padrão</Label>
-                <Input 
-                  value={persona} 
-                  onChange={(e) => setPersona(e.target.value)} 
-                  className="bg-surface-2 border-border-subtle text-fg-primary rounded-xl h-11 focus-visible:ring-brand" 
-                  placeholder="Ex: Diretor de Marketing" 
-                />
-                <p className="text-[12px] text-fg-muted mt-1">Quem a IA deve assumir que é seu público principal.</p>
-              </div>
-              <div className="space-y-2">
-                <Label className="text-fg-secondary font-semibold">Tom de Voz</Label>
-                <Input 
-                  value={tone} 
-                  onChange={(e) => setTone(e.target.value)} 
-                  className="bg-surface-2 border-border-subtle text-fg-primary rounded-xl h-11 focus-visible:ring-brand" 
-                  placeholder="Ex: Profissional, Criativo, Irreverente" 
-                />
-              </div>
-              <div className="space-y-2">
-                <Label className="text-fg-secondary font-semibold">Framework de Copy</Label>
-                <Input 
-                  value={framework} 
-                  onChange={(e) => setFramework(e.target.value)} 
-                  className="bg-surface-2 border-border-subtle text-fg-primary rounded-xl h-11 focus-visible:ring-brand" 
-                  placeholder="Ex: AIDA, PAS" 
-                />
-              </div>
-              <div className="pt-4 flex justify-end">
-                <Button onClick={handleSave} className="bg-brand text-brand-fg hover:brightness-110 shadow-lg shadow-brand/20 rounded-xl h-11 px-6 font-bold">
-                  <Sparkles className="size-4 mr-2" /> Salvar Preferências
+            <TabsContent value="ai" className="mt-6 space-y-5 px-1">
+              {[
+                {
+                  label: "Persona padrão",
+                  value: persona,
+                  setter: setPersona,
+                  placeholder: "Ex.: Diretora de Marketing",
+                },
+                {
+                  label: "Tom de voz",
+                  value: tone,
+                  setter: setTone,
+                  placeholder: "Ex.: Profissional, próximo e objetivo",
+                },
+                {
+                  label: "Framework de copy",
+                  value: framework,
+                  setter: setFramework,
+                  placeholder: "Ex.: AIDA, PAS",
+                },
+              ].map((field) => (
+                <div key={field.label} className="space-y-2">
+                  <Label className="font-semibold text-fg-secondary">
+                    {field.label}
+                  </Label>
+                  <Input
+                    value={field.value}
+                    onChange={(event) => field.setter(event.target.value)}
+                    className="h-11 rounded-xl border-border-subtle bg-surface-2 text-fg-primary focus-visible:ring-brand"
+                    placeholder={field.placeholder}
+                  />
+                </div>
+              ))}
+              <div className="flex justify-end pt-4">
+                <Button
+                  onClick={handleSave}
+                  className="h-11 w-full rounded-xl bg-brand px-6 font-semibold text-brand-fg sm:w-auto"
+                >
+                  <Sparkles className="mr-2 size-4" /> Salvar preferências
                 </Button>
               </div>
             </TabsContent>
 
-            <TabsContent value="billing" className="space-y-5 mt-6 px-1">
-              <div className="rounded-2xl border border-border-strong bg-gradient-to-b from-surface-2 to-surface-1 p-6 shadow-sm">
-                <div className="flex items-center justify-between mb-6 pb-6 border-b border-border-subtle">
+            <TabsContent value="billing" className="mt-6 space-y-5 px-1">
+              <div className="rounded-2xl border border-border-strong bg-gradient-to-b from-surface-2 to-surface-1 p-6">
+                <div className="mb-6 flex items-start justify-between gap-4 border-b border-border-subtle pb-5">
                   <div>
-                    <h4 className="font-bold text-fg-primary text-sm uppercase tracking-wider mb-1">Plano Atual</h4>
-                    <p className="text-xl font-display font-semibold text-brand">{plan ? planLabel(plan.plan) : "Gratuito"}</p>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-fg-muted">
+                      Plano atual
+                    </p>
+                    <p className="mt-1 font-display text-2xl font-semibold text-brand">
+                      {plan ? planLabel(plan.plan) : "Gratuito"}
+                    </p>
                   </div>
-                  <div className="text-right">
-                    <h4 className="font-bold text-fg-primary text-sm uppercase tracking-wider mb-1">E-mail</h4>
-                    <p className="text-sm font-medium text-fg-secondary bg-surface-3 px-3 py-1 rounded-full">{user?.email || "Não logado"}</p>
-                  </div>
+                  <p className="max-w-[240px] truncate rounded-full bg-surface-3 px-3 py-1 text-xs text-fg-secondary">
+                    {user?.email ?? "Não logado"}
+                  </p>
                 </div>
-                
-                <div className="space-y-3">
-                  <div className="flex justify-between items-end">
-                    <span className="text-sm font-medium text-fg-secondary">Créditos de Geração</span>
-                    <span className="font-bold text-lg text-fg-primary">
-                      {plan ? `${plan.creditsRemaining} / ${plan.creditsMonthly}` : "0 / 0"}
-                    </span>
-                  </div>
-                  <div className="relative h-2.5 w-full overflow-hidden rounded-full bg-surface-3 shadow-inner">
-                    <div 
-                      className="h-full bg-gradient-to-r from-brand to-indigo-500 transition-all duration-1000 ease-out" 
-                      style={{ width: `${Math.min(100, creditsPercent || 0)}%` }} 
-                    />
-                  </div>
+
+                <div className="flex items-end justify-between">
+                  <span className="text-sm text-fg-secondary">
+                    Créditos mensais
+                  </span>
+                  <strong className="text-lg">
+                    {plan
+                      ? `${plan.creditsRemaining} / ${plan.creditsMonthly}`
+                      : "0 / 0"}
+                  </strong>
                 </div>
+                <div className="mt-2 h-2.5 overflow-hidden rounded-full bg-surface-3">
+                  <div
+                    className="h-full bg-gradient-to-r from-brand to-indigo-500 transition-all"
+                    style={{ width: `${Math.min(100, creditsPercent || 0)}%` }}
+                  />
+                </div>
+
+                {plan?.allowedFormats?.length ? (
+                  <p className="mt-4 text-xs leading-5 text-fg-muted">
+                    {plan.allowedFormats
+                      .map((format) => CONTENT_FORMATS[format].shortLabel)
+                      .join(" · ")}
+                  </p>
+                ) : null}
               </div>
-              
-              <div className="pt-2">
-                <Button 
+
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Button
                   onClick={() => setIsUpgrading(true)}
-                  className="w-full bg-white text-black hover:bg-slate-200 font-bold rounded-xl h-12 shadow-lg"
+                  className="h-11 flex-1 rounded-xl bg-fg-primary font-bold text-surface-0 hover:bg-white"
                 >
-                  <Zap className="size-4 mr-2 fill-black" /> Fazer Upgrade do Plano
+                  <Zap className="mr-2 size-4" /> Comparar planos
                 </Button>
+                {plan && plan.plan !== "free" ? (
+                  <Button
+                    variant="outline"
+                    disabled={billingAction === "portal:current"}
+                    onClick={() => void openBilling("portal")}
+                    className="h-11 rounded-xl border-border-strong bg-surface-2"
+                  >
+                    {billingAction === "portal:current" && (
+                      <Loader2 className="mr-2 size-4 animate-spin" />
+                    )}
+                    Gerenciar cobrança
+                  </Button>
+                ) : null}
               </div>
             </TabsContent>
           </Tabs>
         ) : (
-          <div className="space-y-6 animate-in slide-in-from-right-8 duration-300 py-2">
-            <div className="flex items-center gap-3 mb-2">
-              <button onClick={() => setIsUpgrading(false)} className="p-2 rounded-full bg-surface-2 hover:bg-surface-3 transition-colors text-fg-muted hover:text-fg-primary shadow-sm border border-border-subtle">
+          <div className="space-y-6 py-2 animate-in slide-in-from-right-8 duration-300">
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setIsUpgrading(false)}
+                aria-label="Voltar para assinatura"
+                className="grid size-9 place-items-center rounded-xl border border-border-subtle bg-surface-2 text-fg-muted hover:text-fg-primary"
+              >
                 <ArrowLeft className="size-4" />
               </button>
               <div>
-                <h3 className="font-display font-bold text-fg-primary text-2xl">Escolha seu plano</h3>
-                <p className="text-sm text-fg-tertiary">Cancele quando quiser. Sem compromisso.</p>
+                <h3 className="font-display text-2xl font-bold">
+                  Escolha seu plano
+                </h3>
+                <p className="text-sm text-fg-tertiary">
+                  Preço e impostos são confirmados no checkout seguro.
+                </p>
               </div>
             </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 overflow-y-auto pr-1 max-h-[65vh] pb-4">
-              {/* Plano Pro */}
-              <div className="border-2 border-brand/80 rounded-2xl p-6 bg-gradient-to-b from-brand/10 to-surface-2 relative overflow-hidden shadow-[0_10px_40px_-10px_rgba(99,102,241,0.2)] md:col-span-2">
-                <div className="absolute top-0 right-0 bg-brand text-brand-fg text-[10px] font-black tracking-widest px-4 py-1.5 rounded-bl-xl uppercase shadow-md">Mais Popular</div>
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="p-2.5 bg-brand/20 rounded-xl">
-                    <Zap className="size-6 text-brand fill-brand" />
-                  </div>
-                  <div>
-                    <h4 className="font-bold text-xl text-fg-primary leading-none">Plano Pro</h4>
-                    <p className="text-sm text-brand font-medium mt-1">O ideal para criadores</p>
-                  </div>
-                </div>
-                <p className="text-4xl font-black text-fg-primary mb-6 tracking-tight">R$ 49,90<span className="text-base font-semibold text-fg-muted tracking-normal">/mês</span></p>
-                <ul className="space-y-3.5 text-sm font-medium text-fg-secondary md:grid md:grid-cols-2 md:gap-x-4 md:space-y-0 md:gap-y-3">
-                  <li className="flex items-start gap-3"><Check className="size-5 text-brand shrink-0 mt-0.5" /> 1000 créditos renovados por dia</li>
-                  <li className="flex items-start gap-3"><Check className="size-5 text-brand shrink-0 mt-0.5" /> Exportação de imagens em alta resolução</li>
-                  <li className="flex items-start gap-3"><Check className="size-5 text-brand shrink-0 mt-0.5" /> Respostas prioritárias e sem filas</li>
-                  <li className="flex items-start gap-3"><Check className="size-5 text-brand shrink-0 mt-0.5" /> Acesso a todos os modelos premium</li>
-                </ul>
-                <Button onClick={handleComingSoon} className="w-full mt-8 bg-brand text-brand-fg hover:brightness-110 shadow-lg shadow-brand/25 rounded-xl h-12 font-bold text-base">Assinar Pro Agora</Button>
-              </div>
 
-              {/* Plano Gratuito */}
-              <div className="border border-border-strong rounded-2xl p-6 bg-surface-2/30 flex flex-col">
-                <div className="flex justify-between items-center mb-4">
-                  <h4 className="font-bold text-lg text-fg-primary">Gratuito</h4>
-                  {(!plan || plan?.plan === "free") && <span className="text-[10px] font-bold uppercase tracking-wider bg-surface-3 px-2 py-1 rounded-md text-fg-muted border border-border-subtle">Atual</span>}
-                </div>
-                <p className="text-2xl font-black text-fg-primary mb-6">R$ 0<span className="text-sm font-medium text-fg-muted">/mês</span></p>
-                <ul className="space-y-3 text-sm text-fg-secondary flex-1">
-                  <li className="flex items-start gap-2"><Check className="size-4 text-fg-muted shrink-0 mt-0.5" /> 50 créditos diários</li>
-                  <li className="flex items-start gap-2"><Check className="size-4 text-fg-muted shrink-0 mt-0.5" /> Geração de banners, e-mails e posts</li>
-                </ul>
-              </div>
-
-              {/* Plano Agência */}
-              <div className="border border-border-strong rounded-2xl p-6 bg-surface-2 flex flex-col">
-                <div className="flex items-center gap-2 mb-4">
-                  <Building2 className="size-5 text-fg-muted" />
-                  <h4 className="font-bold text-lg text-fg-primary">Agência</h4>
-                </div>
-                <p className="text-2xl font-black text-fg-primary mb-6">R$ 149,90<span className="text-sm font-medium text-fg-muted">/mês</span></p>
-                <ul className="space-y-3 text-sm text-fg-secondary flex-1">
-                  <li className="flex items-start gap-2"><Check className="size-4 text-fg-muted shrink-0 mt-0.5" /> Créditos ILIMITADOS</li>
-                  <li className="flex items-start gap-2"><Check className="size-4 text-fg-muted shrink-0 mt-0.5" /> Múltiplas marcas configuráveis</li>
-                </ul>
-                <Button onClick={handleComingSoon} variant="outline" className="w-full mt-6 border-border-strong text-fg-primary hover:bg-surface-3 rounded-xl h-11 font-semibold">Assinar Agência</Button>
-              </div>
+            <div className="grid gap-4 md:grid-cols-3">
+              {SELLABLE_PLANS.map((planId) => {
+                const definition = PLAN_CATALOG[planId];
+                const copy = PLAN_COPY[planId];
+                const isCurrent = plan?.plan === planId;
+                const loading = billingAction === `checkout:${planId}`;
+                return (
+                  <div
+                    key={planId}
+                    className={cn(
+                      "flex flex-col rounded-2xl border bg-surface-2/55 p-5",
+                      planId === "pro"
+                        ? "border-brand/70 shadow-[var(--shadow-brand)]"
+                        : "border-border-strong",
+                    )}
+                  >
+                    <div className="mb-4 flex items-center gap-2">
+                      {planId === "agency" ? (
+                        <Building2 className="size-5 text-brand" />
+                      ) : (
+                        <Zap className="size-5 text-brand" />
+                      )}
+                      <h4 className="text-lg font-bold">{definition.label}</h4>
+                    </div>
+                    <p className="min-h-10 text-xs leading-5 text-fg-tertiary">
+                      {copy.description}
+                    </p>
+                    <p className="mt-5 text-3xl font-black">
+                      {definition.monthlyCredits.toLocaleString("pt-BR")}
+                    </p>
+                    <p className="text-[10px] uppercase tracking-wider text-fg-muted">
+                      créditos por mês
+                    </p>
+                    <ul className="my-5 flex-1 space-y-3 text-xs leading-5 text-fg-secondary">
+                      {copy.highlights.map((highlight) => (
+                        <li key={highlight} className="flex gap-2">
+                          <Check className="mt-0.5 size-4 shrink-0 text-brand" />{" "}
+                          {highlight}
+                        </li>
+                      ))}
+                    </ul>
+                    <Button
+                      disabled={isCurrent || Boolean(billingAction)}
+                      onClick={() => void openBilling("checkout", planId)}
+                      variant={planId === "pro" ? "default" : "outline"}
+                      className="h-11 rounded-xl"
+                    >
+                      {loading && (
+                        <Loader2 className="mr-2 size-4 animate-spin" />
+                      )}
+                      {isCurrent
+                        ? "Plano atual"
+                        : `Escolher ${definition.label}`}
+                    </Button>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}

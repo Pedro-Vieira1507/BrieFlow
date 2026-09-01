@@ -1,6 +1,17 @@
 // src/components/briefflow/builder/BuilderHeader.tsx
 import { useState } from "react";
-import { Loader2, Save, Download, Settings, FolderKanban, LogOut, LogIn, PlusCircle } from "lucide-react";
+import {
+  Loader2,
+  Save,
+  Download,
+  Settings,
+  FolderKanban,
+  LogOut,
+  LogIn,
+  PlusCircle,
+  PanelsTopLeft,
+  LayoutGrid,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useBriefflowStore } from "@/store/briefflow";
@@ -32,6 +43,7 @@ interface Props {
   onExport: () => void;
   onSave: () => void;
   onOpenSettings?: () => void;
+  onOpenContentCatalog?: () => void;
 }
 
 export function BuilderHeader({
@@ -42,8 +54,10 @@ export function BuilderHeader({
   onExport,
   onSave,
   onOpenSettings,
+  onOpenContentCatalog,
 }: Props) {
-  const { user, reset, builder, setAuthOpen, setLibraryOpen } = useBriefflowStore();
+  const { user, reset, builder, setAuthOpen, setLibraryOpen } =
+    useBriefflowStore();
   const { plan } = useCredits();
   const [confirmResetOpen, setConfirmResetOpen] = useState(false);
 
@@ -63,45 +77,78 @@ export function BuilderHeader({
     <>
       <header
         className={cn(
-          "sticky top-0 z-10 flex flex-wrap items-center justify-between gap-3",
-          "border-b border-border-subtle px-4 py-3 lg:px-6 lg:py-4",
-          "glass-strong",
+          "sticky top-0 z-20 flex min-h-[68px] items-center justify-between gap-2",
+          "border-b border-border-subtle px-3 py-2.5 sm:px-4 lg:px-6",
+          "bg-surface-1/82 shadow-[0_14px_40px_-34px_rgba(0,0,0,0.85)] backdrop-blur-2xl",
         )}
       >
-        <div className="flex items-center gap-3">
-          <div>
-            <h2 className="font-display text-[15px] font-semibold tracking-tight text-fg-primary">
-              Canvas de Criação
-            </h2>
-            <p className="text-[10px] font-semibold uppercase tracking-widest text-fg-muted">
-              Preview em Tempo Real
+        <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
+          <span className="hidden size-9 shrink-0 place-items-center rounded-xl border border-border-subtle bg-surface-2 text-brand shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] sm:grid">
+            <PanelsTopLeft className="size-4" />
+          </span>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <h2 className="truncate font-display text-[14px] font-semibold tracking-tight text-fg-primary sm:text-[15px]">
+                Estúdio criativo
+              </h2>
+              <span className="hidden items-center gap-1.5 rounded-full border border-emerald-400/15 bg-emerald-400/8 px-2 py-0.5 text-[9px] font-semibold text-emerald-300/90 md:inline-flex">
+                <span className="size-1 rounded-full bg-emerald-400" /> Ao vivo
+              </span>
+            </div>
+            <p className="truncate text-[9px] font-semibold uppercase tracking-[0.16em] text-fg-muted sm:text-[10px]">
+              Canvas em tempo real
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
           <Button
             variant="outline"
             size="sm"
+            aria-label="Abrir central de formatos"
+            title="Criar outro formato"
+            onClick={onOpenContentCatalog}
+            disabled={loading}
+            className="size-9 rounded-xl border-border-strong bg-surface-1/50 p-0 text-fg-secondary transition hover:border-brand/30 hover:bg-surface-2 hover:text-fg-primary disabled:opacity-40 sm:h-9 sm:w-auto sm:px-3"
+          >
+            <LayoutGrid className="size-3.5 sm:mr-2" />
+            <span className="hidden sm:inline">Formatos</span>
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
+            aria-label="Exportar campanha"
+            title="Exportar campanha"
             onClick={onExport}
             disabled={!isSaveable || loading || isExporting}
-            className="border-border-strong bg-transparent text-fg-secondary hover:bg-surface-2 hover:text-fg-primary disabled:opacity-50 transition-all rounded-lg text-xs"
+            className="size-9 rounded-xl border-border-strong bg-surface-1/50 p-0 text-fg-secondary transition hover:border-brand/30 hover:bg-surface-2 hover:text-fg-primary disabled:opacity-40 sm:h-9 sm:w-auto sm:px-3"
           >
-            {isExporting ? <Loader2 className="mr-2 size-3.5 animate-spin" /> : <Download className="mr-2 size-3.5" />}
-            Exportar
+            {isExporting ? (
+              <Loader2 className="size-3.5 animate-spin sm:mr-2" />
+            ) : (
+              <Download className="size-3.5 sm:mr-2" />
+            )}
+            <span className="hidden sm:inline">Exportar</span>
           </Button>
 
           <Button
             size="sm"
             disabled={!isSaveable || loading || isSaving}
             onClick={onSave}
+            aria-label="Salvar na biblioteca"
+            title="Salvar na biblioteca"
             className={cn(
-              "bg-brand text-brand-fg hover:brightness-110 transition-all rounded-lg text-xs font-medium",
-              "shadow-[var(--shadow-brand)] disabled:shadow-none disabled:opacity-50",
+              "size-9 rounded-xl bg-brand p-0 text-xs font-semibold text-brand-fg transition hover:-translate-y-px hover:brightness-110 sm:h-9 sm:w-auto sm:px-3",
+              "shadow-[var(--shadow-brand)] disabled:translate-y-0 disabled:shadow-none disabled:opacity-40",
             )}
           >
-            {isSaving ? <Loader2 className="mr-2 size-3.5 animate-spin" /> : <Save className="mr-2 size-3.5" />}
-            Salvar na Biblioteca
+            {isSaving ? (
+              <Loader2 className="size-3.5 animate-spin sm:mr-2" />
+            ) : (
+              <Save className="size-3.5 sm:mr-2" />
+            )}
+            <span className="hidden sm:inline">Salvar</span>
           </Button>
 
           {/* PERFIL E MENU DE OPÇÕES */}
@@ -110,15 +157,22 @@ export function BuilderHeader({
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
-                  className="flex size-9 items-center justify-center rounded-full bg-brand text-white font-bold text-xs shadow-md border border-white/10 hover:brightness-110 transition-all ml-1 cursor-pointer"
+                  className="ml-0.5 flex size-9 items-center justify-center rounded-xl border border-white/10 bg-gradient-to-br from-brand to-violet-500 text-xs font-bold text-white shadow-[var(--shadow-brand)] transition hover:brightness-110 sm:ml-1"
                   title={user.email ?? "Perfil"}
+                  aria-label="Abrir menu do perfil"
                 >
                   {user.email?.charAt(0).toUpperCase()}
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent side="bottom" align="end" className="w-56 bg-surface-2 border-border-strong text-fg-primary shadow-2xl p-1">
+              <DropdownMenuContent
+                side="bottom"
+                align="end"
+                className="w-56 bg-surface-2 border-border-strong text-fg-primary shadow-2xl p-1"
+              >
                 <div className="px-3 py-2.5 border-b border-border-subtle">
-                  <p className="text-xs font-bold text-fg-primary truncate">{user.email}</p>
+                  <p className="text-xs font-bold text-fg-primary truncate">
+                    {user.email}
+                  </p>
                   <p className="text-[10px] font-medium text-fg-muted uppercase tracking-wider mt-0.5">
                     Plano {plan ? planLabel(plan.plan) : "Gratuito"}
                   </p>
@@ -128,7 +182,8 @@ export function BuilderHeader({
                   className="cursor-pointer hover:bg-surface-3 my-0.5 text-xs font-medium text-fg-secondary hover:text-fg-primary"
                   onClick={handleNewBriefing}
                 >
-                  <PlusCircle className="mr-2 size-4 text-brand" /> Novo Briefing
+                  <PlusCircle className="mr-2 size-4 text-brand" /> Novo
+                  Briefing
                 </DropdownMenuItem>
 
                 <DropdownMenuItem
@@ -142,7 +197,8 @@ export function BuilderHeader({
                   className="cursor-pointer hover:bg-surface-3 my-0.5 text-xs font-medium text-fg-secondary hover:text-fg-primary"
                   onClick={onOpenSettings}
                 >
-                  <Settings className="mr-2 size-4 text-fg-muted" /> Configurações
+                  <Settings className="mr-2 size-4 text-fg-muted" />{" "}
+                  Configurações
                 </DropdownMenuItem>
 
                 <DropdownMenuSeparator className="bg-border-subtle my-1" />
@@ -160,9 +216,11 @@ export function BuilderHeader({
               size="sm"
               variant="outline"
               onClick={() => setAuthOpen(true)}
-              className="border-border-strong bg-surface-2 text-fg-secondary hover:text-fg-primary text-xs rounded-lg ml-1"
+              aria-label="Entrar no BrieFlow"
+              className="ml-0.5 size-9 rounded-xl border-border-strong bg-surface-2 p-0 text-fg-secondary hover:text-fg-primary sm:ml-1 sm:h-9 sm:w-auto sm:px-3"
             >
-              <LogIn className="mr-1.5 size-3.5" /> Entrar
+              <LogIn className="size-3.5 sm:mr-1.5" />
+              <span className="hidden sm:inline">Entrar</span>
             </Button>
           )}
         </div>
@@ -174,7 +232,8 @@ export function BuilderHeader({
           <AlertDialogHeader>
             <AlertDialogTitle>Descartar campanha atual?</AlertDialogTitle>
             <AlertDialogDescription className="text-fg-secondary">
-              Você tem alterações no canvas que não foram salvas na biblioteca. Ao iniciar um novo briefing, todo o progresso atual será perdido.
+              Você tem alterações no canvas que não foram salvas na biblioteca.
+              Ao iniciar um novo briefing, todo o progresso atual será perdido.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

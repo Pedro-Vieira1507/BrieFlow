@@ -20,8 +20,38 @@ export type MarketingChannel =
   | "whatsapp"
   | "generic";
 
-/** Tipos de peça que o builder renderiza hoje. */
-export type MaterialType = "banner" | "social" | "email";
+/**
+ * Tipos de conteúdo suportados pelo estúdio.
+ *
+ * A lista é também usada em validações de runtime. Manter uma única fonte de
+ * verdade evita que API, planos, canvas e biblioteca aceitem conjuntos
+ * diferentes de formatos.
+ */
+export const MATERIAL_TYPES = [
+  "banner",
+  "social",
+  "email",
+  "reel",
+  "video",
+  "podcast",
+  "slides",
+  "technical_sheet",
+  "blog",
+  "whatsapp",
+] as const;
+
+export type MaterialType = (typeof MATERIAL_TYPES)[number];
+
+export const CORE_MATERIAL_TYPES = ["banner", "email", "social"] as const;
+
+export type CoreMaterialType = (typeof CORE_MATERIAL_TYPES)[number];
+
+export function isMaterialType(value: unknown): value is MaterialType {
+  return (
+    typeof value === "string" &&
+    (MATERIAL_TYPES as readonly string[]).includes(value)
+  );
+}
 
 /**
  * Referência de produto usada para ancorar a copy em algo concreto.
@@ -77,9 +107,9 @@ export interface MarketingBrief extends ProductReference {
 export function hasProductContext(brief: MarketingBrief): boolean {
   return Boolean(
     brief.productImageUrl ||
-      brief.productTitle ||
-      brief.productDescription ||
-      brief.productUrl,
+    brief.productTitle ||
+    brief.productDescription ||
+    brief.productUrl,
   );
 }
 
@@ -108,14 +138,14 @@ export function toMarketingBrief(input: {
       clean(brandContext.brandName) ??
       clean(brandContext.site?.brandName) ??
       "Sua Marca",
-    objective: clean(plan?.proposedStrategy),
+    objective: clean(plan?.objective) ?? clean(plan?.proposedStrategy),
     context: clean(plan?.detectedContext),
     strategy: clean(plan?.proposedStrategy),
     missingInfo: clean(plan?.missingInfo),
     audience: clean(plan?.audience) ?? clean(brandContext.persona),
     product: clean(plan?.product) ?? clean(brandContext.product),
     offer: clean(plan?.offer) ?? clean(brandContext.offer),
-    tone: clean(brandContext.tone),
+    tone: clean(plan?.tone) ?? clean(brandContext.tone),
     framework: clean(brandContext.framework),
     channels,
     site: brandContext.site ?? null,

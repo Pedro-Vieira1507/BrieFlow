@@ -3,17 +3,33 @@ import { z } from "zod";
 import type { BuilderState, CtaVariant } from "./builder";
 import type { MaterialType } from "./brief";
 
-const looseString = z.preprocess((value) => {
+function normalizeInlineString(value: unknown): string {
   if (value === null || value === undefined) return "";
   const raw = typeof value === "string" ? value : String(value);
-  return raw.replace(/\*\*/g, "").replace(/\r/g, "").replace(/\s+/g, " ").trim();
-}, z.string().catch(""));
+  return raw
+    .replace(/\*\*/g, "")
+    .replace(/\r/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
-const looseText = z.preprocess((value) => {
+function normalizeLongText(value: unknown): string {
   if (value === null || value === undefined) return "";
   const raw = typeof value === "string" ? value : String(value);
   return raw.replace(/\*\*/g, "").replace(/\r/g, "").trim();
-}, z.string().catch(""));
+}
+
+const looseString = z.preprocess(normalizeInlineString, z.string().catch(""));
+const requiredString = z.preprocess(
+  normalizeInlineString,
+  z.string().min(1, "Campo de copy obrigatório vazio."),
+);
+
+const looseText = z.preprocess(normalizeLongText, z.string().catch(""));
+const requiredText = z.preprocess(
+  normalizeLongText,
+  z.string().min(1, "Corpo da copy obrigatório vazio."),
+);
 
 const looseList = z.preprocess((value) => {
   if (value === null || value === undefined) return [];
@@ -24,25 +40,48 @@ const looseList = z.preprocess((value) => {
     .filter((item) => item.length > 0 && item.toLowerCase() !== "null");
 }, z.array(z.string()).catch([]));
 
+function compactBadge(maxCharacters: number, maxWords: number) {
+  return z.preprocess((value) => {
+    const normalized = normalizeInlineString(value);
+    if (
+      normalized.length > maxCharacters ||
+      normalized.split(/\s+/).filter(Boolean).length > maxWords
+    ) {
+      return "";
+    }
+    return normalized;
+  }, z.string().catch(""));
+}
+
 const hexColor = z.preprocess((value) => {
   const raw = typeof value === "string" ? value.trim() : "";
   const colorMap: Record<string, string> = {
-    "roxo": "#7c3aed", "branco": "#ffffff", "preto": "#0f172a",
-    "vermelho": "#dc2626", "verde": "#16a34a", "amarelo": "#eab308",
-    "rosa": "#db2777", "laranja": "#ea580c", "azul": "#2563eb",
-    "cinza": "#475569", "marrom": "#78350f"
+    roxo: "#7c3aed",
+    branco: "#ffffff",
+    preto: "#0f172a",
+    vermelho: "#dc2626",
+    verde: "#16a34a",
+    amarelo: "#eab308",
+    rosa: "#db2777",
+    laranja: "#ea580c",
+    azul: "#2563eb",
+    cinza: "#475569",
+    marrom: "#78350f",
   };
   const firstWord = raw.toLowerCase().split(/[\s,-]+/)[0];
   if (colorMap[firstWord]) return colorMap[firstWord];
   return /^#[0-9a-fA-F]{3,8}$/.test(raw) ? raw : undefined;
 }, z.string().optional().catch(undefined));
 
-const ctaVariantSchema = z.preprocess((value) => {
-  const raw = typeof value === "string" ? value.toLowerCase().trim() : "";
-  return ["primary", "secondary", "urgent", "soft"].includes(raw)
-    ? (raw as CtaVariant)
-    : "primary";
-}, z.enum(["primary", "secondary", "urgent", "soft"]).catch("primary"));
+const ctaVariantSchema = z.preprocess(
+  (value) => {
+    const raw = typeof value === "string" ? value.toLowerCase().trim() : "";
+    return ["primary", "secondary", "urgent", "soft"].includes(raw)
+      ? (raw as CtaVariant)
+      : "primary";
+  },
+  z.enum(["primary", "secondary", "urgent", "soft"]).catch("primary"),
+);
 
 const designSchema = z.object({
   imagePrompt: looseString.default(""),
@@ -50,82 +89,212 @@ const designSchema = z.object({
   secondaryColor: hexColor,
 });
 
+const structuredSectionSchema = z.object({
+  title: requiredString,
+  body: looseText.default(""),
+  items: looseList.transform((items) => items.slice(0, 12)).default([]),
+  timing: looseString.default(""),
+  visualDirection: looseText.default(""),
+  speakerNotes: looseText.default(""),
+});
+
+/**
+ * Contrato comum dos novos formatos. O playbook de cada material define o
+ * significado de uma seção (cena, slide, bloco, especificação ou capítulo),
+ * mantendo preview, edição e exportação extensíveis.
+ */
+export const StructuredCopySchema = designSchema.extend({
+  title: requiredString,
+  subtitle: looseString.default(""),
+  summary: looseText.default(""),
+  duration: looseString.default(""),
+  sections: z.array(structuredSectionSchema).min(1).max(30),
+  cta: looseString.default(""),
+  keywords: looseList.transform((items) => items.slice(0, 12)).default([]),
+  disclaimer: looseText.default(""),
+});
+
 export const LandingCopySchema = designSchema.extend({
-  headline: looseString,
+  headline: requiredString,
   subheadline: looseString.default(""),
   body: looseText.optional(),
   footerInfo: looseString.optional(),
-  ctaText: looseString,
+  ctaText: requiredString,
   ctaVariant: ctaVariantSchema,
-  keyBenefits: looseList.default([]),
-  objectionsHandled: looseList.default([]),
-  layoutStyle: z.preprocess((value) => {
-    const raw = typeof value === "string" ? value.toLowerCase().trim() : "";
-    return ["diagonal", "split", "minimalist", "centered", "reverse"].includes(raw) ? raw : "split";
-  }, z.enum(["diagonal", "split", "minimalist", "centered", "reverse"])).default("split"),
-  badgePrimary: looseString.optional(),
-  badgeSecondary: looseString.optional(),
-  backgroundShape: z.preprocess((value) => {
-    const raw = typeof value === "string" ? value.toLowerCase().trim() : "";
-    return ["diagonal", "curve", "split", "minimalist", "blob", "geometric", "frame", "arch", "wave", "pill", "offset"].includes(raw) ? raw : "curve";
-  }, z.enum(["diagonal", "curve", "split", "minimalist", "blob", "geometric", "frame", "arch", "wave", "pill", "offset"])).default("curve"),
+  keyBenefits: looseList.transform((items) => items.slice(0, 2)).default([]),
+  objectionsHandled: looseList
+    .transform((items) => items.slice(0, 2))
+    .default([]),
+  layoutStyle: z
+    .preprocess(
+      (value) => {
+        const raw = typeof value === "string" ? value.toLowerCase().trim() : "";
+        return [
+          "diagonal",
+          "split",
+          "minimalist",
+          "centered",
+          "reverse",
+        ].includes(raw)
+          ? raw
+          : "split";
+      },
+      z.enum(["diagonal", "split", "minimalist", "centered", "reverse"]),
+    )
+    .default("split"),
+  badgePrimary: compactBadge(14, 3).optional(),
+  badgeSecondary: compactBadge(24, 4).optional(),
+  backgroundShape: z
+    .preprocess(
+      (value) => {
+        const raw = typeof value === "string" ? value.toLowerCase().trim() : "";
+        return [
+          "diagonal",
+          "curve",
+          "split",
+          "minimalist",
+          "blob",
+          "geometric",
+          "frame",
+          "arch",
+          "wave",
+          "pill",
+          "offset",
+        ].includes(raw)
+          ? raw
+          : "curve";
+      },
+      z.enum([
+        "diagonal",
+        "curve",
+        "split",
+        "minimalist",
+        "blob",
+        "geometric",
+        "frame",
+        "arch",
+        "wave",
+        "pill",
+        "offset",
+      ]),
+    )
+    .default("curve"),
 });
 
 export const SocialCopySchema = designSchema.extend({
-  hook: looseString.default("Criando conexões autênticas."),
-  body: looseText.default("Nossa marca se conecta com o seu propósito de vida. Descubra mais!"),
-  cta: looseString.default("Acesse o Link"),
-  hashtags: looseList.default([]),
+  hook: requiredString,
+  body: requiredText,
+  cta: requiredString,
+  hashtags: looseList.transform((items) => items.slice(0, 6)).default([]),
 });
 
 export const EmailCopySchema = designSchema.extend({
-  subject: looseString,
+  subject: requiredString,
   preheader: looseString.default(""),
   headline: looseString.default(""),
   subtitle: looseString.default(""),
-  body: looseText,
-  ctaText: looseString,
+  body: requiredText,
+  ctaText: requiredString,
   ctaVariant: ctaVariantSchema,
-  keyBenefits: looseList.default([]),
-  objectionsHandled: looseList.default([]),
+  keyBenefits: looseList.transform((items) => items.slice(0, 3)).default([]),
+  objectionsHandled: looseList
+    .transform((items) => items.slice(0, 2))
+    .default([]),
   heroBadge: looseString.default(""),
   benefitTitle: looseString.default(""),
   secondaryCta: looseString.default(""),
   urgencyText: looseString.default(""),
-  testimonials: looseList.default([]),
+  testimonials: looseList.transform((items) => items.slice(0, 3)).default([]),
   footerInfo: looseString.default(""),
-  layoutStyle: z.preprocess((value) => {
-    const raw = typeof value === "string" ? value.toLowerCase().trim() : "";
-    return ["diagonal", "split", "minimalist", "centered", "editorial", "modern", "overlap", "newsletter"].includes(raw) ? raw : "centered";
-  }, z.enum(["diagonal", "split", "minimalist", "centered", "editorial", "modern", "overlap", "newsletter"])).default("centered"),
-  backgroundShape: z.preprocess((value) => {
-    const raw = typeof value === "string" ? value.toLowerCase().trim() : "";
-    return ["square", "curve", "arch", "pill", "blob"].includes(raw) ? raw : "square";
-  }, z.enum(["square", "curve", "arch", "pill", "blob"])).default("square"),
+  layoutStyle: z
+    .preprocess(
+      (value) => {
+        const raw = typeof value === "string" ? value.toLowerCase().trim() : "";
+        return [
+          "diagonal",
+          "split",
+          "minimalist",
+          "centered",
+          "editorial",
+          "modern",
+          "overlap",
+          "newsletter",
+        ].includes(raw)
+          ? raw
+          : "centered";
+      },
+      z.enum([
+        "diagonal",
+        "split",
+        "minimalist",
+        "centered",
+        "editorial",
+        "modern",
+        "overlap",
+        "newsletter",
+      ]),
+    )
+    .default("centered"),
+  backgroundShape: z
+    .preprocess(
+      (value) => {
+        const raw = typeof value === "string" ? value.toLowerCase().trim() : "";
+        return ["square", "curve", "arch", "pill", "blob"].includes(raw)
+          ? raw
+          : "square";
+      },
+      z.enum(["square", "curve", "arch", "pill", "blob"]),
+    )
+    .default("square"),
 });
 
 export type LandingCopy = z.infer<typeof LandingCopySchema>;
 export type SocialCopy = z.infer<typeof SocialCopySchema>;
 export type EmailCopy = z.infer<typeof EmailCopySchema>;
+export type StructuredCopy = z.infer<typeof StructuredCopySchema>;
 
 export type GeneratedCopyByMaterial = {
   banner: LandingCopy;
   social: SocialCopy;
   email: EmailCopy;
+  reel: StructuredCopy;
+  video: StructuredCopy;
+  podcast: StructuredCopy;
+  slides: StructuredCopy;
+  technical_sheet: StructuredCopy;
+  blog: StructuredCopy;
+  whatsapp: StructuredCopy;
 };
 
-export type GeneratedCopy = LandingCopy | SocialCopy | EmailCopy;
+export type GeneratedCopy =
+  LandingCopy | SocialCopy | EmailCopy | StructuredCopy;
 
 export const MATERIAL_SCHEMAS = {
   banner: LandingCopySchema,
   social: SocialCopySchema,
   email: EmailCopySchema,
+  reel: StructuredCopySchema,
+  video: StructuredCopySchema,
+  podcast: StructuredCopySchema,
+  slides: StructuredCopySchema,
+  technical_sheet: StructuredCopySchema,
+  blog: StructuredCopySchema,
+  whatsapp: StructuredCopySchema,
 } as const;
 
+const STRUCTURED_SCHEMA_HINT = `{\n  "title": "título obrigatório e específico",\n  "subtitle": "subtítulo opcional ou vazio",\n  "summary": "resumo executivo do conteúdo",\n  "duration": "duração ou extensão recomendada; vazio quando não se aplicar",\n  "sections": [{\n    "title": "nome da cena, slide, bloco ou seção",\n    "body": "roteiro, texto principal ou explicação completa",\n    "items": ["itens, especificações ou textos em tela"],\n    "timing": "tempo ou ordem quando aplicável",\n    "visualDirection": "direção visual factual e executável",\n    "speakerNotes": "notas para apresentador, host ou produção"\n  }],\n  "cta": "próxima ação ou vazio",\n  "keywords": ["palavras-chave relevantes"],\n  "disclaimer": "aviso factual necessário ou vazio",\n  "imagePrompt": "direção de capa ou key visual em inglês, sem texto",\n  "themeColor": "#RRGGBB",\n  "secondaryColor": "#RRGGBB"\n}`;
+
 export const SCHEMA_HINTS: Record<MaterialType, string> = {
-  banner: `{\n  "headline": "Benefício principal...",\n  "subheadline": "1 frase explicando",\n  "body": "Parágrafo detalhando a oferta ou produto...",\n  "ctaText": "CTA",\n  "ctaVariant": "primary",\n  "badgePrimary": "Destaque curto (ex: 15% OFF)",\n  "badgeSecondary": "Apoio (ex: FRETE GRÁTIS)",\n  "footerInfo": "Informações de rodapé, regras ou nomes técnicos",\n  "keyBenefits": ["Benefício 1", "Benefício 2"],\n  "objectionsHandled": ["Objeção 1"],\n  "layoutStyle": "split",\n  "backgroundShape": "blob",\n  "imagePrompt": "Prompt",\n  "themeColor": "#HEX",\n  "secondaryColor": "#HEX"\n}`,
-  social: `{\n  "hook": "Gancho",\n  "body": "Corpo",\n  "cta": "CTA",\n  "hashtags": ["#tag"],\n  "imagePrompt": "Prompt",\n  "themeColor": "#HEX",\n  "secondaryColor": "#HEX"\n}`,
-  email: `{\n  "subject": "Assunto",\n  "preheader": "Preheader",\n  "headline": "Título dinâmico",\n  "subtitle": "Subtítulo de apoio",\n  "body": "Corpo persuasivo em 2-3 parágrafos",\n  "heroBadge": "Badge (ex: NOVIDADE)",\n  "benefitTitle": "Por que escolher?",\n  "keyBenefits": ["Benefício forte 1", "Benefício 2"],\n  "objectionsHandled": ["Objeção 1"],\n  "urgencyText": "Apenas hoje",\n  "testimonials": ["Nome do Cliente - R$ Resultado Alcançado | 'Citação do cliente aqui'"],\n  "ctaText": "Comprar Agora",\n  "ctaVariant": "primary",\n  "secondaryCta": "Comprar Agora",\n  "footerInfo": "*Regras, validade ou termos legais",\n  "imagePrompt": "Prompt em inglês",\n  "layoutStyle": "minimalist | split | diagonal | centered | editorial | modern | overlap | newsletter",\n  "backgroundShape": "square | curve | arch | pill | blob",\n  "themeColor": "#HEX",\n  "secondaryColor": "#HEX"\n}`
+  banner: `{\n  "headline": "string obrigatória: conceito de 3–6 palavras, preferencialmente até 42 caracteres",\n  "subheadline": "string opcional: 4–10 palavras com informação nova ou vazio",\n  "body": "string opcional: uma frase de até 18 palavras ou vazio",\n  "ctaText": "string obrigatória: 2–4 palavras",\n  "ctaVariant": "primary | secondary | urgent | soft",\n  "badgePrimary": "string: apenas núcleo numérico da oferta, até 14 caracteres e 3 palavras; senão vazio",\n  "badgeSecondary": "string: condição confirmada, até 24 caracteres e 4 palavras; senão vazio",\n  "footerInfo": "string: condição indispensável de até 90 caracteres; senão vazio",\n  "keyBenefits": ["0–2 benefícios de até 5 palavras; prefira []"],\n  "objectionsHandled": ["0–2 objeções reais e breves"],\n  "layoutStyle": "split | reverse | centered",\n  "backgroundShape": "minimalist | split | curve | blob | geometric | frame | diagonal | arch | wave | pill | offset",\n  "imagePrompt": "prompt editorial detalhado em inglês, sem texto na imagem",\n  "themeColor": "#RRGGBB",\n  "secondaryColor": "#RRGGBB"\n}`,
+  social: `{\n  "hook": "string obrigatória: conceito de 4–10 palavras, específico e sem clickbait",\n  "body": "string obrigatória: 45–90 palavras em 3–4 parágrafos curtos",\n  "cta": "string obrigatória: uma ação clara",\n  "hashtags": ["3–6 hashtags relevantes e não genéricas"],\n  "imagePrompt": "prompt editorial 4:5 detalhado em inglês, sem texto na imagem",\n  "themeColor": "#RRGGBB",\n  "secondaryColor": "#RRGGBB"\n}`,
+  email: `{\n  "subject": "string obrigatória: até 9 palavras e 60 caracteres",\n  "preheader": "string: 40–90 caracteres e sem repetir o assunto",\n  "headline": "string: conceito de 3–8 palavras",\n  "subtitle": "string opcional: até 14 palavras ou vazio",\n  "body": "string obrigatória: 80–140 palavras em 3–5 parágrafos",\n  "heroBadge": "string: somente fato confirmado; senão vazio",\n  "benefitTitle": "string curta que introduz benefícios ou vazio",\n  "keyBenefits": ["0–3 benefícios distintos; use apenas quando ajudarem"],\n  "objectionsHandled": ["0–2 objeções reais respondidas"],\n  "urgencyText": "string: somente urgência confirmada; senão vazio",\n  "testimonials": ["somente depoimentos literais fornecidos; senão array vazio"],\n  "ctaText": "string obrigatória: ação principal concreta",\n  "ctaVariant": "primary | secondary | urgent | soft",\n  "secondaryCta": "string: mesma intenção da ação principal ou vazio",\n  "footerInfo": "string: condição factual ou vazio",\n  "imagePrompt": "prompt hero editorial detalhado em inglês, sem texto",\n  "layoutStyle": "minimalist | split | diagonal | centered | editorial | modern | overlap | newsletter",\n  "backgroundShape": "square | curve | arch | pill | blob",\n  "themeColor": "#RRGGBB",\n  "secondaryColor": "#RRGGBB"\n}`,
+  reel: STRUCTURED_SCHEMA_HINT,
+  video: STRUCTURED_SCHEMA_HINT,
+  podcast: STRUCTURED_SCHEMA_HINT,
+  slides: STRUCTURED_SCHEMA_HINT,
+  technical_sheet: STRUCTURED_SCHEMA_HINT,
+  blog: STRUCTURED_SCHEMA_HINT,
+  whatsapp: STRUCTURED_SCHEMA_HINT,
 };
 
 export interface MaterialRenderContext {
@@ -156,20 +325,20 @@ export function toBuilderContent<T extends MaterialType>(
 
   if (type === "banner") {
     const landing = copy as LandingCopy;
-    return { 
-      ...base, 
-      title: landing.headline, 
+    return {
+      ...base,
+      title: landing.headline,
       subtitle: landing.subheadline,
       body: landing.body,
       footerInfo: landing.footerInfo,
-      cta: landing.ctaText, 
-      ctaVariant: landing.ctaVariant satisfies CtaVariant, 
-      keyBenefits: landing.keyBenefits, 
-      objectionsHandled: landing.objectionsHandled, 
+      cta: landing.ctaText,
+      ctaVariant: landing.ctaVariant satisfies CtaVariant,
+      keyBenefits: landing.keyBenefits,
+      objectionsHandled: landing.objectionsHandled,
       layoutStyle: landing.layoutStyle,
       badgePrimary: landing.badgePrimary,
       badgeSecondary: landing.badgeSecondary,
-      backgroundShape: landing.backgroundShape
+      backgroundShape: landing.backgroundShape,
     };
   }
 
@@ -197,22 +366,56 @@ export function toBuilderContent<T extends MaterialType>(
     } as BuilderState;
   }
 
+  if (type !== "social") {
+    const structured = copy as StructuredCopy;
+    const structuredType = type as Exclude<
+      MaterialType,
+      "banner" | "email" | "social"
+    >;
+
+    return {
+      ...base,
+      type: structuredType,
+      title: structured.title,
+      subtitle: structured.subtitle,
+      body: structured.summary,
+      cta: structured.cta,
+      structuredContent: {
+        format: structuredType,
+        title: structured.title,
+        subtitle: structured.subtitle,
+        summary: structured.summary,
+        duration: structured.duration,
+        sections: structured.sections.map((section, index) => ({
+          id: `${structuredType}-${index + 1}`,
+          ...section,
+        })),
+        cta: structured.cta,
+        keywords: structured.keywords,
+        disclaimer: structured.disclaimer,
+      },
+    };
+  }
+
   const social = copy as SocialCopy;
-  
+
   // Garantia extrema: Sempre devolve uma string limpa para não quebrar a tela do React.
   const theHook = social.hook?.trim() || "";
   const theBody = social.body?.trim() || "";
   const theCta = social.cta?.trim() || "";
-  
-  const caption = [theHook, theBody, theCta].filter((p) => p.length > 0).join("\n\n");
 
-  return { 
-    ...base, 
-    hook: theHook, 
-    body: theBody, 
+  const caption = [theHook, theBody, theCta]
+    .filter((p) => p.length > 0)
+    .join("\n\n");
+
+  return {
+    ...base,
+    hook: theHook,
+    body: theBody,
     cta: theCta,
-    caption: caption || "Crie um post atraente e envolvente com nossa ferramenta.", 
-    hashtags: social.hashtags || [] 
+    caption:
+      caption || "Crie um post atraente e envolvente com nossa ferramenta.",
+    hashtags: social.hashtags || [],
   };
 }
 
