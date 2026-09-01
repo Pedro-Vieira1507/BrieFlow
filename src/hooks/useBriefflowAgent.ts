@@ -3,9 +3,18 @@ import { useCallback, useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { useBriefflowStore, uid } from "@/store/briefflow";
 import { sendToOllama, type ChatTurn } from "@/lib/ollama";
-import { useGenerateMaterials, describeAiError } from "@/hooks/useGenerateMaterials";
-import { toMarketingBrief } from "@/types/brief";
+import {
+  useGenerateMaterials,
+  describeAiError,
+} from "@/hooks/useGenerateMaterials";
+import {
+  CORE_MATERIAL_TYPES,
+  isMaterialType,
+  toMarketingBrief,
+  type MaterialType,
+} from "@/types/brief";
 import { useCreditsStore } from "@/hooks/useCredits";
+import { CONTENT_FORMATS, canUseMaterial } from "@/lib/plans";
 import {
   extractUrlsFromText,
   scrapeProductByUrlFn,
@@ -22,15 +31,12 @@ import type {
 import { analyzeImageWithVisionFn } from "@/lib/vision-api";
 import { mergeDetectedBriefContext } from "@/lib/discoveryContext";
 
-type CampaignChannel = "banner" | "email" | "social";
+type CampaignChannel = MaterialType;
 
-const ALL_CHANNELS: CampaignChannel[] = ["banner", "email", "social"];
+const ALL_CHANNELS: CampaignChannel[] = [...CORE_MATERIAL_TYPES];
 
-const CHANNEL_LABEL: Record<CampaignChannel, string> = {
-  banner: "Banner",
-  email: "E-mail",
-  social: "Post Social",
-};
+const channelLabel = (channel: CampaignChannel) =>
+  CONTENT_FORMATS[channel].shortLabel;
 
 export function useBriefflowAgent() {
   const {
@@ -48,8 +54,6 @@ export function useBriefflowAgent() {
     setLoading,
     setScraping,
     setGeneratingLabel,
-    enqueueOllama,
-    dequeueOllama,
   } = useBriefflowStore();
 
   const { generateMaterial } = useGenerateMaterials();
@@ -127,8 +131,19 @@ export function useBriefflowAgent() {
         errorContent.body = errorMessage;
         errorContent.cta = "Tentar novamente";
       } else {
-        errorContent.caption = `Não consegui gerar este post. ${errorMessage}`;
-        errorContent.hashtags = [];
+        if (channel === "social") {
+          errorContent.caption = `Não consegui gerar este post. ${errorMessage}`;
+          errorContent.hashtags = [];
+        } else {
+          errorContent.title = `Não consegui gerar ${channelLabel(channel)}`;
+          errorContent.body = errorMessage;
+          errorContent.structuredContent = {
+            format: channel,
+            title: errorContent.title,
+            summary: errorMessage,
+            sections: [],
+          };
+        }
       }
 
       return {
@@ -142,19 +157,44 @@ export function useBriefflowAgent() {
   );
 
   const generateCampaignSafely = useCallback(
-    async (baseHistory: ChatTurn[], only?: CampaignChannel, targetKeys: string[] = ["all"], provider: "ollama" | "omniroute" = "omniroute") => {
+    async (
+      baseHistory: ChatTurn[],
+      only?: CampaignChannel,
+      targetKeys: string[] = ["all"],
+      provider: "ollama" | "omniroute" = "omniroute",
+    ) => {
       const plan = discoveryPlanRef.current ?? builderRef.current.discoveryPlan;
 
       const channels: CampaignChannel[] = only ? [only] : ALL_CHANNELS;
+      const accountPlan = useCreditsStore.getState().plan;
+      const blocked = channels.find(
+        (channel) =>
+          !canUseMaterial(
+            accountPlan?.plan,
+            channel,
+            accountPlan?.allowedFormats,
+          ),
+      );
+      if (blocked) {
+        toast.error(
+          `${channelLabel(blocked)} não está disponível no seu plano.`,
+          {
+            description:
+              "Consulte a Central de formatos para ver as opções liberadas.",
+          },
+        );
+        return;
+      }
 
       setLoading(true);
 
-      const savedCampaignImages = builderRef.current.type === "campaign"
-        ? (builderRef.current.campaignAssets ?? []).flatMap((asset) => [
-            ...(asset.content.productImages ?? []),
-            asset.content.productImageUrl,
-          ])
-        : [];
+      const savedCampaignImages =
+        builderRef.current.type === "campaign"
+          ? (builderRef.current.campaignAssets ?? []).flatMap((asset) => [
+              ...(asset.content.productImages ?? []),
+              asset.content.productImageUrl,
+            ])
+          : [];
       const allImages = [
         ...(uploadedImage ? [uploadedImage] : []),
         ...scrapedProductsRef.current.map((p) => p.imageUrl).filter(Boolean),
@@ -186,7 +226,7 @@ export function useBriefflowAgent() {
         id: assistantId,
         role: "assistant",
         content: only
-          ? `Ok! Vou regerar apenas o **${CHANNEL_LABEL[only]}** – as outras peças permanecem como estão.`
+          ? `Ok! Vou regerar apenas o **${channelLabel(only)}** – as outras peças permanecem como estão.`
           : `Mão na massa! Gerando ${channels.length} peças sequencialmente.`,
       });
 
@@ -195,67 +235,207 @@ export function useBriefflowAgent() {
 
       for (const [index, channel] of channels.entries()) {
         setGeneratingLabel(
-          `Produzindo ${CHANNEL_LABEL[channel]} (${index + 1}/${channels.length})...`,
+          `Produzindo ${channelLabel(channel)} (${index + 1}/${channels.length})...`,
         );
 
         try {
-          const safeTargetKeys = Array.isArray(targetKeys) ? targetKeys : ["all"];
-          const isAll = safeTargetKeys.length === 0 || safeTargetKeys.some(k =>
-            ["all", "tudo", "todos", "geral", "completo"].includes(String(k).toLowerCase())
-          );
+          const safeTargetKeys = Array.isArray(targetKeys)
+            ? targetKeys
+            : ["all"];
+          const isAll =
+            safeTargetKeys.length === 0 ||
+            safeTargetKeys.some((k) =>
+              ["all", "tudo", "todos", "geral", "completo"].includes(
+                String(k).toLowerCase(),
+              ),
+            );
 
           const allowedKeys = new Set<string>();
 
           if (!isAll) {
             const normalizedStr = safeTargetKeys.join(" ").toLowerCase();
             const schemaMap: Record<string, string[]> = {
-              cta: ["cta", "ctatext", "botão", "botao", "button", "chamada", "action", "clique", "link"],
-              title: ["title", "headline", "subject", "assunto", "título", "titulo", "cabeçalho", "header", "principal"],
-              subtitle: ["subtitle", "subheadline", "subtítulo", "subtitulo", "descrição", "apoio", "final"],
-              body: ["body", "corpo", "parágrafo", "paragrafo", "conteúdo", "mensagem", "texto"],
+              cta: [
+                "cta",
+                "ctatext",
+                "botão",
+                "botao",
+                "button",
+                "chamada",
+                "action",
+                "clique",
+                "link",
+              ],
+              title: [
+                "title",
+                "headline",
+                "subject",
+                "assunto",
+                "título",
+                "titulo",
+                "cabeçalho",
+                "header",
+                "principal",
+              ],
+              subtitle: [
+                "subtitle",
+                "subheadline",
+                "subtítulo",
+                "subtitulo",
+                "descrição",
+                "apoio",
+                "final",
+              ],
+              body: [
+                "body",
+                "corpo",
+                "parágrafo",
+                "paragrafo",
+                "conteúdo",
+                "mensagem",
+                "texto",
+              ],
               caption: ["caption", "legenda", "post", "texto do post"],
               hook: ["hook", "gancho", "abertura", "primeira linha"],
-              hashtags: ["hashtags", "tags", "marcadores", "palavras", "hashtag"],
-              imagePrompt: ["imagePrompt", "imagem", "foto", "arte", "fundo", "background", "ilustração", "visual", "prompt"],
-              themeColor: ["themeColor", "secondaryColor", "color", "cores", "cor", "paleta", "tom", "visual"],
-              preheader: ["preheader", "pré-header", "pre-header", "texto de prévia", "texto de previa"],
-              keyBenefits: ["keyBenefits", "benefícios", "beneficios", "vantagens", "diferenciais"],
-              objectionsHandled: ["objectionsHandled", "objeções", "objecoes", "dúvidas", "duvidas"],
+              hashtags: [
+                "hashtags",
+                "tags",
+                "marcadores",
+                "palavras",
+                "hashtag",
+              ],
+              imagePrompt: [
+                "imagePrompt",
+                "imagem",
+                "foto",
+                "arte",
+                "fundo",
+                "background",
+                "ilustração",
+                "visual",
+                "prompt",
+              ],
+              themeColor: [
+                "themeColor",
+                "secondaryColor",
+                "color",
+                "cores",
+                "cor",
+                "paleta",
+                "tom",
+                "visual",
+              ],
+              preheader: [
+                "preheader",
+                "pré-header",
+                "pre-header",
+                "texto de prévia",
+                "texto de previa",
+              ],
+              keyBenefits: [
+                "keyBenefits",
+                "benefícios",
+                "beneficios",
+                "vantagens",
+                "diferenciais",
+              ],
+              objectionsHandled: [
+                "objectionsHandled",
+                "objeções",
+                "objecoes",
+                "dúvidas",
+                "duvidas",
+              ],
               heroBadge: ["heroBadge", "badge", "selo", "tag"],
-              badgePrimary: ["badgePrimary", "badge", "selo", "destaque", "desconto", "oferta"],
-              badgeSecondary: ["badgeSecondary", "badge secundário", "selo secundário"],
-              benefitTitle: ["benefitTitle", "título dos benefícios", "titulo dos beneficios"],
-              secondaryCta: ["secondaryCta", "cta secundário", "cta secundario", "segundo botão", "segundo botao"],
-              urgencyText: ["urgencyText", "urgência", "urgencia", "prazo", "escassez"],
-              testimonials: ["testimonials", "depoimentos", "prova social", "avaliações", "avaliacoes"],
-              footerInfo: ["footerInfo", "rodapé", "rodape", "regras", "termos", "observação", "observacao"],
-              layoutStyle: ["layoutStyle", "layout", "composição", "composicao", "estrutura"],
-              backgroundShape: ["backgroundShape", "forma", "shape", "grafismo"],
+              badgePrimary: [
+                "badgePrimary",
+                "badge",
+                "selo",
+                "destaque",
+                "desconto",
+                "oferta",
+              ],
+              badgeSecondary: [
+                "badgeSecondary",
+                "badge secundário",
+                "selo secundário",
+              ],
+              benefitTitle: [
+                "benefitTitle",
+                "título dos benefícios",
+                "titulo dos beneficios",
+              ],
+              secondaryCta: [
+                "secondaryCta",
+                "cta secundário",
+                "cta secundario",
+                "segundo botão",
+                "segundo botao",
+              ],
+              urgencyText: [
+                "urgencyText",
+                "urgência",
+                "urgencia",
+                "prazo",
+                "escassez",
+              ],
+              testimonials: [
+                "testimonials",
+                "depoimentos",
+                "prova social",
+                "avaliações",
+                "avaliacoes",
+              ],
+              footerInfo: [
+                "footerInfo",
+                "rodapé",
+                "rodape",
+                "regras",
+                "termos",
+                "observação",
+                "observacao",
+              ],
+              layoutStyle: [
+                "layoutStyle",
+                "layout",
+                "composição",
+                "composicao",
+                "estrutura",
+              ],
+              backgroundShape: [
+                "backgroundShape",
+                "forma",
+                "shape",
+                "grafismo",
+              ],
             };
 
             for (const [canonicalKey, synonyms] of Object.entries(schemaMap)) {
-              if (synonyms.some(syn => normalizedStr.includes(syn))) {
+              if (synonyms.some((syn) => normalizedStr.includes(syn))) {
                 allowedKeys.add(canonicalKey);
               }
             }
           }
 
-          const existingAsset = builderRef.current.type === "campaign"
-            ? builderRef.current.campaignAssets?.find((a) => a.type === channel)
-            : undefined;
+          const existingAsset =
+            builderRef.current.type === "campaign"
+              ? builderRef.current.campaignAssets?.find(
+                  (a) => a.type === channel,
+                )
+              : undefined;
 
           let currentContentContext = "";
           if (existingAsset?.content) {
             try {
-              const c = existingAsset.content as any;
-              
+              const c = existingAsset.content;
+
               // PREVINE INJEÇÃO DE ERRO: Ignora o texto atual da tela se ele contiver a mensagem de erro
-              const isErrorState = 
-                (c.title && c.title.includes("Não consegui gerar")) || 
+              const isErrorState =
+                (c.title && c.title.includes("Não consegui gerar")) ||
                 (c.caption && c.caption.includes("Não consegui gerar"));
 
               if (!isErrorState) {
-                const safeContext: any = {
+                const safeContext: Partial<BuilderState> = {
                   title: c.title,
                   subtitle: c.subtitle,
                   preheader: c.preheader,
@@ -281,6 +461,7 @@ export function useBriefflowAgent() {
                   secondaryColor: c.secondaryColor,
                   layoutStyle: c.layoutStyle,
                   backgroundShape: c.backgroundShape,
+                  structuredContent: c.structuredContent,
                 };
                 currentContentContext = `\n\n=== CONTEÚDO ATUAL DA PEÇA ===\nATENÇÃO: Preserve o texto abaixo exatamente como está para todos os campos que o usuário NÃO pediu para alterar:\n${JSON.stringify(safeContext, null, 2)}`;
               }
@@ -295,7 +476,10 @@ export function useBriefflowAgent() {
             .map((m) => m.content)
             .join("\n\n---\n\n");
 
-          const rawBriefing = recentUserBriefing + campaignPlatformContext + currentContentContext;
+          const rawBriefing =
+            recentUserBriefing +
+            campaignPlatformContext +
+            currentContentContext;
 
           const { content } = await generateMaterial({
             brief: campaignBrief,
@@ -315,7 +499,10 @@ export function useBriefflowAgent() {
               content.badgePrimary,
               content.badgeSecondary,
             ]
-              .filter((value): value is string => typeof value === "string" && Boolean(value.trim()))
+              .filter(
+                (value): value is string =>
+                  typeof value === "string" && Boolean(value.trim()),
+              )
               .join(" | ");
 
             if (semanticSpine) {
@@ -330,13 +517,14 @@ Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo terri
           updateCampaignAsset(channel, (prevAsset) => {
             const { generationError: _discardedError, ...prevContent } =
               prevAsset?.content || {};
-            let mergedContent: any = { ...prevContent };
+            let mergedContent: Record<string, unknown> = { ...prevContent };
 
             if (isAll || !prevAsset) {
               mergedContent = { ...prevContent, ...content };
             } else {
               const assign = (key: keyof BuilderState) => {
-                if (content[key] !== undefined) mergedContent[key] = content[key];
+                if (content[key] !== undefined)
+                  mergedContent[key] = content[key];
               };
 
               if (allowedKeys.has("title")) assign("title");
@@ -346,7 +534,8 @@ Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo terri
               if (allowedKeys.has("hook")) assign("hook");
               if (allowedKeys.has("hashtags")) assign("hashtags");
               if (allowedKeys.has("keyBenefits")) assign("keyBenefits");
-              if (allowedKeys.has("objectionsHandled")) assign("objectionsHandled");
+              if (allowedKeys.has("objectionsHandled"))
+                assign("objectionsHandled");
               if (allowedKeys.has("heroBadge")) assign("heroBadge");
               if (allowedKeys.has("badgePrimary")) assign("badgePrimary");
               if (allowedKeys.has("badgeSecondary")) assign("badgeSecondary");
@@ -402,7 +591,10 @@ Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo terri
               content: {
                 ...mergedContent,
                 type: channel,
-                brandName: content.brandName || plan?.brandName || (prevAsset?.content as any)?.brandName,
+                brandName:
+                  content.brandName ||
+                  plan?.brandName ||
+                  prevAsset?.content.brandName,
                 productImages: uniqueImages,
               },
             };
@@ -425,10 +617,10 @@ Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo terri
       updateMessage(assistantId, {
         content: hasErrors
           ? only
-            ? `Não consegui regerar o ${CHANNEL_LABEL[only]} agora. Tente novamente.`
+            ? `Não consegui regerar o ${channelLabel(only)} agora. Tente novamente.`
             : "Processo concluído, mas uma ou mais peças falharam. Você pode pedir para regenerar."
           : only
-            ? `${CHANNEL_LABEL[only]} atualizado com sucesso.`
+            ? `${channelLabel(only)} atualizado com sucesso.`
             : "Campanha finalizada! Navegue pelas abas ao lado.",
       });
 
@@ -450,11 +642,9 @@ Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo terri
 
   const handleSend = useCallback(
     async (text: string, isHiddenAction = false) => {
-      const currentPlan = useCreditsStore.getState().plan?.plan || "free";
-      const isPro = currentPlan === "pro" || currentPlan === "agency";
-      
-      // FORÇANDO OLLAMA AQUI PARA RODAR LOCALMENTE:
-      const provider: "ollama" | "omniroute" = "omniroute"; 
+      // O nome legado do provider é mantido por compatibilidade; a chamada de
+      // nuvem é sempre roteada pela Edge Function autenticada.
+      const provider: "ollama" | "omniroute" = "omniroute";
 
       const tryScrapeProduct = async (
         skuOrUrl: string,
@@ -477,7 +667,9 @@ Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo terri
             const target = new URL(value);
             if (target.pathname === "/" || target.pathname === "")
               isHomepage = true;
-          } catch { /* noop */ }
+          } catch {
+            /* noop */
+          }
         }
 
         if (isHomepage) return;
@@ -503,7 +695,9 @@ Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo terri
           if (!productData.imageUrl && !isUrl) {
             setGeneratingLabel(`Buscando foto oficial para: ${value}...`);
             try {
-              const visualResult = await visualSearchFn({ data: { query: value } });
+              const visualResult = await visualSearchFn({
+                data: { query: value },
+              });
               if (visualResult.found && visualResult.imageUrl) {
                 productData.imageUrl = visualResult.imageUrl;
                 productData.found = true;
@@ -513,7 +707,7 @@ Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo terri
                 appendMessage({
                   id: uid(),
                   role: "assistant",
-                  content: `⚠️ **Aviso:** ${visualResult.error}`
+                  content: `⚠️ **Aviso:** ${visualResult.error}`,
                 });
               }
             } catch (visualErr) {
@@ -529,40 +723,58 @@ Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo terri
               productData,
             ];
 
-            setGeneratingLabel(`Google Vision API analisando imagem do produto...`);
+            setGeneratingLabel(
+              `Google Vision API analisando imagem do produto...`,
+            );
             try {
-              const visionResult = await analyzeImageWithVisionFn({ data: { imageUrl: productData.imageUrl } });
-              
+              const visionResult = await analyzeImageWithVisionFn({
+                data: { imageUrl: productData.imageUrl },
+              });
+
               if (visionResult.primaryBrandColor) {
                 const themeColor = visionResult.primaryBrandColor;
-                const secondaryColor = visionResult.secondaryBrandColor || "#0f172a";
+                const secondaryColor =
+                  visionResult.secondaryBrandColor || "#0f172a";
 
-                if (builderRef.current.type === "campaign" && builderRef.current.campaignAssets) {
-                  const updatedAssets = builderRef.current.campaignAssets.map(asset => ({
-                    ...asset,
-                    content: {
-                      ...asset.content,
-                      productImageUrl: productData.imageUrl,
-                      themeColor,
-                      secondaryColor
-                    }
-                  }));
-                  setBuilder({ ...builderRef.current, campaignAssets: updatedAssets });
+                if (
+                  builderRef.current.type === "campaign" &&
+                  builderRef.current.campaignAssets
+                ) {
+                  const updatedAssets = builderRef.current.campaignAssets.map(
+                    (asset) => ({
+                      ...asset,
+                      content: {
+                        ...asset.content,
+                        productImageUrl: productData.imageUrl,
+                        themeColor,
+                        secondaryColor,
+                      },
+                    }),
+                  );
+                  setBuilder({
+                    ...builderRef.current,
+                    campaignAssets: updatedAssets,
+                  });
                 }
 
                 if (discoveryPlanRef.current && visionResult.labels?.length) {
                   discoveryPlanRef.current = {
                     ...discoveryPlanRef.current,
-                    detectedContext: `${discoveryPlanRef.current.detectedContext}\nContexto do Produto: ${visionResult.labels.join(", ")}`
+                    detectedContext: `${discoveryPlanRef.current.detectedContext}\nContexto do Produto: ${visionResult.labels.join(", ")}`,
                   };
                 }
               }
             } catch (visionErr) {
-              console.error("Falha ao analisar imagem com a Vision API:", visionErr);
+              console.error(
+                "Falha ao analisar imagem com a Vision API:",
+                visionErr,
+              );
             }
 
             if (!hidden) {
-              const pName = productData.name ? "*" + productData.name + "*\n" : "";
+              const pName = productData.name
+                ? "*" + productData.name + "*\n"
+                : "";
               const pImg = `<img src="${productData.imageUrl}" style="max-height: 120px; border-radius: 8px; margin-top: 8px;" />\n\n`;
               appendMessage({
                 id: uid(),
@@ -579,7 +791,9 @@ Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo terri
       };
 
       const userMessage = { id: uid(), role: "user" as const, content: text };
-      const nextMessages = isHiddenAction ? messages : [...messages, userMessage];
+      const nextMessages = isHiddenAction
+        ? messages
+        : [...messages, userMessage];
 
       if (!isHiddenAction) {
         setMessages(nextMessages);
@@ -601,11 +815,6 @@ Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo terri
       }));
 
       setLoading(true);
-      const ticketId = uid();
-
-      if (!isPro) {
-        await enqueueOllama(ticketId);
-      }
 
       try {
         const response = await sendToOllama(
@@ -638,11 +847,18 @@ Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo terri
         ) {
           const discoveryPlan = response.builder.discoveryPlan;
           discoveryPlanRef.current = mergeDetectedBriefContext(
-            { ...discoveryPlanRef.current, ...builderRef.current.discoveryPlan, ...discoveryPlan },
+            {
+              ...discoveryPlanRef.current,
+              ...builderRef.current.discoveryPlan,
+              ...discoveryPlan,
+            },
             response.detectedContext,
           );
           if (!inCampaignPhase) {
-            setBuilder({ type: "discovery_plan", discoveryPlan: discoveryPlanRef.current });
+            setBuilder({
+              type: "discovery_plan",
+              discoveryPlan: discoveryPlanRef.current,
+            });
           }
         } else {
           discoveryPlanRef.current = mergeDetectedBriefContext(
@@ -660,13 +876,22 @@ Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo terri
         const targetKeys = response.targetKeys || ["all"];
 
         if (action === "generate_all") {
-          await generateCampaignSafely(history, undefined, targetKeys, provider);
-        } else if (action === "generate_banner") {
-          await generateCampaignSafely(history, "banner", targetKeys, provider);
-        } else if (action === "generate_email") {
-          await generateCampaignSafely(history, "email", targetKeys, provider);
-        } else if (action === "generate_social") {
-          await generateCampaignSafely(history, "social", targetKeys, provider);
+          await generateCampaignSafely(
+            history,
+            undefined,
+            targetKeys,
+            provider,
+          );
+        } else if (action.startsWith("generate_")) {
+          const requestedMaterial = action.slice("generate_".length);
+          if (isMaterialType(requestedMaterial)) {
+            await generateCampaignSafely(
+              history,
+              requestedMaterial,
+              targetKeys,
+              provider,
+            );
+          }
         }
       } catch (err) {
         toast.error("Falha ao processar", { description: String(err) });
@@ -676,9 +901,6 @@ Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo terri
           });
         }
       } finally {
-        if (!isPro) {
-          await dequeueOllama(ticketId);
-        }
         setLoading(false);
       }
     },
@@ -688,11 +910,10 @@ Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo terri
       maybeScrapeUrls,
       messages,
       setBuilder,
+      setGeneratingLabel,
       setLoading,
       setMessages,
       updateMessage,
-      enqueueOllama,
-      dequeueOllama,
     ],
   );
 

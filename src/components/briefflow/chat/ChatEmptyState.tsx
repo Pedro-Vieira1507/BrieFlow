@@ -1,4 +1,11 @@
-import { ArrowUpRight, Link2, Mail, Sparkles } from "lucide-react";
+import {
+  ArrowUpRight,
+  Clapperboard,
+  Link2,
+  Mail,
+  Presentation,
+  Sparkles,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const SUGGESTIONS = [
@@ -6,6 +13,17 @@ const SUGGESTIONS = [
     icon: Link2,
     label: "Analisar produto",
     prompt: "Quero criar uma campanha completa a partir do link de um produto.",
+  },
+  {
+    icon: Clapperboard,
+    label: "Roteiro de Reel",
+    prompt:
+      "Quero criar um roteiro de Reel vertical para apresentar meu produto.",
+  },
+  {
+    icon: Presentation,
+    label: "Apresentação comercial",
+    prompt: "Quero criar uma apresentação em slides para esta campanha.",
   },
   {
     icon: Mail,
@@ -38,7 +56,7 @@ export function ChatEmptyState({ onPick }: { onPick: (s: string) => void }) {
         qualquer peça.
       </p>
 
-      <div className="flex w-full flex-col gap-2">
+      <div className="grid w-full grid-cols-1 gap-2">
         {SUGGESTIONS.map(({ icon: Icon, label, prompt }) => (
           <button
             key={label}

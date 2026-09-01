@@ -2,23 +2,23 @@
 import { useEffect } from "react";
 import { create } from "zustand";
 import { supabase } from "@/lib/supabase";
+import { PLAN_CATALOG, normalizePlanId, type PlanId } from "@/lib/plans";
+import { isMaterialType, type MaterialType } from "@/types/brief";
 
 export interface UserPlan {
-  plan: "free" | "basic" | "pro" | "agency";
+  plan: PlanId;
   creditsMonthly: number;
   creditsRemaining: number;
-  subscriptionStatus: "active" | "past_due" | "canceled" | "trialing";
+  subscriptionStatus:
+    "active" | "past_due" | "canceled" | "trialing" | "incomplete";
+  allowedFormats: MaterialType[];
+  maxMembers: number;
+  maxSavedAssets: number;
+  organizationId: string | null;
 }
 
-const PLAN_LABELS: Record<string, string> = {
-  free: "Gratuito",
-  basic: "Básico",
-  pro: "Pro",
-  agency: "Agência",
-};
-
 export function planLabel(plan: string): string {
-  return PLAN_LABELS[plan] ?? plan;
+  return PLAN_CATALOG[normalizePlanId(plan)].label;
 }
 
 // 1. Cria o Estado Global de Créditos
@@ -29,34 +29,59 @@ interface CreditsState {
   refresh: () => Promise<void>;
 }
 
+let refreshSequence = 0;
+
 export const useCreditsStore = create<CreditsState>((set) => ({
   plan: null,
   loading: false,
   error: null,
   refresh: async () => {
     if (!supabase) return;
+    const request = ++refreshSequence;
     set({ loading: true, error: null });
     try {
       const { data, error: rpcError } = await supabase.rpc("get_user_plan");
       if (rpcError) throw rpcError;
+      if (request !== refreshSequence) return;
       const row = Array.isArray(data) ? data[0] : data;
-      if (!row) return;
+      if (!row) {
+        set({ plan: null, error: "Plano do usuário não encontrado." });
+        return;
+      }
+
+      const planId = normalizePlanId(row.plan);
+      const fallback = PLAN_CATALOG[planId];
+      const serverFormats = Array.isArray(row.allowed_formats)
+        ? row.allowed_formats.filter(isMaterialType)
+        : [];
 
       set({
         plan: {
-          plan: row.plan,
-          creditsMonthly: row.credits_monthly,
-          creditsRemaining: row.credits_remaining,
-          subscriptionStatus: row.subscription_status,
+          plan: planId,
+          creditsMonthly: Number(
+            row.credits_monthly ?? fallback.monthlyCredits,
+          ),
+          creditsRemaining: Number(row.credits_remaining ?? 0),
+          subscriptionStatus: row.subscription_status ?? "active",
+          allowedFormats:
+            serverFormats.length > 0
+              ? serverFormats
+              : [...fallback.allowedFormats],
+          maxMembers: Number(row.max_members ?? fallback.maxMembers),
+          maxSavedAssets: Number(
+            row.max_saved_assets ?? fallback.maxSavedAssets,
+          ),
+          organizationId: row.organization_id ?? null,
         },
         error: null,
       });
     } catch (err) {
+      if (request !== refreshSequence) return;
       set({
         error: err instanceof Error ? err.message : "Erro ao carregar créditos",
       });
     } finally {
-      set({ loading: false });
+      if (request === refreshSequence) set({ loading: false });
     }
   },
 }));
@@ -66,23 +91,29 @@ let initialized = false;
 // 2. Hook de Consumo que gerencia a Sessão
 export function useCredits() {
   const state = useCreditsStore();
+  const refresh = useCreditsStore((current) => current.refresh);
 
   useEffect(() => {
     if (!supabase || initialized) return;
     initialized = true;
 
     supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) state.refresh();
+      if (session) refresh();
     });
 
     supabase.auth.onAuthStateChange((_event, session) => {
       if (session) {
-        state.refresh();
+        refresh();
       } else {
-        useCreditsStore.setState({ plan: null });
+        refreshSequence += 1;
+        useCreditsStore.setState({
+          plan: null,
+          loading: false,
+          error: null,
+        });
       }
     });
-  }, []);
+  }, [refresh]);
 
   const creditsPercent =
     state.plan && state.plan.creditsMonthly > 0

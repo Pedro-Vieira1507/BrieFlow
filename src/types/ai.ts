@@ -1,8 +1,5 @@
-import type {
-  BuilderState,
-  CampaignAsset,
-  DiscoveryPlan,
-} from "./builder";
+import type { BuilderState, CampaignAsset, DiscoveryPlan } from "./builder";
+import { MATERIAL_TYPES, type MaterialType } from "./brief";
 
 export type AiIntent =
   | "discovery"
@@ -10,6 +7,13 @@ export type AiIntent =
   | "banner"
   | "social"
   | "email"
+  | "reel"
+  | "video"
+  | "podcast"
+  | "slides"
+  | "technical_sheet"
+  | "blog"
+  | "whatsapp"
   | "copy"
   | "strategy"
   | "website_analysis"
@@ -25,7 +29,7 @@ export type AiChannel =
   | "whatsapp"
   | "other";
 
-export type AiAssetType = "banner" | "social" | "email";
+export type AiAssetType = MaterialType;
 
 export type AiStage =
   | "discovery"
@@ -163,7 +167,10 @@ export interface AiModelResponse {
 }
 
 export function isAiAssetType(value: unknown): value is AiAssetType {
-  return value === "banner" || value === "social" || value === "email";
+  return (
+    typeof value === "string" &&
+    (MATERIAL_TYPES as readonly string[]).includes(value)
+  );
 }
 
 export function isAiIntent(value: unknown): value is AiIntent {
@@ -173,6 +180,13 @@ export function isAiIntent(value: unknown): value is AiIntent {
     value === "banner" ||
     value === "social" ||
     value === "email" ||
+    value === "reel" ||
+    value === "video" ||
+    value === "podcast" ||
+    value === "slides" ||
+    value === "technical_sheet" ||
+    value === "blog" ||
+    value === "whatsapp" ||
     value === "copy" ||
     value === "strategy" ||
     value === "website_analysis" ||
@@ -211,11 +225,7 @@ export function normalizeQualityScore(
     input?.overall !== undefined
       ? clampScore(input.overall)
       : Math.round(
-          (persuasion +
-            clarity +
-            brandAlignment +
-            channelFit +
-            completeness) /
+          (persuasion + clarity + brandAlignment + channelFit + completeness) /
             5,
         );
 

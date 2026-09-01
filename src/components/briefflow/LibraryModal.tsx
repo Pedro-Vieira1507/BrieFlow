@@ -1,5 +1,5 @@
 // src/components/briefflow/LibraryModal.tsx
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -19,7 +19,12 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { useBriefflowStore } from "@/store/briefflow";
-import { getSavedAssets, deleteSavedAsset } from "@/lib/supabase";
+import {
+  deleteSavedAsset,
+  getSavedAssetsPage,
+  type SavedAssetsCursor,
+  type SavedLibraryAsset,
+} from "@/lib/supabase";
 import { CampaignTabs } from "@/components/briefflow/builder/CampaignTabs";
 import {
   Loader2,
@@ -28,6 +33,7 @@ import {
   FolderKanban,
   Calendar,
   Sparkles,
+  ShieldCheck,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -36,8 +42,10 @@ import type { BuilderState, CampaignAsset } from "@/types/builder";
 
 export function LibraryModal() {
   const { libraryOpen, setLibraryOpen, setBuilder, user } = useBriefflowStore();
-  const [items, setItems] = useState<any[]>([]);
+  const [items, setItems] = useState<SavedLibraryAsset[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [nextCursor, setNextCursor] = useState<SavedAssetsCursor | null>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [activeTab, setActiveTab] = useState<CampaignAsset["type"]>("banner");
   const [pendingDelete, setPendingDelete] = useState<{
@@ -45,28 +53,81 @@ export function LibraryModal() {
     name: string;
   } | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const loadRequestRef = useRef(0);
 
-  const loadLibrary = async () => {
+  const loadLibrary = useCallback(async () => {
     if (!user) return;
+    const request = ++loadRequestRef.current;
+    const requestedUserId = user.id;
+    setItems([]);
+    setNextCursor(null);
     setLoading(true);
     try {
-      const data = await getSavedAssets();
-      setItems(data || []);
+      const page = await getSavedAssetsPage();
+      if (
+        request !== loadRequestRef.current ||
+        useBriefflowStore.getState().user?.id !== requestedUserId
+      )
+        return;
+      setItems(page.items);
+      setNextCursor(page.nextCursor);
       setSelectedIndex(0);
-    } catch (err: any) {
+    } catch (error) {
+      if (request !== loadRequestRef.current) return;
       toast.error("Erro ao carregar a biblioteca", {
-        description: err.message,
+        description:
+          error instanceof Error
+            ? error.message
+            : "Tente novamente em instantes.",
       });
     } finally {
-      setLoading(false);
+      if (request === loadRequestRef.current) setLoading(false);
     }
-  };
+  }, [user]);
 
   useEffect(() => {
     if (libraryOpen && user) {
-      loadLibrary();
+      void loadLibrary();
+    } else if (!user) {
+      loadRequestRef.current += 1;
+      setItems([]);
+      setNextCursor(null);
+      setSelectedIndex(0);
     }
-  }, [libraryOpen, user]);
+  }, [libraryOpen, loadLibrary, user]);
+
+  const loadMore = async () => {
+    if (!user || !nextCursor || loadingMore) return;
+    const request = loadRequestRef.current;
+    const requestedUserId = user.id;
+    setLoadingMore(true);
+    try {
+      const page = await getSavedAssetsPage({ cursor: nextCursor });
+      if (
+        request !== loadRequestRef.current ||
+        useBriefflowStore.getState().user?.id !== requestedUserId
+      )
+        return;
+      setItems((current) => {
+        const knownIds = new Set(current.map((item) => item.id));
+        return [
+          ...current,
+          ...page.items.filter((item) => !knownIds.has(item.id)),
+        ];
+      });
+      setNextCursor(page.nextCursor);
+    } catch (error) {
+      if (request !== loadRequestRef.current) return;
+      toast.error("Erro ao carregar mais campanhas", {
+        description:
+          error instanceof Error
+            ? error.message
+            : "Tente novamente em instantes.",
+      });
+    } finally {
+      if (request === loadRequestRef.current) setLoadingMore(false);
+    }
+  };
 
   const requestDelete = (id: string, name: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -89,8 +150,13 @@ export function LibraryModal() {
         return Math.min(current, Math.max(0, updated.length - 1));
       });
       setPendingDelete(null);
-    } catch (err: any) {
-      toast.error("Erro ao excluir campanha", { description: err.message });
+    } catch (error) {
+      toast.error("Erro ao excluir campanha", {
+        description:
+          error instanceof Error
+            ? error.message
+            : "Tente novamente em instantes.",
+      });
     } finally {
       setDeleting(false);
     }
@@ -136,8 +202,11 @@ export function LibraryModal() {
                 Biblioteca
               </DialogTitle>
               <DialogDescription className="mt-2 max-w-2xl text-xs leading-5 text-fg-tertiary sm:text-sm">
-                Revise campanhas salvas e carregue qualquer versão de volta ao
-                canvas.
+                <span className="inline-flex items-center gap-1.5">
+                  <ShieldCheck className="size-3.5 text-emerald-400" />
+                  Biblioteca privada: somente este login pode acessar estes
+                  conteúdos.
+                </span>
               </DialogDescription>
             </div>
           </DialogHeader>
@@ -167,7 +236,8 @@ export function LibraryModal() {
               {/* PAINEL LATERAL DE CAMPANHAS SALVAS */}
               <div className="flex max-h-52 w-full shrink-0 gap-2 overflow-x-auto border-b border-border-subtle bg-surface-2/35 p-3 md:max-h-none md:w-[286px] md:flex-col md:overflow-x-hidden md:overflow-y-auto md:border-b-0 md:border-r">
                 <div className="hidden px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-fg-muted md:block">
-                  Campanhas Salvas ({items.length})
+                  Campanhas salvas ({items.length}
+                  {nextCursor ? "+" : ""})
                 </div>
                 {items.map((item, idx) => {
                   const isSelected = idx === selectedIndex;
@@ -217,6 +287,21 @@ export function LibraryModal() {
                     </div>
                   );
                 })}
+                {nextCursor && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={loadingMore}
+                    onClick={() => void loadMore()}
+                    className="min-w-[150px] shrink-0 rounded-xl border-border-strong bg-surface-2 text-xs text-fg-secondary hover:bg-surface-3 hover:text-fg-primary md:min-w-0"
+                  >
+                    {loadingMore && (
+                      <Loader2 className="mr-2 size-3.5 animate-spin" />
+                    )}
+                    Carregar mais
+                  </Button>
+                )}
               </div>
 
               {/* ÁREA DE VISUALIZAÇÃO COM ABAS */}

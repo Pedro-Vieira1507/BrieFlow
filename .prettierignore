@@ -1,0 +1,12 @@
+.output/
+.wrangler/
+.tanstack/
+coverage/
+dist/
+node_modules/
+repomix-output.xml
+src/routeTree.gen.ts
+package-lock.json
+bun.lock
+prompts para testar a geração de Banners.txt
+prompts para testar a geração de e-mails.txt

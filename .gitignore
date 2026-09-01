@@ -10,6 +10,8 @@ dist/
 .env
 .env.local
 .env.*.local
+supabase/.env
+supabase/.env.local
 
 # IDE
 .vscode/
@@ -27,3 +29,6 @@ npm-debug.log*
 
 # Misc
 .lovable/
+coverage/
+repomix-output.xml
+*.tsbuildinfo

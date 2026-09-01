@@ -2,7 +2,12 @@
 // Chamadas de IA com Bypass (Direct API) + Supabase RPC para Créditos.
 // Roteia entre Ollama Local (Gratuito) e Omniroute Nuvem (PRO/Agência).
 
-import type { BrandContext, BuilderState, CampaignAsset, DiscoveryPlan } from "@/types/builder";
+import type {
+  BrandContext,
+  BuilderState,
+  CampaignAsset,
+  DiscoveryPlan,
+} from "@/types/builder";
 import { formatSiteContextForAgent } from "@/lib/scrape-site";
 import {
   BRAND_VOICE,
@@ -15,9 +20,10 @@ import {
   STRATEGIC_COPY_PROCESS,
 } from "@/lib/marketingPrompts";
 import type { AiAssetType, AiGenerationMeta, AiIntent } from "@/types/ai";
-import { supabase } from "@/lib/supabase";
-import { getAiRoutingEnvironment, resolveCloudAiRoute } from "@/lib/aiRouting";
-import { parseStructuredJson, supportsReasoningControls } from "@/lib/structuredOutput";
+import { parseStructuredJson } from "@/lib/structuredOutput";
+import { extractMaterialBriefing } from "@/lib/marketingPromptCore";
+import { isMaterialType } from "@/types/brief";
+import { requestAiCompletion, type AiProviderName } from "@/lib/aiClient";
 
 // ============================================================
 // PROMPTS
@@ -50,6 +56,13 @@ ${CREATIVE_QUALITY_BENCHMARK}
    - "generate_banner": O usuário pediu especificamente para gerar, editar ou alterar APENAS o banner.
    - "generate_email": O usuário pediu especificamente para gerar, editar ou alterar APENAS o e-mail.
    - "generate_social": O usuário pediu especificamente para gerar, editar ou alterar APENAS o post social.
+   - "generate_reel": O usuário pediu especificamente um roteiro de Reel.
+   - "generate_video": O usuário pediu especificamente um roteiro de vídeo.
+   - "generate_podcast": O usuário pediu especificamente um roteiro de podcast.
+   - "generate_slides": O usuário pediu especificamente uma apresentação em slides.
+   - "generate_technical_sheet": O usuário pediu especificamente uma ficha técnica.
+   - "generate_blog": O usuário pediu especificamente um artigo de blog.
+   - "generate_whatsapp": O usuário pediu especificamente uma mensagem para WhatsApp.
    - "cancel": O usuário expressou claro desejo de cancelar a operação inteira ou parar o fluxo.
 5. WHITELIST DE EDIÇÃO (NOVO E CRÍTICO): Se a ação for "generate_*" e o usuário pediu para alterar APENAS campos específicos (ex: "Mude só o botão", "Mude só a cor", "Altere o título"), você DEVE preencher "targetKeys" com APENAS as chaves dos campos solicitados. NÃO regenere campos que o usuário não pediu para mudar.
 
@@ -76,7 +89,7 @@ ${currentPlan ? JSON.stringify(currentPlan) : "Nenhum plano ainda."}
 Responda SEMPRE em JSON válido com esta estrutura:
 {
   "chat": "Sua mensagem conversacional em PT-BR (sempre preenchido)",
-  "action": "discovery_continue|generate_all|generate_banner|generate_email|generate_social|cancel",
+  "action": "discovery_continue|generate_all|generate_banner|generate_email|generate_social|generate_reel|generate_video|generate_podcast|generate_slides|generate_technical_sheet|generate_blog|generate_whatsapp|cancel",
   "targetKeys": ["array de chaves se aplicável"],
   "detectedContext": {
     "brandName": "string|null",
@@ -141,6 +154,30 @@ function executionContentContract(targetAsset: AiAssetType): string {
   "heroBadge": "somente fato confirmado ou vazio",
   "footerInfo": "condição factual ou vazio",
   "emailHeroImagePrompt": "direção de arte editorial em inglês sem texto na imagem",
+  "themeColor": "#RRGGBB",
+  "secondaryColor": "#RRGGBB"
+}`;
+  }
+
+  if (targetAsset !== "social") {
+    return `{
+  "type": "${targetAsset}",
+  "title": "título específico",
+  "subtitle": "subtítulo opcional",
+  "summary": "resumo executivo",
+  "duration": "duração ou extensão",
+  "sections": [{
+    "title": "seção, cena, slide ou bloco",
+    "body": "conteúdo principal",
+    "items": [],
+    "timing": "",
+    "visualDirection": "",
+    "speakerNotes": ""
+  }],
+  "cta": "próxima ação",
+  "keywords": [],
+  "disclaimer": "",
+  "imagePrompt": "direção de capa em inglês, sem texto",
   "themeColor": "#RRGGBB",
   "secondaryColor": "#RRGGBB"
 }`;
@@ -226,12 +263,16 @@ export interface OllamaGenerationOptions {
 }
 
 export interface OllamaResultMeta extends AiGenerationMeta {
-  provider: "ollama" | "omniroute";
+  provider: AiProviderName;
 }
 
 export interface OllamaResponse {
   chat: string;
-  action?: "discovery_continue" | "generate_all" | "generate_banner" | "generate_email" | "generate_social" | "cancel";
+  action?:
+    | "discovery_continue"
+    | "generate_all"
+    | `generate_${AiAssetType}`
+    | "cancel";
   targetKeys?: string[];
   detectedContext?: Record<string, string | null>; // <-- ADICIONADO PARA RETER O SKU
   builder: BuilderState;
@@ -245,91 +286,74 @@ export type OllamaResult = OllamaResponse & { meta: OllamaResultMeta };
 // ============================================================
 
 function createRequestId(): string {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto)
+    return crypto.randomUUID();
   return `bf_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
 function extractSpecificBriefing(text: string, targetAsset: string): string {
-  const normalized = text.toUpperCase();
-  const hasMarkers = /BANNER:|E-MAIL:|EMAIL:|POST SOCIAL:|SOCIAL:/i.test(text);
-
-  if (!hasMarkers) return text;
-
-  let keyword = "";
-  if (targetAsset === "banner") keyword = "BANNER:";
-  else if (targetAsset === "email") keyword = normalized.includes("E-MAIL:") ? "E-MAIL:" : "EMAIL:";
-  else if (targetAsset === "social") keyword = normalized.includes("POST SOCIAL:") ? "POST SOCIAL:" : "SOCIAL:";
-
-  if (!keyword || !normalized.includes(keyword)) return text;
-
-  const startIndex = normalized.indexOf(keyword) + keyword.length;
-  const otherKeywords = ["BANNER:", "E-MAIL:", "EMAIL:", "POST SOCIAL:", "SOCIAL:"].filter((k) => k !== keyword);
-
-  let endIndex = text.length;
-  for (const kw of otherKeywords) {
-    const idx = normalized.indexOf(kw, startIndex);
-    if (idx !== -1 && idx < endIndex) endIndex = idx;
-  }
-
-  return text.substring(startIndex, endIndex).trim();
+  return isMaterialType(targetAsset)
+    ? extractMaterialBriefing(text, targetAsset)
+    : text;
 }
 
 function tryParseJson(text: string): OllamaResponse | null {
   return parseStructuredJson(text) as OllamaResponse | null;
 }
 
-function extractChatField(rawJson: string): string | null {
-  const match = rawJson.match(/"chat"\s*:\s*"/);
-  if (!match || match.index === undefined) return null;
-
-  const start = match.index + match[0].length;
-  let result = ""; let escaped = false;
-
-  for (let index = start; index < rawJson.length; index += 1) {
-    const character = rawJson[index];
-    if (escaped) {
-      const replacements: Record<string, string> = { n: "\n", r: "\r", t: "\t", '"': '"', "\\": "\\" };
-      result += replacements[character] ?? character;
-      escaped = false; continue;
-    }
-    if (character === "\\") { escaped = true; continue; }
-    if (character === '"') return result;
-    result += character;
-  }
-  return result || null;
-}
-
-function validateAsset(asset: CampaignAsset, targetAsset: AiAssetType): boolean {
-  const content = asset.content as any;
+function validateAsset(
+  asset: CampaignAsset,
+  targetAsset: AiAssetType,
+): boolean {
+  const content = asset.content;
   if (!content || typeof content !== "object") return false;
 
   if (targetAsset === "banner") return Boolean(content.title);
   if (targetAsset === "email") return Boolean(content.body || content.title);
   if (targetAsset === "social") return Boolean(content.caption);
-  return false;
+  return Boolean(content.title && content.structuredContent);
 }
 
-function createFallbackBuilder(currentPlan: DiscoveryPlan | undefined): BuilderState {
-  return currentPlan ? { type: "discovery_plan", discoveryPlan: currentPlan } : { type: "none" };
+function createFallbackBuilder(
+  currentPlan: DiscoveryPlan | undefined,
+): BuilderState {
+  return currentPlan
+    ? { type: "discovery_plan", discoveryPlan: currentPlan }
+    : { type: "none" };
 }
 
-function normalizeBuilder(response: OllamaResponse, currentPlan: DiscoveryPlan | undefined, targetAsset?: AiAssetType, productImageUrl?: string | null): BuilderState {
+function normalizeBuilder(
+  response: OllamaResponse,
+  currentPlan: DiscoveryPlan | undefined,
+  targetAsset?: AiAssetType,
+  productImageUrl?: string | null,
+): BuilderState {
   const builder = response.builder;
   if (!builder) return createFallbackBuilder(currentPlan);
 
-  if (builder.type === "campaign" && Array.isArray(builder.campaignAssets) && targetAsset) {
+  if (
+    builder.type === "campaign" &&
+    Array.isArray(builder.campaignAssets) &&
+    targetAsset
+  ) {
     const campaignAssets = builder.campaignAssets
-      .filter((asset) =>
-        String(asset.type).toLowerCase().includes(targetAsset) ||
-        String((asset.content as any)?.type).toLowerCase().includes(targetAsset)
+      .filter(
+        (asset) =>
+          String(asset.type).toLowerCase().includes(targetAsset) ||
+          String(asset.content.type).toLowerCase().includes(targetAsset),
       )
       .filter((asset) => validateAsset(asset, targetAsset))
       .map((asset) => ({
-        ...asset, type: targetAsset, status: asset.status ?? "draft",
+        ...asset,
+        type: targetAsset,
+        status: asset.status ?? "draft",
         content: {
-          ...asset.content, type: targetAsset,
-          brandName: currentPlan?.brandName || (asset.content as any).brandName || null,
-          productImageUrl: productImageUrl ?? (asset.content as any).productImageUrl ?? null,
+          ...asset.content,
+          type: targetAsset,
+          brandName:
+            currentPlan?.brandName || asset.content.brandName || undefined,
+          productImageUrl:
+            productImageUrl ?? asset.content.productImageUrl ?? null,
         },
       }));
     return { type: "campaign", campaignAssets };
@@ -344,119 +368,35 @@ async function callDirectAi(
   messagesPayload: { role: "system" | "user" | "assistant"; content: string }[],
   options: OllamaGenerationOptions,
   controller: AbortController,
-): Promise<{ raw: string; provider: "omniroute" | "ollama" }> {
+): Promise<{
+  raw: string;
+  provider: AiProviderName;
+  model: string;
+  requestId: string;
+  usedFallback: boolean;
+  latencyMs: number;
+}> {
   const isExecution = Boolean(options.targetAsset);
-  // DESLIGAMOS O STREAM PARA NÃO TER PROBLEMAS DE CORS COM A GROQ
-  const wantsStream = false; 
-  const provider = options.provider || "omniroute";
+  const result = await requestAiCompletion({
+    messages: messagesPayload,
+    action: options.targetAsset ?? "discovery",
+    stage: isExecution ? "content" : "discovery",
+    responseFormat: "json",
+    temperature: isExecution ? 0.1 : 0.3,
+    maxTokens: isExecution ? 8_000 : 4_000,
+    requestId: options.requestId,
+    preferredProvider: options.provider,
+    signal: controller.signal,
+  });
 
-  if (supabase) {
-    const { data: session } = await supabase.auth.getSession();
-    if (session?.session) {
-      const { data: success, error } = await supabase.rpc("deduct_user_credit", { cost: 1 });
-      if (error || !success) throw new Error("Créditos diários esgotados. Acesse as Configurações da Conta e faça o upgrade do seu plano.");
-    }
-  }
-
-  // 1. OLLAMA LOCAL
-  if (provider === "ollama") {
-    const ollamaUrl = import.meta.env.VITE_OLLAMA_URL || "http://localhost:11434/api/chat";
-    const model = isExecution
-      ? (import.meta.env.VITE_OLLAMA_EXECUTION_MODEL || import.meta.env.VITE_OLLAMA_MODEL || "qwen2.5:7b")
-      : (import.meta.env.VITE_OLLAMA_DISCOVERY_MODEL || import.meta.env.VITE_OLLAMA_MODEL || "qwen2.5:7b");
-
-    const response = await fetch(ollamaUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model,
-        messages: messagesPayload,
-        stream: wantsStream,
-        format: "json",
-        options: {
-          temperature: isExecution ? 0.1 : 0.3,
-          num_predict: isExecution ? 8000 : 4000
-        }
-      }),
-      signal: controller.signal,
-    });
-
-    if (!response.ok) {
-      const errText = await response.text();
-      throw new Error(`Ollama Local Erro ${response.status}: ${errText}`);
-    }
-    const data = await response.json();
-    return { raw: data.message?.content ?? "", provider: "ollama" };
-  } 
-  
- // 2. NUVEM COM FALLBACK POR FUNÇÃO (descoberta ou geração final)
-  else {
-    const fallbackProviders = resolveCloudAiRoute(
-      isExecution ? "content" : "discovery",
-      getAiRoutingEnvironment(import.meta.env),
-    );
-
-    let lastError: any;
-
-    for (const p of fallbackProviders) {
-
-      try {
-        const payload: any = {
-          model: p.model,
-          messages: messagesPayload,
-          max_tokens: isExecution ? 4000 : 2000,
-          stream: false, 
-          response_format: { type: "json_object" },
-        };
-
-        // Gemini 3.6 não aceita os antigos parâmetros de amostragem.
-        if (p.name === "groq") {
-          payload.temperature = isExecution ? 0.1 : 0.3;
-        }
-
-        if (p.name === "groq" && supportsReasoningControls(p.model)) {
-          payload.reasoning_format = "hidden";
-        }
-
-        const response = await fetch(p.url, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${p.key}`,
-          },
-          body: JSON.stringify(payload),
-          signal: controller.signal,
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          const content = data.choices?.[0]?.message?.content ?? "";
-
-          if (tryParseJson(content)) {
-            return { raw: content, provider: "omniroute" };
-          }
-
-          lastError = new Error(`${p.name}/${p.model} retornou JSON inválido.`);
-          console.warn(`[Ollama.ts] Saída inválida em ${p.name}/${p.model}. Tentando o próximo...`);
-          continue;
-        }
-
-        if (response.status === 429) {
-          console.warn(`[Ollama.ts] Limite atingido em ${p.name} (429). Tentando o próximo...`);
-          continue;
-        }
-        
-        console.warn(`[Ollama.ts] Erro ${response.status} em ${p.name}. Tentando o próximo...`);
-        const errText = await response.text();
-        console.warn(`Detalhes do erro:`, errText);
-
-      } catch (err) {
-        lastError = err;
-      }
-    }
-
-    throw new Error(`Falha em todos os provedores de IA. Último erro: ${lastError}`);
-  }
+  return {
+    raw: result.raw,
+    provider: result.meta.provider as AiProviderName,
+    model: result.meta.model,
+    requestId: result.meta.requestId,
+    usedFallback: result.meta.usedFallback,
+    latencyMs: result.meta.latencyMs,
+  };
 }
 
 // ============================================================
@@ -473,9 +413,10 @@ export async function sendToOllama(
   const targetAsset = options.targetAsset;
   const startedAt = Date.now();
 
-  const systemPrompt = wantsExecution && targetAsset
-    ? EXECUTION_AGENT_PROMPT(brandContext, currentPlan, targetAsset, options)
-    : DISCOVERY_AGENT_PROMPT(currentPlan, brandContext);
+  const systemPrompt =
+    wantsExecution && targetAsset
+      ? EXECUTION_AGENT_PROMPT(brandContext, currentPlan, targetAsset, options)
+      : DISCOVERY_AGENT_PROMPT(currentPlan, brandContext);
 
   const recentUserBriefing = history
     .filter((m) => m.role === "user")
@@ -483,42 +424,56 @@ export async function sendToOllama(
     .map((m) => m.content)
     .join("\n\n---\n\n");
 
-  const isolatedBriefing = wantsExecution && targetAsset
-    ? extractSpecificBriefing(recentUserBriefing, targetAsset)
-    : recentUserBriefing;
+  const isolatedBriefing =
+    wantsExecution && targetAsset
+      ? extractSpecificBriefing(recentUserBriefing, targetAsset)
+      : recentUserBriefing;
 
-  const messagesPayload = wantsExecution && targetAsset
-    ? [
-        { role: "system" as const, content: systemPrompt },
-        {
-          role: "user" as const,
-          content: `=== REGRAS OBRIGATÓRIAS DESTA PEÇA ===\n${isolatedBriefing}\n\n=== TAREFA ===\nGere AGORA o JSON para a peça ${targetAsset.toUpperCase()}. Siga as frases acima à risca.`,
-        },
-      ]
-    : [
-        { role: "system" as const, content: systemPrompt },
-        ...history.slice(-6).map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
-      ];
+  const messagesPayload =
+    wantsExecution && targetAsset
+      ? [
+          { role: "system" as const, content: systemPrompt },
+          {
+            role: "user" as const,
+            content: `=== REGRAS OBRIGATÓRIAS DESTA PEÇA ===\n${isolatedBriefing}\n\n=== TAREFA ===\nGere AGORA o JSON para a peça ${targetAsset.toUpperCase()}. Siga as frases acima à risca.`,
+          },
+        ]
+      : [
+          { role: "system" as const, content: systemPrompt },
+          ...history.slice(-6).map((m) => ({
+            role: m.role as "user" | "assistant",
+            content: m.content,
+          })),
+        ];
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), wantsExecution ? 500_000 : 320_000);
+  const timeoutId = setTimeout(
+    () => controller.abort(),
+    wantsExecution ? 500_000 : 320_000,
+  );
 
   let rawJson = "";
-  let providerUsed: "omniroute" | "ollama" = "omniroute";
+  let providerUsed: AiProviderName = "omniroute";
+  let modelUsed = "unknown";
+  let requestId = options.requestId ?? createRequestId();
+  let usedFallback = false;
 
   try {
     const result = await callDirectAi(messagesPayload, options, controller);
     rawJson = result.raw;
-    providerUsed = result.provider as "omniroute" | "ollama";
+    providerUsed = result.provider;
+    modelUsed = result.model;
+    requestId = result.requestId;
+    usedFallback = result.usedFallback;
 
     const parsed = tryParseJson(rawJson);
 
     const metaBase: OllamaResultMeta = {
-      requestId: options.requestId ?? createRequestId(),
-      model: providerUsed,
+      requestId,
+      model: modelUsed,
       intent: options.intent ?? (wantsExecution ? "campaign" : "discovery"),
       stage: wantsExecution ? "generating" : "discovery",
-      usedFallback: true, 
+      usedFallback,
       generatedAt: new Date().toISOString(),
       provider: providerUsed,
     };
@@ -534,24 +489,39 @@ export async function sendToOllama(
         chat: "Desculpe, tive um problema ao processar seu pedido. Podemos tentar novamente?",
         action: "discovery_continue",
         builder: createFallbackBuilder(currentPlan),
-        meta: { ...metaBase, stage: "discovery", latencyMs: Date.now() - startedAt },
+        meta: {
+          ...metaBase,
+          stage: "discovery",
+          latencyMs: Date.now() - startedAt,
+        },
       };
     }
 
-    const builder = normalizeBuilder(parsed as OllamaResponse, currentPlan, targetAsset, options.productImageUrl);
-    
+    const builder = normalizeBuilder(
+      parsed as OllamaResponse,
+      currentPlan,
+      targetAsset,
+      options.productImageUrl,
+    );
+
     return {
-      chat: (parsed as OllamaResponse).chat || (wantsExecution ? "Peça gerada." : "Briefing atualizado."),
+      chat:
+        (parsed as OllamaResponse).chat ||
+        (wantsExecution ? "Peça gerada." : "Briefing atualizado."),
       action: (parsed as OllamaResponse).action || "discovery_continue",
       targetKeys: (parsed as OllamaResponse).targetKeys,
       detectedContext: (parsed as OllamaResponse).detectedContext, // <-- REPASSA O CONTEXTO PARA O FRONTEND
       builder,
       scores: (parsed as OllamaResponse).scores,
-      meta: { ...metaBase, stage: wantsExecution ? "completed" : "ready_to_generate", latencyMs: Date.now() - startedAt },
+      meta: {
+        ...metaBase,
+        stage: wantsExecution ? "completed" : "ready_to_generate",
+        latencyMs: Date.now() - startedAt,
+      },
     };
-
   } catch (error: unknown) {
-    if ((error as { name?: string }).name === "AbortError") throw new Error("Tempo excedido.");
+    if ((error as { name?: string }).name === "AbortError")
+      throw new Error("Tempo excedido.");
     throw new Error(`Falha no pipeline de IA: ${String(error)}`);
   } finally {
     clearTimeout(timeoutId);

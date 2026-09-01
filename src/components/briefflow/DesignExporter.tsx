@@ -38,12 +38,13 @@ import {
 } from "@/lib/export-utils";
 import { cn } from "@/lib/utils";
 
-import type { BuilderState, CampaignAsset } from "@/types/builder";
+import type { BuilderState } from "@/types/builder";
+import type { CoreMaterialType } from "@/types/brief";
 import { BannerPreview } from "./BannerPreview";
 import { EmailPreview } from "./EmailPreview";
 import { SocialPreview } from "./SocialPreview";
 
-type ExportTab = CampaignAsset["type"];
+type ExportTab = CoreMaterialType;
 type ExportFormat = "png" | "jpg";
 type ExportSize = { width: number; height: number };
 
@@ -188,11 +189,10 @@ function getInitialTab(
     return state.type;
   }
   if (state?.type === "campaign") {
-    return (
-      state.campaignAssets?.find((asset) =>
-        ["banner", "email", "social"].includes(asset.type),
-      )?.type ?? "banner"
+    const asset = state.campaignAssets?.find((candidate) =>
+      ["banner", "email", "social"].includes(candidate.type),
     );
+    return asset ? (asset.type as ExportTab) : "banner";
   }
   return "banner";
 }

@@ -50,7 +50,8 @@ export function BuilderEmptyState({ onOpenChat }: { onOpenChat?: () => void }) {
       </h2>
       <p className="mt-5 max-w-2xl text-pretty text-sm leading-6 text-fg-secondary sm:text-base sm:leading-7">
         Descreva o objetivo ou envie o link do produto. O BrieFlow organiza a
-        estratégia e monta banner, e-mail e social em um único fluxo editável.
+        estratégia e cria peças visuais, roteiros, apresentações e documentos em
+        um único fluxo editável.
       </p>
 
       <Button

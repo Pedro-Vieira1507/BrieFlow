@@ -166,16 +166,18 @@ function RootComponent() {
   // Sincronização Global de Sessão
   useEffect(() => {
     if (!supabase) return;
+    let observedAuthEvent = false;
 
     // 1. Carrega a sessão inicial para persistência após F5/Refresh
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
+      if (!observedAuthEvent) setUser(session?.user ?? null);
     });
 
     // 2. Escuta mudanças globais de estado (Login concluído, Logout, Token expirado)
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
+      observedAuthEvent = true;
       setUser(session?.user ?? null);
     });
 

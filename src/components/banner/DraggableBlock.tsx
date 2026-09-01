@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Move } from 'lucide-react';
-import type { BannerTextBlock, Position } from './types';
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Move } from "lucide-react";
+import type { BannerTextBlock, Position } from "./types";
 
 export interface DraggableBlockProps {
   block: BannerTextBlock;
@@ -27,7 +27,11 @@ export default function DraggableBlock({
 }: DraggableBlockProps) {
   const isExportMode = useExportMode(isExport, isExportClone);
   const [dragging, setDragging] = useState(false);
-  const dragStart = useRef<{ mouseX: number; mouseY: number; pos: Position } | null>(null);
+  const dragStart = useRef<{
+    mouseX: number;
+    mouseY: number;
+    pos: Position;
+  } | null>(null);
 
   const handlePointerDown = useCallback(
     (e: React.PointerEvent) => {
@@ -35,7 +39,11 @@ export default function DraggableBlock({
       e.preventDefault();
       e.stopPropagation();
       setDragging(true);
-      dragStart.current = { mouseX: e.clientX, mouseY: e.clientY, pos: { ...block.pos } };
+      dragStart.current = {
+        mouseX: e.clientX,
+        mouseY: e.clientY,
+        pos: { ...block.pos },
+      };
       (e.target as HTMLElement).setPointerCapture(e.pointerId);
     },
     [isExportMode, block.pos],
@@ -54,8 +62,14 @@ export default function DraggableBlock({
       onChange({
         ...block,
         pos: {
-          x: Math.min(100, Math.max(0, start.pos.x + (deltaX / rect.width) * 100)),
-          y: Math.min(100, Math.max(0, start.pos.y + (deltaY / rect.height) * 100)),
+          x: Math.min(
+            100,
+            Math.max(0, start.pos.x + (deltaX / rect.width) * 100),
+          ),
+          y: Math.min(
+            100,
+            Math.max(0, start.pos.y + (deltaY / rect.height) * 100),
+          ),
         },
       });
     };
@@ -63,18 +77,20 @@ export default function DraggableBlock({
       setDragging(false);
       dragStart.current = null;
     };
-    window.addEventListener('pointermove', handleMove);
-    window.addEventListener('pointerup', handleUp);
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
     return () => {
-      window.removeEventListener('pointermove', handleMove);
-      window.removeEventListener('pointerup', handleUp);
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
     };
   }, [dragging, block, onChange, containerRef]);
 
   // In export mode: no responsive font scaling, use the block's fixed pt size
   const fontSizeStyle = isExportMode
     ? { fontSize: `${block.fontSize}px` }
-    : { fontSize: `clamp(${block.fontSize * 0.5}px, ${block.fontSize * 0.1}vw, ${block.fontSize}px)` };
+    : {
+        fontSize: `clamp(${block.fontSize * 0.5}px, ${block.fontSize * 0.1}vw, ${block.fontSize}px)`,
+      };
 
   return (
     <div
@@ -84,14 +100,14 @@ export default function DraggableBlock({
         top: `${block.pos.y}%`,
         width: `${block.width}%`,
         zIndex: 5,
-        transform: 'translate(-50%, -50%)',
+        transform: "translate(-50%, -50%)",
         ...fontSizeStyle,
       }}
       className={[
-        'absolute select-none',
-        isExportMode ? '' : dragging ? 'cursor-grabbing' : 'cursor-grab',
-        isExportMode ? '' : 'hover:ring-2 hover:ring-white/40',
-      ].join(' ')}
+        "absolute select-none",
+        isExportMode ? "" : dragging ? "cursor-grabbing" : "cursor-grab",
+        isExportMode ? "" : "hover:ring-2 hover:ring-white/40",
+      ].join(" ")}
     >
       <p
         style={{

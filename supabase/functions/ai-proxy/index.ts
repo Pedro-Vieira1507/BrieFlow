@@ -1,209 +1,550 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { createClient } from "npm:@supabase/supabase-js@2";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
-};
+import {
+  authenticate,
+  json,
+  preflight,
+  publicError,
+  readJson,
+  requirePost,
+} from "../_shared/http.ts";
 
-const CREDIT_COSTS: Record<string, number> = {
-  banner: 3,
-  email: 3,
-  social: 2,
-  chat: 1,
-  discovery: 1,
-};
+type ChatRole = "system" | "user" | "assistant";
+type ProviderName = "omniroute" | "groq" | "gemini" | "ollama";
 
-const BLOCKED_HOSTS = new Set([
-  "localhost", "127.0.0.1", "0.0.0.0",
-  "169.254.169.254", "metadata.google.internal", "100.100.100.200",
-]);
-
-function isBlockedUrl(rawUrl: string): boolean {
-  try {
-    const u = new URL(rawUrl);
-    if (!["http:", "https:"].includes(u.protocol)) return true;
-    const host = u.hostname.toLowerCase();
-    if (BLOCKED_HOSTS.has(host)) return true;
-    if (/^10\./.test(host)) return true;
-    if (/^192\.168\./.test(host)) return true;
-    if (/^172\.(1[6-9]|2[0-9]|3[01])\./.test(host)) return true;
-    return false;
-  } catch { return true; }
+interface ProxyBody {
+  messages?: Array<{ role?: string; content?: unknown }>;
+  action?: string;
+  stage?: "discovery" | "content";
+  temperature?: number;
+  max_tokens?: number;
+  response_format?: { type?: string };
+  request_id?: string;
+  preferred_provider?: ProviderName;
 }
 
-async function checkRateLimit(supabase: ReturnType<typeof createClient>, userId: string): Promise<boolean> {
-  const oneMinuteAgo = new Date(Date.now() - 60_000).toISOString();
-  const { count } = await supabase
-    .from("ai_usage_log")
-    .select("id", { count: "exact", head: true })
-    .eq("user_id", userId)
-    .gte("created_at", oneMinuteAgo);
-  return (count ?? 0) < 20;
+interface AuthorizationResult {
+  ok: boolean;
+  code: string;
+  credits_remaining: number;
+  credit_cost: number;
+  plan: string;
+  allowed_formats: string[];
+  organization_id: string;
+}
+
+interface ProviderAttempt {
+  name: ProviderName;
+  model: string;
+  execute: () => Promise<ProviderResult>;
+}
+
+interface ProviderResult {
+  provider: ProviderName;
+  model: string;
+  content: string;
+  usage: { prompt_tokens?: number; completion_tokens?: number };
+}
+
+const ACTIONS = new Set([
+  "banner",
+  "email",
+  "social",
+  "whatsapp",
+  "technical_sheet",
+  "blog",
+  "reel",
+  "video",
+  "slides",
+  "podcast",
+  "chat",
+  "discovery",
+]);
+
+function env(name: string): string | null {
+  const value = Deno.env.get(name)?.trim();
+  return value || null;
+}
+
+function safeEndpoint(raw: string): string {
+  const url = new URL(raw);
+  if (
+    !["http:", "https:"].includes(url.protocol) ||
+    url.username ||
+    url.password
+  ) {
+    throw new Error("provider_endpoint_invalid");
+  }
+  if (
+    url.protocol !== "https:" &&
+    Deno.env.get("ENVIRONMENT") === "production"
+  ) {
+    throw new Error("provider_endpoint_insecure");
+  }
+  return url.toString();
+}
+
+function isValidJsonContent(content: string): boolean {
+  const normalized = content
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/, "");
+  try {
+    JSON.parse(normalized);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function openAiRequest(options: {
+  provider: ProviderName;
+  endpoint: string;
+  apiKey: string;
+  model: string;
+  messages: Array<{ role: ChatRole; content: string }>;
+  temperature: number;
+  maxTokens: number;
+  jsonMode: boolean;
+  extraHeaders?: Record<string, string>;
+}): Promise<ProviderResult> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 75_000);
+  try {
+    const response = await fetch(safeEndpoint(options.endpoint), {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${options.apiKey}`,
+        ...options.extraHeaders,
+      },
+      body: JSON.stringify({
+        model: options.model,
+        messages: options.messages,
+        temperature: options.temperature,
+        max_tokens: options.maxTokens,
+        ...(options.jsonMode
+          ? { response_format: { type: "json_object" } }
+          : {}),
+      }),
+    });
+    if (!response.ok) {
+      throw new Error(`${options.provider}_http_${response.status}`);
+    }
+    const raw = await response.text();
+    if (raw.length > 2_000_000) throw new Error("provider_response_too_large");
+    const payload = JSON.parse(raw) as {
+      model?: string;
+      choices?: Array<{ message?: { content?: string } }>;
+      usage?: { prompt_tokens?: number; completion_tokens?: number };
+    };
+    const content = payload.choices?.[0]?.message?.content?.trim() ?? "";
+    if (!content) throw new Error(`${options.provider}_empty_response`);
+    if (options.jsonMode && !isValidJsonContent(content)) {
+      throw new Error(`${options.provider}_invalid_json`);
+    }
+    return {
+      provider: options.provider,
+      model: payload.model ?? options.model,
+      content,
+      usage: payload.usage ?? {},
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function ollamaRequest(options: {
+  endpoint: string;
+  model: string;
+  messages: Array<{ role: ChatRole; content: string }>;
+  temperature: number;
+  maxTokens: number;
+  jsonMode: boolean;
+}): Promise<ProviderResult> {
+  const base = safeEndpoint(options.endpoint).replace(/\/$/, "");
+  const endpoint = base.endsWith("/api/chat") ? base : `${base}/api/chat`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 90_000);
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      signal: controller.signal,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: options.model,
+        messages: options.messages,
+        stream: false,
+        ...(options.jsonMode ? { format: "json" } : {}),
+        options: {
+          temperature: options.temperature,
+          num_predict: options.maxTokens,
+        },
+      }),
+    });
+    if (!response.ok) throw new Error(`ollama_http_${response.status}`);
+    const payload = (await response.json()) as {
+      model?: string;
+      message?: { content?: string };
+      prompt_eval_count?: number;
+      eval_count?: number;
+    };
+    const content = payload.message?.content?.trim() ?? "";
+    if (!content) throw new Error("ollama_empty_response");
+    if (options.jsonMode && !isValidJsonContent(content))
+      throw new Error("ollama_invalid_json");
+    return {
+      provider: "ollama",
+      model: payload.model ?? options.model,
+      content,
+      usage: {
+        prompt_tokens: payload.prompt_eval_count,
+        completion_tokens: payload.eval_count,
+      },
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function buildAttempts(options: {
+  stage: "discovery" | "content";
+  preferred?: ProviderName;
+  messages: Array<{ role: ChatRole; content: string }>;
+  temperature: number;
+  maxTokens: number;
+  jsonMode: boolean;
+}): ProviderAttempt[] {
+  const attempts: ProviderAttempt[] = [];
+  const shared = {
+    messages: options.messages,
+    temperature: options.temperature,
+    maxTokens: options.maxTokens,
+    jsonMode: options.jsonMode,
+  };
+
+  const omnirouteKey = env("OMNIROUTE_API_KEY");
+  const omnirouteUrl = env("OMNIROUTE_API_URL");
+  const omnirouteModel =
+    env(
+      options.stage === "discovery"
+        ? "OMNIROUTE_DISCOVERY_MODEL"
+        : "OMNIROUTE_CONTENT_MODEL",
+    ) ?? env("OMNIROUTE_MODEL");
+  if (omnirouteKey && omnirouteUrl && omnirouteModel) {
+    attempts.push({
+      name: "omniroute",
+      model: omnirouteModel,
+      execute: () =>
+        openAiRequest({
+          ...shared,
+          provider: "omniroute",
+          endpoint: omnirouteUrl,
+          apiKey: omnirouteKey,
+          model: omnirouteModel,
+        }),
+    });
+  }
+
+  const groqKey = env("GROQ_API_KEY");
+  if (groqKey) {
+    const modelNames =
+      options.stage === "discovery"
+        ? [env("GROQ_DISCOVERY_MODEL")]
+        : [
+            env("GROQ_PRIMARY_MODEL"),
+            env("GROQ_FIRST_FALLBACK_MODEL"),
+            env("GROQ_SECOND_FALLBACK_MODEL"),
+          ];
+    for (const model of [
+      ...new Set(modelNames.filter((value): value is string => Boolean(value))),
+    ]) {
+      attempts.push({
+        name: "groq",
+        model,
+        execute: () =>
+          openAiRequest({
+            ...shared,
+            provider: "groq",
+            endpoint: "https://api.groq.com/openai/v1/chat/completions",
+            apiKey: groqKey,
+            model,
+          }),
+      });
+    }
+  }
+
+  const geminiKey = env("GEMINI_API_KEY");
+  const geminiModel = env(
+    options.stage === "discovery"
+      ? "GEMINI_DISCOVERY_MODEL"
+      : "GEMINI_CONTENT_MODEL",
+  );
+  if (geminiKey && geminiModel) {
+    attempts.push({
+      name: "gemini",
+      model: geminiModel,
+      execute: () =>
+        openAiRequest({
+          ...shared,
+          provider: "gemini",
+          endpoint:
+            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+          apiKey: geminiKey,
+          model: geminiModel,
+          extraHeaders: { "x-goog-api-key": geminiKey },
+        }),
+    });
+  }
+
+  const ollamaUrl = env("OLLAMA_API_URL");
+  const ollamaModel =
+    env(
+      options.stage === "discovery"
+        ? "OLLAMA_DISCOVERY_MODEL"
+        : "OLLAMA_CONTENT_MODEL",
+    ) ?? env("OLLAMA_MODEL");
+  if (ollamaUrl && ollamaModel) {
+    attempts.push({
+      name: "ollama",
+      model: ollamaModel,
+      execute: () =>
+        ollamaRequest({ ...shared, endpoint: ollamaUrl, model: ollamaModel }),
+    });
+  }
+
+  if (options.preferred) {
+    attempts.sort(
+      (a, b) =>
+        Number(b.name === options.preferred) -
+        Number(a.name === options.preferred),
+    );
+  }
+  return attempts;
 }
 
 Deno.serve(async (req: Request) => {
-  if (req.method === "OPTIONS") return new Response(null, { status: 200, headers: corsHeaders });
+  const optionsResponse = preflight(req);
+  if (optionsResponse) return optionsResponse;
+  const methodResponse = requirePost(req);
+  if (methodResponse) return methodResponse;
 
-  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-  const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-  const omnirouteApiKey = Deno.env.get("OMNIROUTE_API_KEY");
-  const omnirouteApiUrl = Deno.env.get("OMNIROUTE_API_URL");
-  const omnirouteModel = Deno.env.get("OMNIROUTE_MODEL") ?? "groq/llama-3.3-70b-versatile";
-  const ollamaApiUrl = Deno.env.get("OLLAMA_API_URL");
-  const ollamaModel = Deno.env.get("OLLAMA_MODEL") ?? "qwen2.5:7b";
-
-  const authHeader = req.headers.get("Authorization");
-  if (!authHeader?.startsWith("Bearer ")) {
-    return new Response(JSON.stringify({ error: "unauthorized" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-  }
-
-  const anonClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!, {
-    global: { headers: { Authorization: authHeader } },
-  });
-  const { data: { user }, error: authError } = await anonClient.auth.getUser();
-  if (authError || !user) {
-    return new Response(JSON.stringify({ error: "unauthorized" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-  }
-
-  const serviceClient = createClient(supabaseUrl, supabaseServiceKey);
+  const startedAt = Date.now();
+  let context: Awaited<ReturnType<typeof authenticate>> = null;
+  let requestId = "";
+  let authorized = false;
+  let action = "chat";
 
   try {
-    const body = await req.json() as {
-      messages: { role: string; content: string }[];
-      action?: string; model?: string; temperature?: number;
-      max_tokens?: number; response_format?: { type: string };
-      request_id?: string; preferred_provider?: "omniroute" | "ollama";
-    };
+    context = await authenticate(req);
+    if (!context)
+      return json(req, 401, {
+        error: "unauthorized",
+        message: "Sessão inválida.",
+      });
 
-    if (!Array.isArray(body.messages) || body.messages.length === 0) {
-      return new Response(JSON.stringify({ error: "messages array required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    const body = await readJson<ProxyBody>(req, 96_000);
+    action = String(body.action ?? "chat").toLowerCase();
+    if (!ACTIONS.has(action))
+      return json(req, 400, { error: "invalid_action" });
+
+    requestId = body.request_id?.trim() || crypto.randomUUID();
+    if (!/^[a-zA-Z0-9_-]{8,128}$/.test(requestId)) {
+      return json(req, 400, { error: "invalid_request_id" });
     }
 
-    const safeMessages = body.messages
-      .filter((m) => ["system", "user", "assistant"].includes(m.role))
-      .map((m) => ({ role: m.role, content: String(m.content).slice(0, 32_000) }));
-
-    const action = (body.action ?? "chat").toLowerCase();
-    const creditCost = CREDIT_COSTS[action] ?? 2;
-    const requestId = body.request_id ?? crypto.randomUUID();
-
-    const withinLimit = await checkRateLimit(serviceClient, user.id);
-    if (!withinLimit) {
-      return new Response(JSON.stringify({ error: "rate_limit_exceeded" }), { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    if (
+      !Array.isArray(body.messages) ||
+      body.messages.length === 0 ||
+      body.messages.length > 32
+    ) {
+      return json(req, 400, { error: "invalid_messages" });
     }
-
-    const { data: deductResult, error: deductError } = await serviceClient.rpc("deduct_credits", {
-      p_user_id: user.id, p_amount: creditCost, p_action: action,
-      p_metadata: { request_id: requestId },
+    let totalCharacters = 0;
+    const messages = body.messages.map((message) => {
+      if (
+        !message ||
+        !["system", "user", "assistant"].includes(String(message.role))
+      ) {
+        throw new Error("invalid_messages");
+      }
+      const content = String(message.content ?? "").trim();
+      if (!content || content.length > 32_000)
+        throw new Error("invalid_messages");
+      totalCharacters += content.length;
+      return { role: message.role as ChatRole, content };
     });
+    if (totalCharacters > 64_000)
+      return json(req, 413, { error: "prompt_too_large" });
 
-    if (deductError) {
-      return new Response(JSON.stringify({ error: "credit_check_failed" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    const { data, error: authorizationError } = await context.service.rpc(
+      "authorize_generation",
+      {
+        p_user_id: context.user.id,
+        p_action: action,
+        p_request_id: requestId,
+        p_metadata: {
+          stage: body.stage ?? "content",
+          client_version: req.headers.get("X-Client-Version"),
+        },
+      },
+    );
+    if (authorizationError) throw new Error("authorization_failed");
+    const authorization = (
+      Array.isArray(data) ? data[0] : data
+    ) as AuthorizationResult | null;
+    if (!authorization?.ok) {
+      const code = authorization?.code ?? "authorization_failed";
+      const status =
+        code === "rate_limit_exceeded"
+          ? 429
+          : code === "insufficient_credits"
+            ? 402
+            : code === "duplicate_request"
+              ? 409
+              : [
+                    "format_not_allowed",
+                    "subscription_inactive",
+                    "membership_inactive",
+                  ].includes(code)
+                ? 403
+                : 500;
+      return json(req, status, {
+        error: code,
+        remaining: authorization?.credits_remaining ?? 0,
+        allowed_formats: authorization?.allowed_formats ?? [],
+      });
     }
+    authorized = true;
 
-    const deduct = Array.isArray(deductResult) ? deductResult[0] : deductResult;
-    if (!deduct?.ok) {
-      return new Response(
-        JSON.stringify({ error: deduct?.message ?? "insufficient_credits", remaining: deduct?.remaining ?? 0 }),
-        { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    }
+    const stage = body.stage === "discovery" ? "discovery" : "content";
+    const requestedTemperature = Number(body.temperature ?? 0.3);
+    const requestedMaxTokens = Number(body.max_tokens ?? 4096);
+    const temperature = Math.min(
+      Math.max(
+        Number.isFinite(requestedTemperature) ? requestedTemperature : 0.3,
+        0,
+      ),
+      1.2,
+    );
+    const maxTokens = Math.min(
+      Math.max(
+        Number.isFinite(requestedMaxTokens)
+          ? Math.floor(requestedMaxTokens)
+          : 4096,
+        256,
+      ),
+      8192,
+    );
+    const jsonMode = body.response_format?.type === "json_object";
+    const attempts = buildAttempts({
+      stage,
+      preferred: ["omniroute", "groq", "gemini", "ollama"].includes(
+        String(body.preferred_provider),
+      )
+        ? body.preferred_provider
+        : undefined,
+      messages,
+      temperature,
+      maxTokens,
+      jsonMode,
+    });
+    if (attempts.length === 0) throw new Error("no_provider_configured");
 
-    const tryOmniroute = async () => {
-      if (!omnirouteApiKey || !omnirouteApiUrl) throw new Error("omniroute_not_configured");
-      if (isBlockedUrl(omnirouteApiUrl)) throw new Error("omniroute_url_blocked");
-      const payload: Record<string, unknown> = {
-        model: body.model ?? omnirouteModel, messages: safeMessages,
-        temperature: body.temperature ?? 0.7, max_tokens: body.max_tokens ?? 4096,
-      };
-      if (body.response_format) payload.response_format = body.response_format;
-      const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), 60_000);
+    let result: ProviderResult | null = null;
+    let attemptIndex = -1;
+    for (const [index, attempt] of attempts.entries()) {
       try {
-        const res = await fetch(omnirouteApiUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${omnirouteApiKey}` },
-          body: JSON.stringify(payload), signal: ctrl.signal,
-        });
-        clearTimeout(t);
-        if (!res.ok) throw new Error(`omniroute_http_${res.status}`);
-        return { data: await res.json(), provider: "omniroute" as const };
-      } finally { clearTimeout(t); }
-    };
-
-    const tryOllama = async () => {
-      if (!ollamaApiUrl) throw new Error("ollama_not_configured");
-      if (isBlockedUrl(ollamaApiUrl)) throw new Error("ollama_url_blocked");
-      const endpoint = ollamaApiUrl.replace(/\/?$/, "") + "/api/chat";
-      const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), 90_000);
-      try {
-        const res = await fetch(endpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ model: ollamaModel, messages: safeMessages, stream: false, options: { temperature: body.temperature ?? 0.7 } }),
-          signal: ctrl.signal,
-        });
-        clearTimeout(t);
-        if (!res.ok) throw new Error(`ollama_http_${res.status}`);
-        const raw = await res.json();
-        return {
-          data: {
-            id: `ollama-${crypto.randomUUID()}`, model: ollamaModel,
-            choices: [{ index: 0, message: { role: "assistant", content: raw.message?.content ?? "" }, finish_reason: "stop" }],
-            usage: { prompt_tokens: raw.prompt_eval_count ?? 0, completion_tokens: raw.eval_count ?? 0, total_tokens: (raw.prompt_eval_count ?? 0) + (raw.eval_count ?? 0) },
-          },
-          provider: "ollama" as const,
-        };
-      } finally { clearTimeout(t); }
-    };
-
-    let result: { data: Record<string, unknown>; provider: "omniroute" | "ollama" };
-    let usedFallback = false;
-    const startTime = Date.now();
-    const preferred = body.preferred_provider ?? "omniroute";
-
-    try {
-      result = preferred === "omniroute" ? await tryOmniroute() : await tryOllama();
-    } catch {
-      try {
-        result = preferred === "omniroute" ? await tryOllama() : await tryOmniroute();
-        usedFallback = true;
-      } catch {
-        await serviceClient.rpc("deduct_credits", {
-          p_user_id: user.id, p_amount: -creditCost,
-          p_action: `${action}_refund`, p_metadata: { request_id: requestId, reason: "provider_failed" },
-        });
-        await serviceClient.from("ai_usage_log").insert({
-          user_id: user.id, provider: "none", model: "none", action,
-          success: false, error_code: "all_providers_failed", request_id: requestId,
-          latency_ms: Date.now() - startTime,
-        });
-        return new Response(JSON.stringify({ error: "all_providers_failed" }), { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        result = await attempt.execute();
+        attemptIndex = index;
+        break;
+      } catch (error) {
+        const code = error instanceof Error ? error.message : "provider_failed";
+        console.warn(
+          JSON.stringify({
+            event: "ai_provider_failed",
+            provider: attempt.name,
+            model: attempt.model,
+            code,
+          }),
+        );
       }
     }
+    if (!result) throw new Error("all_providers_failed");
 
-    const latencyMs = Date.now() - startTime;
-    const usage = (result.data.usage ?? {}) as { prompt_tokens?: number; completion_tokens?: number };
+    const latencyMs = Date.now() - startedAt;
+    const logPromise = context.service.from("ai_usage_log").insert({
+      organization_id: authorization.organization_id,
+      user_id: context.user.id,
+      request_id: requestId,
+      action,
+      provider: result.provider,
+      model: result.model,
+      prompt_tokens: result.usage.prompt_tokens ?? null,
+      completion_tokens: result.usage.completion_tokens ?? null,
+      latency_ms: latencyMs,
+      success: true,
+    });
+    EdgeRuntime.waitUntil(logPromise.then(() => undefined));
 
-    EdgeRuntime.waitUntil(serviceClient.from("ai_usage_log").insert({
-      user_id: user.id, provider: result.provider,
-      model: String(result.data.model ?? body.model ?? "unknown"),
-      action, prompt_tokens: usage.prompt_tokens ?? null,
-      completion_tokens: usage.completion_tokens ?? null,
-      latency_ms: latencyMs, success: true, request_id: requestId,
-    }));
-
-    return new Response(
-      JSON.stringify({ ...result.data, _meta: { request_id: requestId, provider: result.provider, used_fallback: usedFallback, latency_ms: latencyMs, credits_remaining: deduct.remaining - creditCost } }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } },
-    );
-  } catch (err) {
-    return new Response(
-      JSON.stringify({ error: err instanceof Error ? err.message : "internal_error" }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-    );
+    return json(req, 200, {
+      model: result.model,
+      choices: [
+        {
+          index: 0,
+          message: { role: "assistant", content: result.content },
+          finish_reason: "stop",
+        },
+      ],
+      usage: result.usage,
+      _meta: {
+        request_id: requestId,
+        provider: result.provider,
+        model: result.model,
+        used_fallback: attemptIndex > 0,
+        latency_ms: latencyMs,
+        credits_remaining: authorization.credits_remaining,
+      },
+    });
+  } catch (error) {
+    const code = error instanceof Error ? error.message : "internal_error";
+    if (context && requestId && authorized) {
+      await context.service.rpc("refund_generation", {
+        p_user_id: context.user.id,
+        p_request_id: requestId,
+        p_reason: code,
+      });
+      await context.service.from("ai_usage_log").insert({
+        user_id: context.user.id,
+        request_id: requestId,
+        action,
+        provider: "none",
+        model: "none",
+        latency_ms: Date.now() - startedAt,
+        success: false,
+        error_code: code.slice(0, 120),
+      });
+    }
+    const publicCode = [
+      "invalid_json",
+      "request_too_large",
+      "invalid_messages",
+    ].includes(code)
+      ? code
+      : code === "no_provider_configured"
+        ? code
+        : "all_providers_failed";
+    const status = ["invalid_json", "invalid_messages"].includes(publicCode)
+      ? 400
+      : publicCode === "request_too_large"
+        ? 413
+        : publicCode === "no_provider_configured"
+          ? 503
+          : 502;
+    return json(req, status, {
+      error: publicCode,
+      message: publicError(error),
+    });
   }
 });

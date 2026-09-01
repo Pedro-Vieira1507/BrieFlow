@@ -53,7 +53,10 @@ export function Editable({
         // UX: Adicionado cursor-text, empty states e transições mais suaves
         className={`editable-hover cursor-text focus:outline-none focus:ring-2 focus:ring-[rgba(59,130,246,0.6)] focus:bg-[rgba(255,255,255,0.08)] rounded-md px-1.5 -ml-1.5 transition-all duration-200 empty:before:content-[attr(data-placeholder)] empty:before:text-inherit empty:before:opacity-40 empty:before:italic ${className ?? ""}`}
       />
-      <div data-export-exclude="true" className="absolute -right-7 top-1/2 -translate-y-1/2 opacity-0 group-hover/editable:opacity-100 transition-opacity duration-300 pointer-events-none text-white/50 bg-black/20 rounded-full p-1 backdrop-blur-sm">
+      <div
+        data-export-exclude="true"
+        className="absolute -right-7 top-1/2 -translate-y-1/2 opacity-0 group-hover/editable:opacity-100 transition-opacity duration-300 pointer-events-none text-white/50 bg-black/20 rounded-full p-1 backdrop-blur-sm"
+      >
         <Edit2 className="size-3.5" />
       </div>
     </div>

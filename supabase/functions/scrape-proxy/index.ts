@@ -1,126 +1,242 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { createClient } from "npm:@supabase/supabase-js@2";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
-};
+import { authorizationStatus, authorize, refund } from "../_shared/credits.ts";
+import {
+  authenticate,
+  json,
+  preflight,
+  readJson,
+  requirePost,
+} from "../_shared/http.ts";
+import { fetchPublicResource, validatePublicUrl } from "../_shared/urls.ts";
 
-const BLOCKED_HOSTS = new Set(["localhost","127.0.0.1","0.0.0.0","169.254.169.254","metadata.google.internal","100.100.100.200"]);
-
-function validateUrl(raw: string): { ok: true; url: URL } | { ok: false; reason: string } {
-  let parsed: URL;
-  try { parsed = new URL(raw); } catch { return { ok: false, reason: "invalid_url" }; }
-  if (!["http:", "https:"].includes(parsed.protocol)) return { ok: false, reason: "invalid_protocol" };
-  const host = parsed.hostname.toLowerCase();
-  if (BLOCKED_HOSTS.has(host)) return { ok: false, reason: "blocked_host" };
-  if (/^10\./.test(host)) return { ok: false, reason: "private_ip" };
-  if (/^192\.168\./.test(host)) return { ok: false, reason: "private_ip" };
-  if (/^172\.(1[6-9]|2[0-9]|3[01])\./.test(host)) return { ok: false, reason: "private_ip" };
-  return { ok: true, url: parsed };
+interface ScrapeRequest {
+  url?: string;
+  request_id?: string;
 }
 
-async function hashUrl(url: string): Promise<string> {
-  const data = new TextEncoder().encode(url.toLowerCase().trim());
-  const hash = await crypto.subtle.digest("SHA-256", data);
-  return Array.from(new Uint8Array(hash)).map((b) => b.toString(16).padStart(2, "0")).join("");
+function decodeEntities(value: string): string {
+  return value
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code)))
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function stripTags(value: string): string {
+  return decodeEntities(
+    value
+      .replace(/<script[\s\S]*?<\/script>/gi, " ")
+      .replace(/<style[\s\S]*?<\/style>/gi, " ")
+      .replace(/<noscript[\s\S]*?<\/noscript>/gi, " ")
+      .replace(/<[^>]+>/g, " "),
+  );
 }
 
 function metaContent(html: string, names: string[]): string {
   for (const name of names) {
-    for (const re of [
-      new RegExp(`<meta[^>]+(?:name|property)=["']${name}["'][^>]+content=["']([^"']+)["']`, "i"),
-      new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+(?:name|property)=["']${name}["']`, "i"),
-    ]) { const m = html.match(re); if (m?.[1]) return m[1].trim(); }
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    for (const pattern of [
+      new RegExp(
+        `<meta[^>]+(?:name|property)=["']${escaped}["'][^>]+content=["']([^"']+)["']`,
+        "i",
+      ),
+      new RegExp(
+        `<meta[^>]+content=["']([^"']+)["'][^>]+(?:name|property)=["']${escaped}["']`,
+        "i",
+      ),
+    ]) {
+      const match = html.match(pattern);
+      if (match?.[1]) return decodeEntities(match[1]);
+    }
   }
   return "";
 }
 
-function extractBrandData(html: string, url: string) {
-  const title = metaContent(html, ["og:title","twitter:title"]) ||
-    (html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? "").trim();
-  const description = metaContent(html, ["og:description","twitter:description","description"]) || "";
-  const logo = metaContent(html, ["og:image","twitter:image"]) ||
-    (html.match(/<link[^>]+rel=["'](?:icon|shortcut icon)["'][^>]+href=["']([^"']+)["']/i)?.[1] ?? "");
-  const colors: string[] = [];
-  for (const m of html.matchAll(/#([0-9a-fA-F]{6})\b/g)) {
-    if (!colors.includes(`#${m[1]}`) && colors.length < 5) colors.push(`#${m[1]}`);
+function absolutize(value: string, pageUrl: string): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value, pageUrl);
+    return ["http:", "https:"].includes(url.protocol) ? url.toString() : null;
+  } catch {
+    return null;
   }
-  const origin = new URL(url).origin;
+}
+
+function collectColors(html: string): string[] {
+  const frequency = new Map<string, number>();
+  for (const match of html.matchAll(/#([0-9a-f]{6})\b/gi)) {
+    const color = `#${match[1].toUpperCase()}`;
+    if (["#FFFFFF", "#000000", "#F5F5F5"].includes(color)) continue;
+    frequency.set(color, (frequency.get(color) ?? 0) + 1);
+  }
+  return [...frequency.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6)
+    .map(([color]) => color);
+}
+
+function extractPage(html: string, pageUrl: string) {
+  const title =
+    metaContent(html, ["og:title", "twitter:title"]) ||
+    stripTags(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? "");
+  const description = metaContent(html, [
+    "og:description",
+    "twitter:description",
+    "description",
+  ]).slice(0, 800);
+  const image = metaContent(html, [
+    "og:image:secure_url",
+    "og:image",
+    "twitter:image",
+  ]);
+  const headings = [...html.matchAll(/<h[1-3][^>]*>([\s\S]*?)<\/h[1-3]>/gi)]
+    .map((match) => stripTags(match[1]))
+    .filter(Boolean)
+    .slice(0, 12);
+  const bodySnippet = stripTags(
+    html.match(/<body[^>]*>([\s\S]*?)<\/body>/i)?.[1] ?? html,
+  ).slice(0, 3000);
+  const hostname = new URL(pageUrl).hostname.replace(/^www\./, "");
+  const brandName = (title.split(/\s+[|–—]\s+|\s+-\s+/)[0] || hostname)
+    .trim()
+    .slice(0, 120);
+
   return {
-    url, brandName: title.split("|")[0].split("-")[0].trim() || new URL(url).hostname,
-    description: description.slice(0, 500),
-    logo: logo.startsWith("http") ? logo : logo ? `${origin}${logo}` : null,
-    colors, rawTitle: title,
+    url: pageUrl,
+    brandName,
+    description,
+    logo: absolutize(image, pageUrl),
+    colors: collectColors(html),
+    rawTitle: title.slice(0, 300),
+    headings,
+    bodySnippet,
+    keywords: metaContent(html, ["keywords"]).slice(0, 500),
   };
 }
 
+async function hashUrl(url: string): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(url),
+  );
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 Deno.serve(async (req: Request) => {
-  if (req.method === "OPTIONS") return new Response(null, { status: 200, headers: corsHeaders });
+  const optionsResponse = preflight(req);
+  if (optionsResponse) return optionsResponse;
+  const methodResponse = requirePost(req);
+  if (methodResponse) return methodResponse;
 
-  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-  const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const context = await authenticate(req).catch(() => null);
+  if (!context) return json(req, 401, { error: "unauthorized" });
 
-  const authHeader = req.headers.get("Authorization");
-  if (!authHeader?.startsWith("Bearer ")) {
-    return new Response(JSON.stringify({ error: "unauthorized" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-  }
-
-  const anonClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!, {
-    global: { headers: { Authorization: authHeader } },
-  });
-  const { data: { user }, error: authError } = await anonClient.auth.getUser();
-  if (authError || !user) {
-    return new Response(JSON.stringify({ error: "unauthorized" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-  }
-
-  const serviceClient = createClient(supabaseUrl, supabaseServiceKey);
-
+  let requestId = "";
+  let charged = false;
   try {
-    const { url: rawUrl } = await req.json() as { url?: string };
-    if (!rawUrl || typeof rawUrl !== "string") {
-      return new Response(JSON.stringify({ error: "url_required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    const body = await readJson<ScrapeRequest>(req, 8_192);
+    if (typeof body.url !== "string" || body.url.length > 2_048) {
+      return json(req, 400, { error: "invalid_url" });
+    }
+    requestId = body.request_id?.trim() || crypto.randomUUID();
+    if (!/^[a-zA-Z0-9_-]{8,128}$/.test(requestId)) {
+      return json(req, 400, { error: "invalid_request_id" });
     }
 
-    const validation = validateUrl(rawUrl.trim());
-    if (!validation.ok) {
-      return new Response(JSON.stringify({ error: validation.reason }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    }
-
-    const normalizedUrl = validation.url.toString();
-    const urlHash = await hashUrl(normalizedUrl);
-
-    const { data: cached } = await serviceClient.from("scrape_cache")
-      .select("data, expires_at").eq("url_hash", urlHash).maybeSingle();
-    if (cached && new Date(cached.expires_at) > new Date()) {
-      return new Response(JSON.stringify({ ...cached.data, _cached: true }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    }
-
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15_000);
-    let html = "";
-    try {
-      const res = await fetch(normalizedUrl, {
-        headers: { "User-Agent": "Mozilla/5.0 (compatible; BrieFlow/1.0)", Accept: "text/html,application/xhtml+xml", "Accept-Language": "pt-BR,pt;q=0.9" },
-        redirect: "follow", signal: controller.signal,
+    const access = await authorize(context, "website_analysis", requestId, {});
+    if (!access.ok) {
+      return json(req, authorizationStatus(access.code), {
+        error: access.code,
+        remaining: access.credits_remaining,
       });
-      clearTimeout(timeout);
-      if (!res.ok) return new Response(JSON.stringify({ error: `fetch_failed_${res.status}` }), { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-      const buf = await res.arrayBuffer();
-      html = new TextDecoder().decode(buf.slice(0, 512 * 1024));
-    } finally { clearTimeout(timeout); }
+    }
+    charged = true;
 
-    const brandData = extractBrandData(html, normalizedUrl);
+    const normalized = (await validatePublicUrl(body.url)).toString();
+    const urlHash = await hashUrl(normalized);
+    const { data: cached } = await context.service
+      .from("scrape_cache")
+      .select("data,expires_at")
+      .eq("url_hash", urlHash)
+      .maybeSingle();
+    if (cached && Date.parse(cached.expires_at) > Date.now()) {
+      return json(req, 200, {
+        ...(cached.data as Record<string, unknown>),
+        _cached: true,
+        _meta: {
+          request_id: requestId,
+          credits_remaining: access.credits_remaining,
+        },
+      });
+    }
 
-    EdgeRuntime.waitUntil(serviceClient.from("scrape_cache").upsert({
-      url_hash: urlHash, url: normalizedUrl, data: brandData,
+    const { response, bytes, finalUrl } = await fetchPublicResource(
+      normalized,
+      {
+        accept: "text/html,application/xhtml+xml;q=0.9",
+        maxBytes: 1_000_000,
+        timeoutMs: 15_000,
+        maxRedirects: 4,
+      },
+    );
+    if (!response.ok) throw new Error(`upstream_http_${response.status}`);
+    const contentType =
+      response.headers.get("Content-Type")?.toLowerCase() ?? "";
+    if (
+      !contentType.includes("text/html") &&
+      !contentType.includes("application/xhtml+xml")
+    ) {
+      throw new Error("unsupported_content_type");
+    }
+
+    const html = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+    const page = extractPage(html, finalUrl.toString());
+    const cacheWrite = context.service.from("scrape_cache").upsert({
+      url_hash: urlHash,
+      url: normalized,
+      data: page,
       fetched_at: new Date().toISOString(),
       expires_at: new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString(),
-    }));
+    });
+    EdgeRuntime.waitUntil(cacheWrite.then(() => undefined));
 
-    return new Response(JSON.stringify(brandData), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
-  } catch (err) {
-    return new Response(JSON.stringify({ error: err instanceof Error ? err.message : "internal_error" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    return json(req, 200, {
+      ...page,
+      _cached: false,
+      _meta: {
+        request_id: requestId,
+        credits_remaining: access.credits_remaining,
+      },
+    });
+  } catch (error) {
+    const code = error instanceof Error ? error.message : "scrape_failed";
+    if (charged && requestId) await refund(context, requestId, code);
+    const status = [
+      "invalid_url",
+      "invalid_protocol",
+      "url_credentials_not_allowed",
+      "port_not_allowed",
+      "private_address_blocked",
+      "dns_resolution_failed",
+    ].includes(code)
+      ? 400
+      : code === "resource_too_large"
+        ? 413
+        : 502;
+    return json(req, status, {
+      error: status < 500 ? code : "scrape_failed",
+      message:
+        status < 500
+          ? "A URL não pode ser analisada."
+          : "Não foi possível analisar este site.",
+    });
   }
 });

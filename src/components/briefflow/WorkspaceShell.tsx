@@ -14,13 +14,18 @@ import { ChatPanel } from "./ChatPanel";
 import { LibraryModal } from "./LibraryModal";
 import { PageBuilder } from "./PageBuilder";
 import { ProfileSettingsModal } from "./ProfileSettingsModal";
+import { ContentCatalogModal } from "./ContentCatalogModal";
+import { CONTENT_FORMATS } from "@/lib/plans";
+import type { MaterialType } from "@/types/brief";
 
 export function WorkspaceShell() {
-  const { brandContext, authOpen, setAuthOpen } = useBriefflowStore();
+  const { brandContext, authOpen, builder, messages, setAuthOpen, user } =
+    useBriefflowStore();
   const { handleSend, generateCampaign, regenerateChannel } =
     useBriefflowAgent();
   const [mobileChatOpen, setMobileChatOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [catalogOpen, setCatalogOpen] = useState(false);
 
   useEffect(() => {
     document.documentElement.classList.add("dark");
@@ -28,6 +33,25 @@ export function WorkspaceShell() {
 
   const sendFromMobile = (text: string) => {
     handleSend(text, false);
+  };
+
+  const handleSelectFormat = (material: MaterialType) => {
+    if (!user) {
+      setAuthOpen(true);
+      return;
+    }
+    const hasBriefing =
+      messages.some((message) => message.role === "user") ||
+      Boolean(builder.discoveryPlan);
+    if (!hasBriefing) {
+      void handleSend(
+        `Quero criar ${CONTENT_FORMATS[material].label}. Antes de gerar, conduza um briefing objetivo comigo.`,
+        false,
+      );
+      setMobileChatOpen(true);
+      return;
+    }
+    void regenerateChannel(material);
   };
 
   return (
@@ -55,6 +79,7 @@ export function WorkspaceShell() {
           onRetry={regenerateChannel}
           onOpenSettings={() => setSettingsOpen(true)}
           onOpenChat={() => setMobileChatOpen(true)}
+          onOpenContentCatalog={() => setCatalogOpen(true)}
         />
 
         <div className="lg:hidden">
@@ -96,6 +121,11 @@ export function WorkspaceShell() {
         onOpenChange={setSettingsOpen}
       />
       <LibraryModal />
+      <ContentCatalogModal
+        open={catalogOpen}
+        onOpenChange={setCatalogOpen}
+        onSelect={handleSelectFormat}
+      />
       <Toaster richColors position="top-right" theme="dark" />
     </main>
   );

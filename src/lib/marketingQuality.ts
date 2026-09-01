@@ -256,13 +256,16 @@ export function sanitizeGeneratedCopy<T extends MaterialType>(
   brief: MarketingBrief,
 ): GeneratedCopyByMaterial[T] {
   const sanitized = { ...copy } as Record<string, unknown>;
+  const isStructured = !["banner", "email", "social"].includes(material);
 
   const headlineKeys =
     material === "banner"
       ? ["headline", "subheadline"]
       : material === "email"
         ? ["subject", "headline", "subtitle"]
-        : ["hook"];
+        : material === "social"
+          ? ["hook"]
+          : ["title", "subtitle"];
   for (const key of headlineKeys) {
     if (typeof sanitized[key] === "string") {
       sanitized[key] = repairFragmentedHeadline(sanitized[key]);
@@ -272,6 +275,9 @@ export function sanitizeGeneratedCopy<T extends MaterialType>(
   if (typeof sanitized.body === "string") {
     sanitized.body = removeUnsupportedSentences(sanitized.body, brief);
   }
+  if (typeof sanitized.summary === "string") {
+    sanitized.summary = removeUnsupportedSentences(sanitized.summary, brief);
+  }
 
   filterUnsupportedLists(
     sanitized,
@@ -279,7 +285,33 @@ export function sanitizeGeneratedCopy<T extends MaterialType>(
     brief,
   );
 
-  if (material === "banner") {
+  if (isStructured && Array.isArray(sanitized.sections)) {
+    sanitized.sections = sanitized.sections.map((rawSection) => {
+      if (!rawSection || typeof rawSection !== "object") return rawSection;
+      const section = { ...(rawSection as Record<string, unknown>) };
+      if (typeof section.title === "string") {
+        section.title = repairFragmentedHeadline(section.title);
+      }
+      for (const key of ["body", "visualDirection", "speakerNotes"] as const) {
+        if (typeof section[key] === "string") {
+          section[key] = removeUnsupportedSentences(section[key], brief);
+        }
+      }
+      if (Array.isArray(section.items)) {
+        section.items = section.items.filter(
+          (item) =>
+            typeof item !== "string" ||
+            findUnsupportedClaims(item, brief).length === 0,
+        );
+      }
+      return section;
+    });
+    clearUnsupportedOptionalFields(
+      sanitized,
+      ["subtitle", "summary", "cta", "disclaimer"],
+      brief,
+    );
+  } else if (material === "banner") {
     clearUnsupportedOptionalFields(
       sanitized,
       ["subheadline", "footerInfo", "badgePrimary", "badgeSecondary"],

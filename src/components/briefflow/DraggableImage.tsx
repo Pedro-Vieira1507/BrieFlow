@@ -3,16 +3,33 @@ import { useState, useRef, useEffect, useMemo } from "react";
 import { ImageOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const positionCache = new Map<string, { x: number; y: number; scale: number }>();
+const positionCache = new Map<
+  string,
+  { x: number; y: number; scale: number }
+>();
 
-export function DraggableImage({ src, type = "default", isExport = false }: { src?: string | null; type?: string; isExport?: boolean }) {
+export function DraggableImage({
+  src,
+  type = "default",
+  isExport = false,
+}: {
+  src?: string | null;
+  type?: string;
+  isExport?: boolean;
+}) {
   const safeSrc = typeof src === "string" ? src : "";
   const cacheKey = useMemo(() => {
-    const hash = safeSrc.length > 100 ? `${safeSrc.length}-${safeSrc.substring(safeSrc.length - 50)}` : safeSrc;
+    const hash =
+      safeSrc.length > 100
+        ? `${safeSrc.length}-${safeSrc.substring(safeSrc.length - 50)}`
+        : safeSrc;
     return `${type}-v10-${hash}`;
   }, [safeSrc, type]);
 
-  const cached = useMemo(() => positionCache.get(cacheKey) || { x: 0, y: 0, scale: 1 }, [cacheKey]);
+  const cached = useMemo(
+    () => positionCache.get(cacheKey) || { x: 0, y: 0, scale: 1 },
+    [cacheKey],
+  );
   const [pos, setPos] = useState({ x: cached.x, y: cached.y });
   const [scale, setScale] = useState(cached.scale);
   const [isActive, setIsActive] = useState(false);
@@ -32,30 +49,26 @@ export function DraggableImage({ src, type = "default", isExport = false }: { sr
   const proxy1 = isExternal
     ? `https://wsrv.nl/?url=${encodeURIComponent(safeSrc)}&output=webp&w=1200&q=95`
     : safeSrc;
-  const proxy2 = isExternal
-    ? `https://api.allorigins.win/raw?url=${encodeURIComponent(safeSrc)}`
-    : "";
-
   const [imgSrc, setImgSrc] = useState<string | undefined>(() => {
-    return safeSrc.startsWith('blob:') ? undefined : proxy1;
+    return safeSrc.startsWith("blob:") ? undefined : proxy1;
   });
-  
+
   const [proxyLevel, setProxyLevel] = useState(0);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
-    if (safeSrc.startsWith('blob:')) {
+    if (safeSrc.startsWith("blob:")) {
       fetch(safeSrc)
-        .then(r => r.blob())
-        .then(blob => {
+        .then((r) => r.blob())
+        .then((blob) => {
           const reader = new FileReader();
           reader.onloadend = () => {
             if (isMounted) setImgSrc(reader.result as string);
           };
           reader.readAsDataURL(blob);
         })
-        .catch(err => {
+        .catch((err) => {
           console.error("Failed to convert blob to base64", err);
           if (isMounted) setImgSrc(proxy1);
         });
@@ -64,7 +77,9 @@ export function DraggableImage({ src, type = "default", isExport = false }: { sr
     }
     setProxyLevel(0);
     setFailed(false);
-    return () => { isMounted = false; };
+    return () => {
+      isMounted = false;
+    };
   }, [safeSrc, proxy1]);
 
   useEffect(() => {
@@ -81,17 +96,21 @@ export function DraggableImage({ src, type = "default", isExport = false }: { sr
 
   useEffect(() => {
     if (isExport) {
-       setIsActive(false);
-       return;
+      setIsActive(false);
+      return;
     }
-    
+
     const handleMove = (e: MouseEvent | TouchEvent) => {
       if (!isDragging.current && !isResizing.current) return;
-      const clientX = e instanceof MouseEvent ? e.clientX : e.touches[0].clientX;
-      const clientY = e instanceof MouseEvent ? e.clientY : e.touches[0].clientY;
+      const clientX =
+        e instanceof MouseEvent ? e.clientX : e.touches[0].clientX;
+      const clientY =
+        e instanceof MouseEvent ? e.clientY : e.touches[0].clientY;
 
       if (isDragging.current) {
-        const parent = containerRef.current?.closest('#banner-export-node, #email-export-node, #social-export-node') as HTMLElement;
+        const parent = containerRef.current?.closest(
+          "#banner-export-node, #email-export-node, #social-export-node",
+        ) as HTMLElement;
         const pWidth = parent ? parent.clientWidth : window.innerWidth;
         const pHeight = parent ? parent.clientHeight : window.innerHeight;
 
@@ -114,7 +133,10 @@ export function DraggableImage({ src, type = "default", isExport = false }: { sr
     };
 
     const handleClickOutside = (e: MouseEvent | TouchEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(e.target as Node)
+      ) {
         setIsActive(false);
       }
     };
@@ -146,10 +168,16 @@ export function DraggableImage({ src, type = "default", isExport = false }: { sr
     if (failed) return;
     setIsActive(true);
     isDragging.current = true;
-    let clientX = 0, clientY = 0;
-    if ("clientX" in e) { clientX = e.clientX; clientY = e.clientY; } 
-    else if ("touches" in e) { clientX = e.touches[0].clientX; clientY = e.touches[0].clientY; }
-    
+    let clientX = 0,
+      clientY = 0;
+    if ("clientX" in e) {
+      clientX = e.clientX;
+      clientY = e.clientY;
+    } else if ("touches" in e) {
+      clientX = e.touches[0].clientX;
+      clientY = e.touches[0].clientY;
+    }
+
     startMousePos.current = { x: clientX, y: clientY };
     startPos.current = { ...pos };
   };
@@ -161,10 +189,16 @@ export function DraggableImage({ src, type = "default", isExport = false }: { sr
     e.stopPropagation();
     setIsActive(true);
     isResizing.current = true;
-    let clientX = 0, clientY = 0;
-    if ("clientX" in e) { clientX = e.clientX; clientY = e.clientY; } 
-    else if ("touches" in e) { clientX = e.touches[0].clientX; clientY = e.touches[0].clientY; }
-    
+    let clientX = 0,
+      clientY = 0;
+    if ("clientX" in e) {
+      clientX = e.clientX;
+      clientY = e.clientY;
+    } else if ("touches" in e) {
+      clientX = e.touches[0].clientX;
+      clientY = e.touches[0].clientY;
+    }
+
     startMousePos.current = { x: clientX, y: clientY };
     initialScale.current = scale;
   };
@@ -172,16 +206,14 @@ export function DraggableImage({ src, type = "default", isExport = false }: { sr
   const handleImgError = () => {
     if (isExternal && proxyLevel === 0) {
       setProxyLevel(1);
-      setImgSrc(proxy2);
-    } else if (isExternal && proxyLevel === 1) {
-      setProxyLevel(2);
       setImgSrc(safeSrc);
     } else {
       setFailed(true);
     }
   };
 
-  const isSafeOrigin = imgSrc?.startsWith("data:") || imgSrc?.startsWith("blob:");
+  const isSafeOrigin =
+    imgSrc?.startsWith("data:") || imgSrc?.startsWith("blob:");
 
   if (failed && !isExport) {
     return (
@@ -192,7 +224,15 @@ export function DraggableImage({ src, type = "default", isExport = false }: { sr
           "border-2 border-dashed border-[#cbd5e1] bg-[rgba(241,245,249,0.8)]",
           "text-[#94a3b8] shadow-lg cursor-grab active:cursor-grabbing",
         )}
-        style={{ position: 'absolute', zIndex: 40, left: `${pos.x}%`, top: `${pos.y}%`, width: type === "banner" ? '20%' : '40%', aspectRatio: '1', transform: `scale(${scale})` }}
+        style={{
+          position: "absolute",
+          zIndex: 40,
+          left: `${pos.x}%`,
+          top: `${pos.y}%`,
+          width: type === "banner" ? "20%" : "40%",
+          aspectRatio: "1",
+          transform: `scale(${scale})`,
+        }}
         onPointerDown={onPointerDown}
       >
         <ImageOff className="size-6" />
@@ -213,14 +253,16 @@ export function DraggableImage({ src, type = "default", isExport = false }: { sr
         !isExport && "cursor-grab active:cursor-grabbing",
         isActive && !isExport
           ? "ring-2 ring-dashed ring-brand shadow-[0_20px_50px_rgba(0,0,0,0.5)]"
-          : (!isExport ? "drop-shadow-2xl hover:ring-2 hover:ring-dashed hover:ring-white/50" : "drop-shadow-2xl"),
+          : !isExport
+            ? "drop-shadow-2xl hover:ring-2 hover:ring-dashed hover:ring-white/50"
+            : "drop-shadow-2xl",
       )}
       style={{
-        position: 'absolute',
+        position: "absolute",
         zIndex: 40,
         left: `${pos.x}%`,
         top: `${pos.y}%`,
-        width: type === "banner" ? '20%' : '40%',
+        width: type === "banner" ? "20%" : "40%",
         transform: `scale(${scale})`,
         transformOrigin: "center",
       }}
@@ -239,13 +281,25 @@ export function DraggableImage({ src, type = "default", isExport = false }: { sr
           style={{ imageRendering: "auto" }}
         />
       )}
-      
+
       {isActive && !isExport && (
         <>
-          <div onPointerDown={onResizeDown} className="absolute -left-2.5 -top-2.5 z-50 h-5 w-5 cursor-nwse-resize rounded-full border-[3px] border-brand bg-white shadow-md hover:scale-125 transition-transform" />
-          <div onPointerDown={onResizeDown} className="absolute -right-2.5 -top-2.5 z-50 h-5 w-5 cursor-nesw-resize rounded-full border-[3px] border-brand bg-white shadow-md hover:scale-125 transition-transform" />
-          <div onPointerDown={onResizeDown} className="absolute -bottom-2.5 -left-2.5 z-50 h-5 w-5 cursor-nesw-resize rounded-full border-[3px] border-brand bg-white shadow-md hover:scale-125 transition-transform" />
-          <div onPointerDown={onResizeDown} className="absolute -bottom-2.5 -right-2.5 z-50 h-5 w-5 cursor-nwse-resize rounded-full border-[3px] border-brand bg-white shadow-md hover:scale-125 transition-transform" />
+          <div
+            onPointerDown={onResizeDown}
+            className="absolute -left-2.5 -top-2.5 z-50 h-5 w-5 cursor-nwse-resize rounded-full border-[3px] border-brand bg-white shadow-md hover:scale-125 transition-transform"
+          />
+          <div
+            onPointerDown={onResizeDown}
+            className="absolute -right-2.5 -top-2.5 z-50 h-5 w-5 cursor-nesw-resize rounded-full border-[3px] border-brand bg-white shadow-md hover:scale-125 transition-transform"
+          />
+          <div
+            onPointerDown={onResizeDown}
+            className="absolute -bottom-2.5 -left-2.5 z-50 h-5 w-5 cursor-nesw-resize rounded-full border-[3px] border-brand bg-white shadow-md hover:scale-125 transition-transform"
+          />
+          <div
+            onPointerDown={onResizeDown}
+            className="absolute -bottom-2.5 -right-2.5 z-50 h-5 w-5 cursor-nwse-resize rounded-full border-[3px] border-brand bg-white shadow-md hover:scale-125 transition-transform"
+          />
         </>
       )}
     </div>

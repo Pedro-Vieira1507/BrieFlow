@@ -6,16 +6,18 @@ export function buildPollinationsUrl(
   opts: { width?: number; height?: number; seed?: number } = {},
 ): string {
   const { width = 1080, height = 1080, seed } = opts;
-  
-  let cleanPrompt = (prompt || "").replace(/[^a-zA-Z0-9\s]/g, ' ').trim();
+
+  let cleanPrompt = (prompt || "").replace(/[^a-zA-Z0-9\s]/g, " ").trim();
   if (cleanPrompt.length > 140) cleanPrompt = cleanPrompt.substring(0, 140);
-  
+
   if (!cleanPrompt || cleanPrompt.length < 3) {
-    cleanPrompt = "luxury commercial product photography cosmetic bottle studio lighting";
+    cleanPrompt =
+      "luxury commercial product photography cosmetic bottle studio lighting";
   }
 
   // UX & Design: Injeção de estúdio comercial profissional para evitar fotos amadoras
-  const commercialKeywords = "high end commercial advertising photography, professional studio lighting, luxury editorial style, rim light, ultra detailed 8k, soft bokeh background, depth of field";
+  const commercialKeywords =
+    "high end commercial advertising photography, professional studio lighting, luxury editorial style, rim light, ultra detailed 8k, soft bokeh background, depth of field";
   const fullPrompt = `${cleanPrompt}, ${commercialKeywords}`;
 
   const cacheKey = `${fullPrompt}|${width}|${height}|${seed ?? "none"}`;

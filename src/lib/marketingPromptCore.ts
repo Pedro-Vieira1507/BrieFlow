@@ -18,12 +18,28 @@ const FALLBACK_PALETTES: PromptPalette[] = [
 
 const CURRENT_CONTENT_MARKER = /===\s*CONTE[ÚU]DO ATUAL DA PE[ÇC]A\s*===/i;
 const CHANNEL_MARKER =
-  /(?:^|\n)\s*(?:#{1,3}\s*)?(BANNER|E[- ]?MAIL(?:\s+MARKETING)?|EMAIL(?:\s+MARKETING)?|POST\s+SOCIAL|SOCIAL)\s*:\s*/gim;
+  /(?:^|\n)\s*(?:#{1,3}\s*)?(BANNER|E[- ]?MAIL(?:\s+MARKETING)?|EMAIL(?:\s+MARKETING)?|POST\s+SOCIAL|SOCIAL|REEL|V[IÍ]DEO|PODCAST|SLIDES?|APRESENTA[ÇC][AÃ]O|FICHA\s+T[EÉ]CNICA|BLOG|ARTIGO|WHATSAPP)\s*:\s*/gim;
 
 function markerToMaterial(marker: string): MaterialType {
-  const normalized = marker.toLowerCase().replace(/[- ]/g, "");
+  const normalized = marker
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[- ]/g, "");
   if (normalized === "banner") return "banner";
   if (normalized.includes("mail")) return "email";
+  if (normalized === "reel") return "reel";
+  if (normalized === "video") return "video";
+  if (normalized === "podcast") return "podcast";
+  if (
+    normalized === "slide" ||
+    normalized === "slides" ||
+    normalized === "apresentacao"
+  )
+    return "slides";
+  if (normalized === "fichatecnica") return "technical_sheet";
+  if (normalized === "blog" || normalized === "artigo") return "blog";
+  if (normalized === "whatsapp") return "whatsapp";
   return "social";
 }
 
@@ -87,7 +103,10 @@ export function selectFallbackPalette(seed: string): PromptPalette {
 
 export function clipPromptValue(value: unknown, maxLength = 1800): string {
   if (typeof value !== "string") return "";
-  const normalized = value.replace(/\u0000/g, "").trim();
+  const normalized = Array.from(value)
+    .filter((character) => character.charCodeAt(0) !== 0)
+    .join("")
+    .trim();
   if (normalized.length <= maxLength) return normalized;
   return `${normalized.slice(0, maxLength).trimEnd()}…`;
 }

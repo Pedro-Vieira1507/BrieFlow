@@ -27,7 +27,8 @@ export function isEmptyLike(value: unknown): boolean {
   if (value === null || value === undefined) return true;
   if (typeof value === "number") return Number.isNaN(value);
   if (Array.isArray(value)) return value.every(isEmptyLike);
-  if (typeof value === "object") return Object.keys(value as object).length === 0;
+  if (typeof value === "object")
+    return Object.keys(value as object).length === 0;
   if (typeof value !== "string") return false;
   const normalized = value.trim().toLowerCase();
   return EMPTY_TOKENS.has(normalized);
@@ -43,7 +44,7 @@ export function cleanText(value: unknown, fallback = ""): string {
   return raw
     .replace(/\*\*/g, "")
     .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-    .replace(/[\[\]]/g, "")
+    .replace(/\[|\]/g, "")
     .trim();
 }
 
@@ -53,12 +54,8 @@ export function cleanText(value: unknown, fallback = ""): string {
  */
 export function cleanList(value: unknown): string[] {
   if (isEmptyLike(value)) return [];
-  const arr = Array.isArray(value)
-    ? value
-    : String(value).split(/[,;\n]/);
-  return arr
-    .map((v) => cleanText(v))
-    .filter((v) => v.length > 0);
+  const arr = Array.isArray(value) ? value : String(value).split(/[,;\n]/);
+  return arr.map((v) => cleanText(v)).filter((v) => v.length > 0);
 }
 
 /**

@@ -6,6 +6,9 @@ import { cn } from "@/lib/utils";
 import { useBriefflowStore } from "@/store/briefflow";
 import { isSupabaseConfigured, saveAssetToLibrary } from "@/lib/supabase";
 import { getBuilderCampaignBrandName } from "@/lib/campaignGeneration";
+import { downloadBlob, sanitizeFilenamePart } from "@/lib/export-utils";
+import { formatStructuredContentText } from "@/lib/structuredContent";
+import { CORE_MATERIAL_TYPES } from "@/types/brief";
 
 import { BuilderHeader } from "./builder/BuilderHeader";
 import { GeneratingBanner } from "./builder/GeneratingBanner";
@@ -20,6 +23,7 @@ interface Props {
   onRetry: (channel: CampaignAsset["type"]) => void | Promise<void>;
   onOpenSettings?: () => void;
   onOpenChat?: () => void;
+  onOpenContentCatalog?: () => void;
 }
 
 export function PageBuilder({
@@ -27,6 +31,7 @@ export function PageBuilder({
   onRetry,
   onOpenSettings,
   onOpenChat,
+  onOpenContentCatalog,
 }: Props) {
   const {
     user,
@@ -77,8 +82,11 @@ export function PageBuilder({
         builder,
       );
       toast.success("Salvo na biblioteca com sucesso!", { id: toastId });
-    } catch (e: any) {
-      toast.error(e.message || "Erro ao salvar a campanha", { id: toastId });
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Erro ao salvar a campanha",
+        { id: toastId },
+      );
     } finally {
       isSavingRef.current = false;
       setIsSaving(false);
@@ -86,6 +94,26 @@ export function PageBuilder({
   };
 
   const handleExportClick = () => {
+    if (!(CORE_MATERIAL_TYPES as readonly string[]).includes(activeTab)) {
+      const asset =
+        builder.type === "campaign"
+          ? builder.campaignAssets?.find((entry) => entry.type === activeTab)
+          : undefined;
+      const document = asset?.content.structuredContent;
+      if (!document) {
+        toast.error("Conteúdo não encontrado para exportação.");
+        return;
+      }
+      const brand = asset.content.brandName || document.title;
+      downloadBlob(
+        new Blob([formatStructuredContentText(document)], {
+          type: "text/plain;charset=utf-8",
+        }),
+        `${activeTab}_${sanitizeFilenamePart(brand)}.txt`,
+      );
+      toast.success("Conteúdo exportado em TXT.");
+      return;
+    }
     setDesignExporterOpen(true);
   };
 
@@ -107,6 +135,7 @@ export function PageBuilder({
         onExport={handleExportClick}
         onSave={handleSave}
         onOpenSettings={onOpenSettings}
+        onOpenContentCatalog={onOpenContentCatalog}
       />
 
       <div
@@ -160,7 +189,11 @@ export function PageBuilder({
         open={designExporterOpen}
         onOpenChange={setDesignExporterOpen}
         state={builder}
-        initialTab={activeTab}
+        initialTab={
+          (CORE_MATERIAL_TYPES as readonly string[]).includes(activeTab)
+            ? (activeTab as (typeof CORE_MATERIAL_TYPES)[number])
+            : undefined
+        }
         onExportingChange={setIsExporting}
       />
     </div>

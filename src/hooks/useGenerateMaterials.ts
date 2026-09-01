@@ -1,7 +1,12 @@
 // src/hooks/useGenerateMaterials.ts
 import { useCallback, useRef, useState } from "react";
-import { AiClientError, generateCompletion, type AiCompletionMeta, type AiProviderName } from "@/lib/aiClient";
-import { useCreditsStore } from "@/hooks/useCredits"; 
+import {
+  AiClientError,
+  generateCompletion,
+  type AiCompletionMeta,
+  type AiProviderName,
+} from "@/lib/aiClient";
+import { useCreditsStore } from "@/hooks/useCredits";
 import {
   buildMaterialPrompt,
   extractChannelBriefing,
@@ -41,7 +46,9 @@ export interface UseGenerateMaterialsResult {
   generateMaterials: (
     materials: MaterialType[],
     params: Omit<GenerateMaterialParams, "material">,
-    onEach?: (result: GeneratedMaterial | { material: MaterialType; error: Error }) => void,
+    onEach?: (
+      result: GeneratedMaterial | { material: MaterialType; error: Error },
+    ) => void,
   ) => Promise<{
     results: GeneratedMaterial[];
     errors: { material: MaterialType; error: Error }[];
@@ -82,6 +89,18 @@ export function describeAiError(error: unknown): string {
         return "A IA respondeu num formato inesperado. Peça para regenerar a peça.";
       case "NO_PROVIDER":
         return "Nenhum modelo de IA está configurado. Verifique as variáveis de ambiente.";
+      case "INSUFFICIENT_CREDITS":
+        return "Seus créditos deste ciclo terminaram. Faça upgrade ou aguarde a renovação.";
+      case "FEATURE_NOT_AVAILABLE":
+        return "Este formato não está disponível no seu plano atual.";
+      case "RATE_LIMITED":
+        return "Muitas gerações em sequência. Aguarde um instante e tente novamente.";
+      case "DUPLICATE_REQUEST":
+        return "Esta solicitação já foi processada. Tente gerar novamente.";
+      case "WORKSPACE_SUSPENDED":
+        return "Seu acesso a este workspace está suspenso. Fale com um administrador.";
+      case "UNAUTHORIZED":
+        return "Sua sessão expirou. Entre novamente para continuar.";
       default:
         return "Não consegui falar com a IA agora (nuvem e modelo local indisponíveis).";
     }
@@ -91,7 +110,9 @@ export function describeAiError(error: unknown): string {
 
 export function useGenerateMaterials(): UseGenerateMaterialsResult {
   const [isGenerating, setIsGenerating] = useState(false);
-  const [currentMaterial, setCurrentMaterial] = useState<MaterialType | null>(null);
+  const [currentMaterial, setCurrentMaterial] = useState<MaterialType | null>(
+    null,
+  );
   const [lastError, setLastError] = useState<Error | null>(null);
   const controllerRef = useRef<AbortController | null>(null);
 
@@ -109,7 +130,7 @@ export function useGenerateMaterials(): UseGenerateMaterialsResult {
       rawBriefing,
       prompt,
       images,
-      provider = 'omniroute' // <-- Opcional
+      provider = "omniroute", // <-- Opcional
     }: GenerateMaterialParams<T>): Promise<GeneratedMaterial<T>> => {
       const controller = controllerRef.current ?? new AbortController();
       controllerRef.current = controller;
@@ -121,16 +142,18 @@ export function useGenerateMaterials(): UseGenerateMaterialsResult {
       try {
         const channelBriefing =
           prompt?.channelBriefing ??
-          (rawBriefing ? extractChannelBriefing(rawBriefing, material) : undefined);
+          (rawBriefing
+            ? extractChannelBriefing(rawBriefing, material)
+            : undefined);
 
         const { system, user } = buildMaterialPrompt(brief, material, {
           ...prompt,
           channelBriefing,
         });
 
-        const schema = MATERIAL_SCHEMAS[material] as unknown as import("zod").ZodType<
-          GeneratedCopyByMaterial[T]
-        >;
+        const schema = MATERIAL_SCHEMAS[
+          material
+        ] as unknown as import("zod").ZodType<GeneratedCopyByMaterial[T]>;
 
         const { data, meta } = await generateCompletion({
           system,
@@ -139,6 +162,7 @@ export function useGenerateMaterials(): UseGenerateMaterialsResult {
           signal: controller.signal,
           provider,
           stage: "content",
+          action: material,
         });
 
         const safeData = sanitizeGeneratedCopy(material, data, brief);
@@ -168,7 +192,9 @@ export function useGenerateMaterials(): UseGenerateMaterialsResult {
     [],
   );
 
-  const generateMaterials = useCallback<UseGenerateMaterialsResult["generateMaterials"]>(
+  const generateMaterials = useCallback<
+    UseGenerateMaterialsResult["generateMaterials"]
+  >(
     async (materials, params, onEach) => {
       const results: GeneratedMaterial[] = [];
       const errors: { material: MaterialType; error: Error }[] = [];

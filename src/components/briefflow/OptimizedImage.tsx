@@ -24,13 +24,19 @@ export function OptimizedImage({
   src,
   ...rest
 }: Props) {
-  const [status, setStatus] = useState<"loading" | "loaded" | "error">("loading");
+  const [status, setStatus] = useState<"loading" | "loaded" | "error">(
+    "loading",
+  );
 
-  const isExternal = src && src.startsWith("http") && !src.includes("wsrv.nl") && !src.includes("picsum.photos");
-  
-  const proxy1 = isExternal ? `https://wsrv.nl/?url=${encodeURIComponent(src!)}&output=webp&w=400` : (src || "");
-  const proxy2 = isExternal ? `https://api.allorigins.win/raw?url=${encodeURIComponent(src!)}` : "";
-  
+  const isExternal =
+    src &&
+    src.startsWith("http") &&
+    !src.includes("wsrv.nl") &&
+    !src.includes("picsum.photos");
+
+  const proxy1 = isExternal
+    ? `https://wsrv.nl/?url=${encodeURIComponent(src!)}&output=webp&w=400`
+    : src || "";
   const [imgSrc, setImgSrc] = useState(proxy1);
   const [proxyLevel, setProxyLevel] = useState(0);
 
@@ -53,7 +59,9 @@ export function OptimizedImage({
       )}
       {status === "error" && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-surface-2 text-fg-muted p-2 text-center">
-          <span className="text-[10px] uppercase font-bold tracking-widest opacity-50">Sem Imagem</span>
+          <span className="text-[10px] uppercase font-bold tracking-widest opacity-50">
+            Sem Imagem
+          </span>
         </div>
       )}
       {imgSrc && (
@@ -70,9 +78,6 @@ export function OptimizedImage({
           onError={(e) => {
             if (isExternal && proxyLevel === 0) {
               setProxyLevel(1);
-              setImgSrc(proxy2);
-            } else if (isExternal && proxyLevel === 1) {
-              setProxyLevel(2);
               setImgSrc(src!);
             } else {
               setStatus("error");

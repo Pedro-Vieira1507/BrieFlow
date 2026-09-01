@@ -116,8 +116,14 @@ test("retry filters legacy empty image references before rendering the campaign"
     "utf8",
   );
 
-  assert.match(agent, /typeof image === "string" && image\.trim\(\)\.length > 0/);
-  assert.match(draggableImage, /const safeSrc = typeof src === "string" \? src : ""/);
+  assert.match(
+    agent,
+    /typeof image === "string" && image\.trim\(\)\.length > 0/,
+  );
+  assert.match(
+    draggableImage,
+    /const safeSrc = typeof src === "string" \? src : ""/,
+  );
 });
 
 test("social preview does not fabricate engagement", () => {

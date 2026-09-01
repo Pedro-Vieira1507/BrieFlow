@@ -1,10 +1,12 @@
-// src/lib/aiClient.ts
 import type { ZodType } from "zod";
-import { supabase } from "@/lib/supabase";
-import { getAiRoutingEnvironment, resolveCloudAiRoute, type AiGenerationStage } from "@/lib/aiRouting";
-import { parseStructuredJson, supportsReasoningControls } from "@/lib/structuredOutput";
+
+import { EdgeFunctionError, invokeEdgeFunction } from "@/lib/supabase";
+import { parseStructuredJson } from "@/lib/structuredOutput";
+import type { MaterialType } from "@/types/brief";
 
 export type AiProviderName = "omniroute" | "ollama" | "groq" | "gemini";
+export type AiGenerationStage = "discovery" | "content";
+export type AiAction = MaterialType | "chat" | "discovery" | "website_analysis";
 
 export interface AiCompletionMeta {
   requestId: string;
@@ -13,6 +15,7 @@ export interface AiCompletionMeta {
   usedFallback: boolean;
   latencyMs: number;
   generatedAt: string;
+  creditsRemaining?: number;
 }
 
 export interface AiCompletionResult<T> {
@@ -34,12 +37,23 @@ export interface GenerateCompletionOptions<T> {
   signal?: AbortSignal;
   provider?: AiProviderName;
   stage?: AiGenerationStage;
+  action?: AiAction;
 }
 
 export class AiClientError extends Error {
   constructor(
     message: string,
-    readonly code: "NO_PROVIDER" | "PROVIDER_FAILED" | "TIMEOUT" | "INVALID_OUTPUT" | "UNAUTHORIZED" | "INSUFFICIENT_CREDITS",
+    readonly code:
+      | "NO_PROVIDER"
+      | "PROVIDER_FAILED"
+      | "TIMEOUT"
+      | "INVALID_OUTPUT"
+      | "UNAUTHORIZED"
+      | "INSUFFICIENT_CREDITS"
+      | "FEATURE_NOT_AVAILABLE"
+      | "RATE_LIMITED"
+      | "DUPLICATE_REQUEST"
+      | "WORKSPACE_SUSPENDED",
     readonly detail?: unknown,
   ) {
     super(message);
@@ -47,209 +61,242 @@ export class AiClientError extends Error {
   }
 }
 
-export async function generateCompletion<T = string>(
-  opts: GenerateCompletionOptions<T>,
-): Promise<AiCompletionResult<T>> {
-  const {
-    system,
-    user,
-    history,
-    schema,
-    temperature,
-    maxTokens,
-    timeoutMs = 500_000,
-    requestId = (typeof crypto !== "undefined" && "randomUUID" in crypto) ? crypto.randomUUID() : `req_${Date.now()}`,
-    signal,
-    provider = "omniroute",
-    stage = "content",
-  } = opts;
-
-  // 1. VERIFICA E DEDUZ CRÉDITOS DIRETAMENTE NO BANCO DE DADOS
-  if (supabase) {
-    const { data: session } = await supabase.auth.getSession();
-    if (session?.session) {
-      const { data: success, error } = await supabase.rpc("deduct_user_credit", { cost: 1 });
-      if (error || !success) {
-        throw new AiClientError("Créditos insuficientes para esta geração.", "INSUFFICIENT_CREDITS");
-      }
-    }
-  }
-
-  const messages = [
-    { role: "system", content: schema ? `${system}\n\nResponda EXCLUSIVAMENTE em JSON válido.` : system },
-    ...(history ?? []),
-    { role: "user", content: user },
-  ];
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  const combinedSignal = signal ?? controller.signal;
-  const startMs = Date.now();
-
-  let response: Response | undefined;
-  let usedProviderName = provider as string;
-  let usedModel = "unknown";
-  let usedFallback = false;
-  let lastError: any;
-  let acceptedCloudResponse = false;
-
-  // 2. ROTEAMENTO PARA OLLAMA LOCAL
-  if (provider === "ollama") {
-    const ollamaUrl = import.meta.env.VITE_OLLAMA_URL || "http://localhost:11434/api/chat";
-    usedModel = import.meta.env.VITE_OLLAMA_EXECUTION_MODEL || import.meta.env.VITE_OLLAMA_MODEL || "qwen2.5:7b";
-    
-    try {
-      response = await fetch(ollamaUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: usedModel,
-          messages,
-          stream: false,
-          format: schema ? "json" : undefined,
-          options: {
-            temperature: temperature ?? 0.7,
-            num_predict: maxTokens ?? 4096
-          }
-        }),
-        signal: combinedSignal,
-      });
-    } catch (err) {
-      clearTimeout(timeout);
-      throw new AiClientError("Erro de conexão com o Ollama local.", "PROVIDER_FAILED", err);
-    }
-  } 
-  
-  // 3. ROTEAMENTO NUVEM (FALLBACK EM CASCATA)
-  else {
-    const fallbackProviders = resolveCloudAiRoute(stage, getAiRoutingEnvironment(import.meta.env));
-
-    for (const [index, p] of fallbackProviders.entries()) {
-
-      try {
-        const payload: any = {
-          model: p.model,
-          messages,
-          // Reduzimos o limite de resposta para 2000 para a Groq não dar erro 400
-          max_tokens: p.name === "groq" ? 2000 : (maxTokens ?? 4096),
-          stream: false,
-        };
-
-        // Gemini 3.6 não aceita os antigos parâmetros de amostragem.
-        if (p.name === "groq") {
-          payload.temperature = temperature ?? 0.7;
-        }
-
-        if (schema) {
-          payload.response_format = { type: "json_object" };
-        }
-
-        if (p.name === "groq" && supportsReasoningControls(p.model)) {
-          payload.reasoning_format = "hidden";
-        }
-
-        response = await fetch(p.url, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${p.key}`,
-          },
-          body: JSON.stringify(payload),
-          signal: combinedSignal,
-        });
-
-        if (response.ok) {
-          if (schema) {
-            const candidateJson = await response.clone().json();
-            const candidateRaw = candidateJson.choices?.[0]?.message?.content;
-            const candidateParsed = typeof candidateRaw === "string"
-              ? parseStructuredJson(candidateRaw)
-              : null;
-            const candidateValidation = candidateParsed === null
-              ? null
-              : schema.safeParse(candidateParsed);
-
-            if (!candidateValidation?.success) {
-              lastError = new Error(
-                candidateParsed === null
-                  ? `${p.name}/${p.model} retornou JSON inválido.`
-                  : `${p.name}/${p.model} não cumpriu o schema solicitado.`,
-              );
-              console.warn(`[Fallback] Saída inválida em ${p.name}/${p.model}. Tentando o próximo...`);
-              continue;
-            }
-          }
-
-          usedProviderName = p.name;
-          usedModel = p.model;
-          usedFallback = index > 0;
-          acceptedCloudResponse = true;
-          break; // Sucesso! Sai do loop.
-        }
-
-        if (response.status === 429) {
-          console.warn(`[Fallback] Limite atingido no provedor ${p.name} (429). Tentando o próximo...`);
-          continue;
-        }
-
-        const errText = await response.text();
-        console.warn(`[Fallback] Erro ${response.status} no provedor ${p.name}:`, errText);
-        continue;
-      } catch (err) {
-        lastError = err;
-        console.warn(`[Fallback] Erro de rede ao acessar ${p.name}. Tentando o próximo...`);
-      }
-    }
-
-    if (!fallbackProviders.length) {
-      clearTimeout(timeout);
-      throw new AiClientError("Nenhuma API Key configurada no .env (Groq ou Gemini).", "NO_PROVIDER");
-    }
-
-    if (!acceptedCloudResponse || !response || !response.ok) {
-      clearTimeout(timeout);
-      throw new AiClientError(`Todos os provedores de nuvem falharam.`, "PROVIDER_FAILED", lastError);
-    }
-  }
-
-  clearTimeout(timeout);
-
-  const json = await response.json();
-  
-  // Como Groq e Gemini usam o formato OpenAI, acessamos choices[0].message.content
-  const raw = usedProviderName === "ollama" ? json.message?.content : json.choices?.[0]?.message?.content;
-
-  if (!raw) throw new AiClientError("Resposta vazia.", "INVALID_OUTPUT");
-
-  const metaData: AiCompletionMeta = { 
-    requestId, 
-    provider: usedProviderName, 
-    model: usedModel, 
-    usedFallback,
-    latencyMs: Date.now() - startMs, 
-    generatedAt: new Date().toISOString() 
+interface ProxyResponse {
+  model?: string;
+  choices?: Array<{
+    message?: { content?: string };
+  }>;
+  message?: { content?: string };
+  _meta?: {
+    request_id?: string;
+    provider?: string;
+    model?: string;
+    used_fallback?: boolean;
+    latency_ms?: number;
+    credits_remaining?: number;
   };
+}
 
-  if (!schema) {
+export interface RawAiRequest {
+  messages: Array<{
+    role: "system" | "user" | "assistant";
+    content: string;
+  }>;
+  action: AiAction;
+  stage: AiGenerationStage;
+  responseFormat?: "json" | "text";
+  temperature?: number;
+  maxTokens?: number;
+  timeoutMs?: number;
+  requestId?: string;
+  preferredProvider?: AiProviderName;
+  signal?: AbortSignal;
+}
+
+function createRequestId(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return `bf_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function mapEdgeError(error: EdgeFunctionError): AiClientError {
+  if (error.status === 401 || error.code === "unauthorized") {
+    return new AiClientError(
+      "Entre novamente para continuar.",
+      "UNAUTHORIZED",
+      error.detail,
+    );
+  }
+  if (
+    error.status === 402 ||
+    error.code === "insufficient_credits" ||
+    error.code === "credits_exhausted"
+  ) {
+    return new AiClientError(
+      "Seus créditos deste ciclo terminaram.",
+      "INSUFFICIENT_CREDITS",
+      error.detail,
+    );
+  }
+  if (error.code === "membership_inactive") {
+    return new AiClientError(
+      "Seu acesso a este workspace está suspenso.",
+      "WORKSPACE_SUSPENDED",
+      error.detail,
+    );
+  }
+  if (error.status === 403 || error.code === "format_not_allowed") {
+    return new AiClientError(
+      "Este formato não está disponível no seu plano.",
+      "FEATURE_NOT_AVAILABLE",
+      error.detail,
+    );
+  }
+  if (error.status === 429 || error.code === "rate_limit_exceeded") {
+    return new AiClientError(
+      "Muitas gerações em sequência. Aguarde um instante e tente novamente.",
+      "RATE_LIMITED",
+      error.detail,
+    );
+  }
+  if (error.status === 409 || error.code === "duplicate_request") {
+    return new AiClientError(
+      "Esta solicitação já foi processada. Inicie uma nova geração.",
+      "DUPLICATE_REQUEST",
+      error.detail,
+    );
+  }
+  if (error.code === "backend_not_configured") {
+    return new AiClientError(error.message, "NO_PROVIDER", error.detail);
+  }
+  return new AiClientError(
+    "Os provedores de IA estão temporariamente indisponíveis.",
+    "PROVIDER_FAILED",
+    error.detail,
+  );
+}
+
+/**
+ * Único ponto de saída do navegador para modelos de IA. Nenhuma chave de
+ * provedor é enviada ao bundle; autenticação, plano, créditos, rate limit e
+ * fallback são validados pela Edge Function.
+ */
+export async function requestAiCompletion(
+  options: RawAiRequest,
+): Promise<AiCompletionResult<string>> {
+  const requestId = options.requestId ?? createRequestId();
+  const timeoutMs = Math.min(
+    Math.max(options.timeoutMs ?? 120_000, 5_000),
+    300_000,
+  );
+  const controller = new AbortController();
+  const onParentAbort = () => controller.abort(options.signal?.reason);
+  options.signal?.addEventListener("abort", onParentAbort, { once: true });
+  const timeout = globalThis.setTimeout(() => controller.abort(), timeoutMs);
+  const startedAt = Date.now();
+
+  try {
+    const response = await invokeEdgeFunction<ProxyResponse>(
+      "ai-proxy",
+      {
+        messages: options.messages,
+        action: options.action,
+        stage: options.stage,
+        temperature: options.temperature,
+        max_tokens: options.maxTokens,
+        response_format:
+          options.responseFormat === "json"
+            ? { type: "json_object" }
+            : undefined,
+        request_id: requestId,
+        preferred_provider: options.preferredProvider,
+      },
+      controller.signal,
+    );
+
+    const raw =
+      response.choices?.[0]?.message?.content ??
+      response.message?.content ??
+      "";
+    if (!raw) {
+      throw new AiClientError(
+        "A IA retornou uma resposta vazia.",
+        "INVALID_OUTPUT",
+      );
+    }
+
+    const meta = response._meta;
     return {
       raw,
-      data: raw as unknown as T,
-      meta: metaData,
+      data: raw,
+      meta: {
+        requestId: meta?.request_id ?? requestId,
+        provider: meta?.provider ?? "unknown",
+        model: meta?.model ?? response.model ?? "unknown",
+        usedFallback: Boolean(meta?.used_fallback),
+        latencyMs: meta?.latency_ms ?? Date.now() - startedAt,
+        generatedAt: new Date().toISOString(),
+        creditsRemaining: meta?.credits_remaining,
+      },
+    };
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new AiClientError(
+        "A IA demorou demais para responder.",
+        "TIMEOUT",
+        error,
+      );
+    }
+    if (error instanceof AiClientError) throw error;
+    if (error instanceof EdgeFunctionError) throw mapEdgeError(error);
+    throw new AiClientError(
+      "Não foi possível concluir a geração.",
+      "PROVIDER_FAILED",
+      error,
+    );
+  } finally {
+    globalThis.clearTimeout(timeout);
+    options.signal?.removeEventListener("abort", onParentAbort);
+  }
+}
+
+export async function generateCompletion<T = string>(
+  options: GenerateCompletionOptions<T>,
+): Promise<AiCompletionResult<T>> {
+  const messages = [
+    {
+      role: "system" as const,
+      content: options.schema
+        ? `${options.system}\n\nResponda EXCLUSIVAMENTE em JSON válido.`
+        : options.system,
+    },
+    ...(options.history ?? []),
+    { role: "user" as const, content: options.user },
+  ];
+
+  const result = await requestAiCompletion({
+    messages,
+    action:
+      options.action ?? (options.stage === "discovery" ? "discovery" : "chat"),
+    stage: options.stage ?? "content",
+    responseFormat: options.schema ? "json" : "text",
+    temperature: options.temperature,
+    maxTokens: options.maxTokens,
+    timeoutMs: options.timeoutMs,
+    requestId: options.requestId,
+    preferredProvider: options.provider,
+    signal: options.signal,
+  });
+
+  options.onToken?.(result.raw);
+
+  if (!options.schema) {
+    return {
+      ...result,
+      data: result.raw as unknown as T,
     };
   }
 
-  // Tratamento de segurança para extrair JSON caso o modelo escreva marcações de markdown (ex: ```json ... ```)
-  const parsed = parseStructuredJson(raw);
+  const parsed = parseStructuredJson(result.raw);
   if (parsed === null) {
-    throw new AiClientError("O modelo não retornou um JSON válido.", "INVALID_OUTPUT");
+    throw new AiClientError(
+      "O modelo não retornou um JSON válido.",
+      "INVALID_OUTPUT",
+    );
   }
 
-  const result = schema.safeParse(parsed);
-  if (!result.success) throw new AiClientError("Validação de estrutura do JSON (Zod) falhou.", "INVALID_OUTPUT", result.error.issues);
+  const validated = options.schema.safeParse(parsed);
+  if (!validated.success) {
+    throw new AiClientError(
+      "A resposta não cumpriu o contrato deste formato.",
+      "INVALID_OUTPUT",
+      validated.error.issues,
+    );
+  }
 
   return {
-    raw,
-    data: result.data,
-    meta: metaData,
+    ...result,
+    data: validated.data,
   };
 }

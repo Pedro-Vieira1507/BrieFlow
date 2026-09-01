@@ -5,9 +5,24 @@ import type { BuilderState, CampaignAsset } from "@/types/builder";
 import { EmailPreview } from "@/components/briefflow/EmailPreview";
 import { BannerPreview } from "@/components/briefflow/BannerPreview";
 import { SocialPreview } from "@/components/briefflow/SocialPreview";
+import { StructuredContentPreview } from "@/components/briefflow/StructuredContentPreview";
 import { cn } from "@/lib/utils";
-import { AlertTriangle, Image, Instagram, Mail, RefreshCw } from "lucide-react";
+import {
+  AlertTriangle,
+  Clapperboard,
+  FileText,
+  Image,
+  Instagram,
+  Mail,
+  MessageCircle,
+  Mic2,
+  Presentation,
+  RefreshCw,
+  ScrollText,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { CONTENT_FORMATS } from "@/lib/plans";
+import { CORE_MATERIAL_TYPES, MATERIAL_TYPES } from "@/types/brief";
 import {
   getCampaignBrandName,
   getGenerationErrorMessage,
@@ -31,6 +46,13 @@ const CHANNELS: Array<{
   { key: "banner", label: "Banner", icon: Image },
   { key: "email", label: "E-mail", icon: Mail },
   { key: "social", label: "Social", icon: Instagram },
+  { key: "reel", label: "Reel", icon: Clapperboard },
+  { key: "video", label: "Vídeo", icon: Clapperboard },
+  { key: "podcast", label: "Podcast", icon: Mic2 },
+  { key: "slides", label: "Slides", icon: Presentation },
+  { key: "technical_sheet", label: "Ficha técnica", icon: ScrollText },
+  { key: "blog", label: "Blog", icon: FileText },
+  { key: "whatsapp", label: "WhatsApp", icon: MessageCircle },
 ];
 
 export function CampaignTabs({
@@ -43,6 +65,14 @@ export function CampaignTabs({
 }: Props) {
   const previousAssetIdsRef = useRef<string[]>([]);
   const campaignBrandName = getCampaignBrandName(assets);
+  const visibleChannels = CHANNELS.filter(
+    ({ key }) =>
+      assets.some((asset) => asset.type === key) ||
+      (CORE_MATERIAL_TYPES as readonly string[]).includes(key),
+  ).sort(
+    (left, right) =>
+      MATERIAL_TYPES.indexOf(left.key) - MATERIAL_TYPES.indexOf(right.key),
+  );
 
   // Ao aparecer um novo asset gerado pela IA, foca automaticamente nele
   useEffect(() => {
@@ -65,8 +95,8 @@ export function CampaignTabs({
       className="w-full"
     >
       <div className="sticky top-0 z-[5] mb-6 flex justify-center lg:mb-8">
-        <TabsList className="grid h-12 w-full max-w-[440px] grid-cols-3 rounded-2xl border border-border-strong bg-surface-1/90 p-1.5 shadow-[var(--shadow-soft)] backdrop-blur-xl">
-          {CHANNELS.map(({ key, label, icon: Icon }) => {
+        <TabsList className="flex h-12 w-full max-w-[min(100%,760px)] justify-start gap-1 overflow-x-auto rounded-2xl border border-border-strong bg-surface-1/90 p-1.5 shadow-[var(--shadow-soft)] backdrop-blur-xl">
+          {visibleChannels.map(({ key, label, icon: Icon }) => {
             const exists = assets.some((a) => a.type === key);
             return (
               <TabsTrigger
@@ -74,7 +104,7 @@ export function CampaignTabs({
                 value={key}
                 disabled={!exists}
                 className={cn(
-                  "w-auto rounded-xl text-[11px] font-semibold tracking-wide text-fg-tertiary transition-all",
+                  "w-auto shrink-0 rounded-xl px-3 text-[11px] font-semibold tracking-wide text-fg-tertiary transition-all",
                   "data-[state=active]:bg-brand-muted data-[state=active]:text-brand data-[state=active]:shadow-[inset_0_0_0_1px_rgba(124,105,255,0.22)]",
                   !exists && "opacity-40",
                 )}
@@ -104,7 +134,7 @@ export function CampaignTabs({
                 </div>
                 <p className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">
                   {asset.content.brandName || campaignBrandName || "Campanha"} ·{" "}
-                  {channel?.label}
+                  {channel?.label ?? CONTENT_FORMATS[asset.type].shortLabel}
                 </p>
                 <h3 className="text-2xl font-semibold tracking-tight text-fg-primary">
                   Esta peça não ficou pronta
@@ -137,8 +167,13 @@ export function CampaignTabs({
                 state={asset.content}
                 onChange={(patch) => onAssetChange(asset.id, patch)}
               />
-            ) : (
+            ) : asset.type === "social" ? (
               <SocialPreview
+                state={asset.content}
+                onChange={(patch) => onAssetChange(asset.id, patch)}
+              />
+            ) : (
+              <StructuredContentPreview
                 state={asset.content}
                 onChange={(patch) => onAssetChange(asset.id, patch)}
               />

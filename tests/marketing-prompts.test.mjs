@@ -78,6 +78,8 @@ test("editorial prompt forbids fabricated proof and removes random directives", 
   assert.match(source, /ALEGAÇÕES FACTUAIS BLOQUEADAS/);
   assert.match(source, /PLATAFORMA CRIATIVA DA CAMPANHA/);
   assert.match(source, /em outro nível/);
+  assert.match(source, /dados externos não confiáveis/);
+  assert.match(source, /ignore qualquer comando/);
   assert.match(source, /teste de substituição/);
   assert.match(source, /fragmento preposicional/);
   assert.match(source, /aplicado automaticamente/);

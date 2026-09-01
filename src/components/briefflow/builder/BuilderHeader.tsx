@@ -10,6 +10,7 @@ import {
   LogIn,
   PlusCircle,
   PanelsTopLeft,
+  LayoutGrid,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -42,6 +43,7 @@ interface Props {
   onExport: () => void;
   onSave: () => void;
   onOpenSettings?: () => void;
+  onOpenContentCatalog?: () => void;
 }
 
 export function BuilderHeader({
@@ -52,6 +54,7 @@ export function BuilderHeader({
   onExport,
   onSave,
   onOpenSettings,
+  onOpenContentCatalog,
 }: Props) {
   const { user, reset, builder, setAuthOpen, setLibraryOpen } =
     useBriefflowStore();
@@ -99,6 +102,19 @@ export function BuilderHeader({
         </div>
 
         <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            aria-label="Abrir central de formatos"
+            title="Criar outro formato"
+            onClick={onOpenContentCatalog}
+            disabled={loading}
+            className="size-9 rounded-xl border-border-strong bg-surface-1/50 p-0 text-fg-secondary transition hover:border-brand/30 hover:bg-surface-2 hover:text-fg-primary disabled:opacity-40 sm:h-9 sm:w-auto sm:px-3"
+          >
+            <LayoutGrid className="size-3.5 sm:mr-2" />
+            <span className="hidden sm:inline">Formatos</span>
+          </Button>
+
           <Button
             variant="outline"
             size="sm"

@@ -1,11 +1,7 @@
 // src/types/builder.ts
-export type BuilderType =
-  | "email"
-  | "social"
-  | "banner"
-  | "none"
-  | "campaign"
-  | "discovery_plan";
+import type { MaterialType } from "./brief";
+
+export type BuilderType = MaterialType | "none" | "campaign" | "discovery_plan";
 
 export interface DiscoveryPlan {
   detectedContext: string;
@@ -41,7 +37,18 @@ export interface BannerContent {
   layoutStyle?: "diagonal" | "split" | "minimalist" | "centered" | "reverse";
   badgePrimary?: string;
   badgeSecondary?: string;
-  backgroundShape?: "diagonal" | "curve" | "split" | "minimalist" | "blob" | "geometric" | "frame" | "arch" | "wave" | "pill" | "offset";
+  backgroundShape?:
+    | "diagonal"
+    | "curve"
+    | "split"
+    | "minimalist"
+    | "blob"
+    | "geometric"
+    | "frame"
+    | "arch"
+    | "wave"
+    | "pill"
+    | "offset";
   bannerFontSizes?: BannerFontSizes;
 }
 
@@ -67,7 +74,15 @@ export interface EmailContent {
   testimonials?: string[];
   footerInfo?: string;
   // --> NOVAS OPÇÕES DE E-MAIL AQUI <--
-  layoutStyle?: "diagonal" | "split" | "minimalist" | "centered" | "editorial" | "modern" | "overlap" | "newsletter";
+  layoutStyle?:
+    | "diagonal"
+    | "split"
+    | "minimalist"
+    | "centered"
+    | "editorial"
+    | "modern"
+    | "overlap"
+    | "newsletter";
   backgroundShape?: "square" | "curve" | "arch" | "pill" | "blob";
 }
 
@@ -86,6 +101,34 @@ export interface SocialContent {
 
 export type AssetContent = BannerContent | EmailContent | SocialContent;
 export type CtaVariant = "primary" | "secondary" | "urgent" | "soft";
+
+/** Bloco reutilizável para roteiros, apresentações e documentos longos. */
+export interface StructuredContentSection {
+  id: string;
+  title: string;
+  body: string;
+  items?: string[];
+  timing?: string;
+  visualDirection?: string;
+  speakerNotes?: string;
+}
+
+/**
+ * Documento normalizado exibido pelo preview avançado. O JSON original fica
+ * preservado na biblioteca, mas todos os novos formatos compartilham esta
+ * representação para edição, exportação e futuras integrações.
+ */
+export interface StructuredContentDocument {
+  format: Exclude<MaterialType, "banner" | "social" | "email">;
+  title: string;
+  subtitle?: string;
+  summary?: string;
+  duration?: string;
+  sections: StructuredContentSection[];
+  cta?: string;
+  keywords?: string[];
+  disclaimer?: string;
+}
 
 export interface BannerFontSizes {
   title?: number;
@@ -123,10 +166,31 @@ export interface BuilderState {
   productImages?: string[];
   themeColor?: string;
   secondaryColor?: string;
-  layoutStyle?: "diagonal" | "split" | "minimalist" | "centered" | "reverse" | "editorial" | "modern" | "overlap" | "newsletter";
+  layoutStyle?:
+    | "diagonal"
+    | "split"
+    | "minimalist"
+    | "centered"
+    | "reverse"
+    | "editorial"
+    | "modern"
+    | "overlap"
+    | "newsletter";
   badgePrimary?: string;
   badgeSecondary?: string;
-  backgroundShape?: "diagonal" | "curve" | "split" | "minimalist" | "blob" | "geometric" | "frame" | "arch" | "wave" | "pill" | "offset" | "square";
+  backgroundShape?:
+    | "diagonal"
+    | "curve"
+    | "split"
+    | "minimalist"
+    | "blob"
+    | "geometric"
+    | "frame"
+    | "arch"
+    | "wave"
+    | "pill"
+    | "offset"
+    | "square";
   imagePosX?: number;
   imagePosY?: number;
   imageScale?: number;
@@ -136,11 +200,12 @@ export interface BuilderState {
   urgencyText?: string;
   testimonials?: string[];
   footerInfo?: string;
-  
+
   textColor?: string;
   boxColor?: string;
   fontFamily?: string;
   bannerFontSizes?: BannerFontSizes;
+  structuredContent?: StructuredContentDocument;
 }
 
 export interface SiteBrandData {
@@ -167,7 +232,7 @@ export interface BrandContext {
 
 export interface CampaignAsset {
   id: string;
-  type: "email" | "social" | "banner";
+  type: MaterialType;
   content: BuilderState;
   status: "draft" | "review" | "approved";
 }

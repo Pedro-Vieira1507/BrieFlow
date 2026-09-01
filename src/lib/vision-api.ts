@@ -121,7 +121,7 @@ export const analyzeImageWithVisionFn = async (payload: {
 
         const primaryHex = rgbToHex(r, g, b);
         // Gera um tom 50% mais escuro para o fundo (Contrast ratio bonito)
-        const secondaryHex = shadeColor(primaryHex, -50); 
+        const secondaryHex = shadeColor(primaryHex, -50);
 
         resolve({
           primaryBrandColor: primaryHex,
