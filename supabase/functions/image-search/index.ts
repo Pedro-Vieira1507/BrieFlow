@@ -1,5 +1,3 @@
-import "jsr:@supabase/functions-js@2.112.4/edge-runtime.d.ts";
-
 import { authorizationStatus, authorize, refund } from "../_shared/credits.ts";
 import {
   authenticate,

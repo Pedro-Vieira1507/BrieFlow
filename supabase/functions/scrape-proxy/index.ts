@@ -1,5 +1,3 @@
-import "jsr:@supabase/functions-js@2.112.4/edge-runtime.d.ts";
-
 import { authorizationStatus, authorize, refund } from "../_shared/credits.ts";
 import {
   authenticate,
@@ -7,6 +5,7 @@ import {
   preflight,
   readJson,
   requirePost,
+  runInBackground,
 } from "../_shared/http.ts";
 import { fetchPublicResource, validatePublicUrl } from "../_shared/urls.ts";
 
@@ -206,7 +205,7 @@ Deno.serve(async (req: Request) => {
       fetched_at: new Date().toISOString(),
       expires_at: new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString(),
     });
-    EdgeRuntime.waitUntil(cacheWrite.then(() => undefined));
+    runInBackground("scrape_cache", cacheWrite);
 
     return json(req, 200, {
       ...page,

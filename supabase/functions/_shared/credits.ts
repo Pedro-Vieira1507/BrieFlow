@@ -1,4 +1,5 @@
 import type { RequestContext } from "./http.ts";
+import type { Json } from "./database.ts";
 
 export interface AuthorizationResult {
   ok: boolean;
@@ -14,7 +15,7 @@ export async function authorize(
   context: RequestContext,
   action: string,
   requestId: string,
-  metadata: Record<string, unknown> = {},
+  metadata: Record<string, Json | undefined> = {},
 ): Promise<AuthorizationResult> {
   const { data, error } = await context.service.rpc("authorize_generation", {
     p_user_id: context.user.id,

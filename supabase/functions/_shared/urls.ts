@@ -117,7 +117,7 @@ export async function validatePublicUrl(rawUrl: string): Promise<URL> {
     throw new Error("private_address_blocked");
 
   if (!parseIpv4(url.hostname) && !url.hostname.includes(":")) {
-    let dnsTimeout: number | undefined;
+    let dnsTimeout: ReturnType<typeof setTimeout> | undefined;
     try {
       const addresses = await Promise.race([
         Promise.all([

@@ -1,5 +1,3 @@
-import "jsr:@supabase/functions-js@2.112.4/edge-runtime.d.ts";
-
 import {
   authenticate,
   json,
@@ -7,6 +5,7 @@ import {
   publicError,
   readJson,
   requirePost,
+  runInBackground,
 } from "../_shared/http.ts";
 
 type ChatRole = "system" | "user" | "assistant";
@@ -486,7 +485,7 @@ Deno.serve(async (req: Request) => {
       latency_ms: latencyMs,
       success: true,
     });
-    EdgeRuntime.waitUntil(logPromise.then(() => undefined));
+    runInBackground("ai_usage_log", logPromise);
 
     return json(req, 200, {
       model: result.model,

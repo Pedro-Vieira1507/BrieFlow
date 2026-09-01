@@ -1,8 +1,16 @@
-import { createClient, type User } from "npm:@supabase/supabase-js@2";
+import {
+  createClient,
+  type SupabaseClient,
+  type User,
+} from "npm:@supabase/supabase-js@2.110.5";
+
+import type { Database } from "./database.ts";
+
+export type ServiceClient = SupabaseClient<Database>;
 
 export interface RequestContext {
   user: User;
-  service: ReturnType<typeof createClient>;
+  service: ServiceClient;
 }
 
 const configuredOrigins = (() => {
@@ -103,21 +111,46 @@ export async function readJson<T>(
 export async function authenticate(
   req: Request,
 ): Promise<RequestContext | null> {
-  const supabaseUrl = Deno.env.get("SUPABASE_URL");
-  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-  if (!supabaseUrl || !serviceKey) throw new Error("backend_not_configured");
-
   const authorization = req.headers.get("Authorization");
   if (!authorization?.startsWith("Bearer ")) return null;
   const token = authorization.slice(7).trim();
   if (!token) return null;
 
-  const service = createClient(supabaseUrl, serviceKey, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  });
+  const service = createServiceClient();
   const { data, error } = await service.auth.getUser(token);
   if (error || !data.user) return null;
   return { user: data.user, service };
+}
+
+export function createServiceClient(): ServiceClient {
+  const supabaseUrl = Deno.env.get("SUPABASE_URL");
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!supabaseUrl || !serviceKey) throw new Error("backend_not_configured");
+  return createClient<Database>(supabaseUrl, serviceKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+}
+
+export function runInBackground(
+  operation: string,
+  promise: PromiseLike<unknown>,
+): void {
+  const guarded = Promise.resolve(promise).catch((error) => {
+    console.error(
+      JSON.stringify({
+        event: "background_operation_failed",
+        operation,
+        code: error instanceof Error ? error.message : "unknown_error",
+      }),
+    );
+  });
+  const runtime = (
+    globalThis as typeof globalThis & {
+      EdgeRuntime?: { waitUntil(promise: Promise<unknown>): void };
+    }
+  ).EdgeRuntime;
+  if (runtime) runtime.waitUntil(guarded);
+  else void guarded;
 }
 
 export function publicError(error: unknown): string {

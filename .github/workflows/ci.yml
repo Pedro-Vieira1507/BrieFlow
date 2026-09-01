@@ -39,4 +39,7 @@ jobs:
         with:
           deno-version: v2.x
       - name: Type-check Edge Functions
-        run: deno check supabase/functions/{ai-proxy,scrape-proxy,image-search,billing,stripe-webhook}/index.ts
+        working-directory: /tmp
+        run: >-
+          deno check --no-config --node-modules-dir=none
+          "$GITHUB_WORKSPACE"/supabase/functions/{ai-proxy,scrape-proxy,image-search,billing,stripe-webhook}/index.ts

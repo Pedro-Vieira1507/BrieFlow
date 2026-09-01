@@ -1,7 +1,8 @@
-import "jsr:@supabase/functions-js@2.112.4/edge-runtime.d.ts";
-import { createClient } from "npm:@supabase/supabase-js@2";
-
-import { json } from "../_shared/http.ts";
+import {
+  createServiceClient,
+  json,
+  type ServiceClient,
+} from "../_shared/http.ts";
 import { planForStripePrice, stripeRequest } from "../_shared/stripe.ts";
 
 interface StripeEvent {
@@ -28,15 +29,6 @@ interface StripeSubscription extends Record<string, unknown> {
   };
 }
 
-function serviceClient() {
-  const url = Deno.env.get("SUPABASE_URL");
-  const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-  if (!url || !key) throw new Error("backend_not_configured");
-  return createClient(url, key, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  });
-}
-
 function parseSignature(value: string | null): {
   timestamp: number;
   signatures: string[];
@@ -54,11 +46,15 @@ function parseSignature(value: string | null): {
   return { timestamp, signatures };
 }
 
-function hexToBytes(hex: string): Uint8Array {
-  if (!/^[a-f0-9]{64}$/i.test(hex)) return new Uint8Array();
-  return Uint8Array.from(hex.match(/.{2}/g) ?? [], (byte) =>
-    Number.parseInt(byte, 16),
-  );
+function hexToBytes(hex: string): Uint8Array<ArrayBuffer> {
+  if (!/^[a-f0-9]{64}$/i.test(hex)) {
+    return new Uint8Array(new ArrayBuffer(0));
+  }
+  const output = new Uint8Array(new ArrayBuffer(32));
+  for (let index = 0; index < output.length; index += 1) {
+    output[index] = Number.parseInt(hex.slice(index * 2, index * 2 + 2), 16);
+  }
+  return output;
 }
 
 async function verifySignature(
@@ -122,7 +118,7 @@ async function fetchSubscription(id: string): Promise<StripeSubscription> {
 }
 
 async function syncSubscription(
-  service: ReturnType<typeof createClient>,
+  service: ServiceClient,
   subscription: StripeSubscription,
   options: {
     resetCredits?: boolean;
@@ -213,7 +209,7 @@ Deno.serve(async (req: Request) => {
     )
       throw new Error("invalid_event");
 
-    const service = serviceClient();
+    const service = createServiceClient();
     const { data: claimData, error: claimError } = await service.rpc(
       "claim_stripe_webhook",
       {
