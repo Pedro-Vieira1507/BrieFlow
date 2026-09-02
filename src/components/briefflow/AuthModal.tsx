@@ -59,12 +59,8 @@ export function AuthModal({ open, onOpenChange }: Props) {
     }
 
     const formData = new FormData(event.currentTarget);
-    const safeEmail = normalizeEmail(
-      String(formData.get("email") ?? email),
-    );
-    const submittedPassword = String(
-      formData.get("password") ?? password,
-    );
+    const safeEmail = normalizeEmail(String(formData.get("email") ?? email));
+    const submittedPassword = String(formData.get("password") ?? password);
     if (mode !== "recovery" && !safeEmail) {
       toast.error("Informe um e-mail válido.");
       return;
