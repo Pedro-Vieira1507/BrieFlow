@@ -12,4 +12,11 @@ export default defineConfig({
     // nitro/vite builds from this
     server: { entry: "server" },
   },
+  vite: {
+    server: {
+      // Quick Tunnel hostnames rotate. Trust only Cloudflare's development
+      // tunnel suffix instead of disabling Vite's host validation globally.
+      allowedHosts: [".trycloudflare.com"],
+    },
+  },
 });

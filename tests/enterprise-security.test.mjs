@@ -189,3 +189,28 @@ test("existing paid subscriptions change plans through the billing portal", asyn
   );
   assert.doesNotMatch(billing, /subscription_already_exists/);
 });
+
+test("authentication submit reads autofilled values from the form", async () => {
+  const modal = await readFile(
+    new URL("../src/components/briefflow/AuthModal.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(modal, /new FormData\(event\.currentTarget\)/);
+  assert.match(modal, /name="email"/);
+  assert.match(modal, /name="password"/);
+  assert.match(modal, /password: submittedPassword/);
+});
+
+test("development tunnels keep bounded host validation and edge env files private", async () => {
+  const [viteConfig, gitignore, edgeEnv] = await Promise.all([
+    readFile(new URL("../vite.config.ts", import.meta.url), "utf8"),
+    readFile(new URL("../.gitignore", import.meta.url), "utf8"),
+    readFile(new URL("../supabase/.env.example", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(viteConfig, /allowedHosts:\s*\["\.trycloudflare\.com"\]/);
+  assert.match(gitignore, /supabase\/\.env\.\*/);
+  assert.doesNotMatch(edgeEnv, /VITE_/);
+  assert.doesNotMatch(edgeEnv, /YOUR_SUPABASE_ANON_KEY/);
+});

@@ -58,9 +58,21 @@ export function AuthModal({ open, onOpenChange }: Props) {
       return;
     }
 
-    const safeEmail = normalizeEmail(email);
-    if (mode !== "recovery" && !safeEmail) return;
-    if (["signup", "recovery"].includes(mode) && password.length < 12) {
+    const formData = new FormData(event.currentTarget);
+    const safeEmail = normalizeEmail(
+      String(formData.get("email") ?? email),
+    );
+    const submittedPassword = String(
+      formData.get("password") ?? password,
+    );
+    if (mode !== "recovery" && !safeEmail) {
+      toast.error("Informe um e-mail válido.");
+      return;
+    }
+    if (
+      ["signup", "recovery"].includes(mode) &&
+      submittedPassword.length < 12
+    ) {
       toast.error("Use uma senha com pelo menos 12 caracteres.");
       return;
     }
@@ -81,7 +93,9 @@ export function AuthModal({ open, onOpenChange }: Props) {
       }
 
       if (mode === "recovery") {
-        const { error } = await supabase.auth.updateUser({ password });
+        const { error } = await supabase.auth.updateUser({
+          password: submittedPassword,
+        });
         if (error) throw error;
         toast.success("Senha atualizada com segurança.");
         setMode("login");
@@ -93,7 +107,7 @@ export function AuthModal({ open, onOpenChange }: Props) {
       if (mode === "login") {
         const { error } = await supabase.auth.signInWithPassword({
           email: safeEmail,
-          password,
+          password: submittedPassword,
         });
         if (error) throw error;
         toast.success("Bem-vindo de volta!");
@@ -103,7 +117,7 @@ export function AuthModal({ open, onOpenChange }: Props) {
 
       const { data, error } = await supabase.auth.signUp({
         email: safeEmail,
-        password,
+        password: submittedPassword,
         options: {
           emailRedirectTo: `${window.location.origin}/app`,
         },
@@ -221,6 +235,7 @@ export function AuthModal({ open, onOpenChange }: Props) {
                 </Label>
                 <Input
                   id="auth-email"
+                  name="email"
                   type="email"
                   autoComplete="email"
                   required
@@ -250,6 +265,7 @@ export function AuthModal({ open, onOpenChange }: Props) {
                 <div className="relative">
                   <Input
                     id="auth-password"
+                    name="password"
                     type={showPassword ? "text" : "password"}
                     autoComplete={
                       mode === "login" ? "current-password" : "new-password"

@@ -8,10 +8,11 @@ dist/
 
 # Environment variables — NEVER commit secrets
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
 supabase/.env
-supabase/.env.local
+supabase/.env.*
+!supabase/.env.example
 
 # IDE
 .vscode/
