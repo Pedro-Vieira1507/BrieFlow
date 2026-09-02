@@ -6,10 +6,14 @@ import { isPrivateAddress } from "../supabase/functions/_shared/urls.ts";
 import { useBriefflowStore } from "../src/store/briefflow.ts";
 
 test("browser bundle delegates AI calls and contains no provider secret variables", async () => {
-  const client = await readFile(
-    new URL("../src/lib/aiClient.ts", import.meta.url),
-    "utf8",
-  );
+  const [client, supabaseClient, edgeHttp] = await Promise.all([
+    readFile(new URL("../src/lib/aiClient.ts", import.meta.url), "utf8"),
+    readFile(new URL("../src/lib/supabase.ts", import.meta.url), "utf8"),
+    readFile(
+      new URL("../supabase/functions/_shared/http.ts", import.meta.url),
+      "utf8",
+    ),
+  ]);
   const envExample = await readFile(
     new URL("../.env.example", import.meta.url),
     "utf8",
@@ -18,6 +22,9 @@ test("browser bundle delegates AI calls and contains no provider secret variable
   assert.match(client, /invokeEdgeFunction<ProxyResponse>\(\s*"ai-proxy"/);
   assert.doesNotMatch(client, /VITE_(?:GROQ|GEMINI|OMNIROUTE|OLLAMA)_/);
   assert.doesNotMatch(envExample, /GROQ_API_KEY|GEMINI_API_KEY|SERVICE_ROLE/);
+  assert.match(supabaseClient, /"X-Client-Info": "brieflow-web\/3"/);
+  assert.doesNotMatch(supabaseClient, /"X-Client-Version":/);
+  assert.match(edgeHttp, /x-client-info, x-client-version/);
 });
 
 test("AI proxy authorizes atomically, falls back server-side and refunds failures", async () => {
@@ -85,6 +92,10 @@ test("library queries stay user-scoped and use bounded cursor pagination", async
   assert.match(client, /\.limit\(pageSize \+ 1\)/);
   assert.match(client, /created_at\.lt\.\$\{cursor\.createdAt\}/);
   assert.match(client, /MAX_LIBRARY_PAGE_SIZE = 100/);
+  assert.match(
+    client,
+    /SAVED_ASSET_COLUMNS\s*=\s*"id,user_id,name,type,content,status,created_at"/,
+  );
   assert.doesNotMatch(client, /\.limit\(500\)/);
 });
 
@@ -163,4 +174,18 @@ test("billing webhooks are atomically claimed and ignore older signed events", a
   assert.doesNotMatch(webhook, /stripe_webhook_events"\)\.upsert/);
   assert.match(migration, /s\.stripe_event_created <= p_event_created/);
   assert.match(migration, /s\.current_period_start < p_period_start/);
+});
+
+test("existing paid subscriptions change plans through the billing portal", async () => {
+  const billing = await readFile(
+    new URL("../supabase/functions/billing/index.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(billing, /async function createPortalSession/);
+  assert.match(
+    billing,
+    /subscription\.stripe_subscription_id[\s\S]*createPortalSession\(/,
+  );
+  assert.doesNotMatch(billing, /subscription_already_exists/);
 });

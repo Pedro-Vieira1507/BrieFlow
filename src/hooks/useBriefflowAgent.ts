@@ -894,10 +894,11 @@ Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo terri
           }
         }
       } catch (err) {
-        toast.error("Falha ao processar", { description: String(err) });
+        const description = describeAiError(err);
+        toast.error("Falha ao processar", { description });
         if (!isHiddenAction) {
           updateMessage(assistantId, {
-            content: "Tive uma falha ao processar. Pode tentar reformular?",
+            content: `Não consegui concluir esta etapa. ${description}`,
           });
         }
       } finally {
