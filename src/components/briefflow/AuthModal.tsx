@@ -51,7 +51,7 @@ export function AuthModal({ open, onOpenChange }: Props) {
     }
   }, [open, mode]);
 
-  const handleAuth = async (event: React.FormEvent) => {
+  const handleAuth = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!supabase) {
       toast.error("Autenticação não configurada.");
