@@ -339,6 +339,8 @@ begin
 end;
 $$;
 
+-- Replace the legacy provisioning trigger so each signup runs exactly once.
+drop trigger if exists on_auth_user_created on auth.users;
 drop trigger if exists on_auth_user_created_brieflow on auth.users;
 create trigger on_auth_user_created_brieflow
 after insert on auth.users for each row execute function public.handle_new_user();
@@ -373,7 +375,7 @@ declare
   v_default_organization_id uuid;
 begin
   if new.user_id is null then
-    new.user_id := auth.uid();
+    new.user_id := (select auth.uid());
   end if;
   if new.user_id is null then
     raise exception using errcode = '42501', message = 'asset_user_required';
@@ -499,7 +501,7 @@ security definer
 set search_path = public, auth
 as $$
 declare
-  v_user_id uuid := auth.uid();
+  v_user_id uuid := (select auth.uid());
 begin
   if v_user_id is null then
     return;
@@ -532,7 +534,7 @@ as $$
     where organization_id = p_organization_id
       and user_id = p_user_id
       and status = 'active'
-  ) and p_user_id = auth.uid();
+  ) and p_user_id = (select auth.uid());
 $$;
 
 create or replace function public.is_organization_admin(p_organization_id uuid, p_user_id uuid)
@@ -548,7 +550,7 @@ as $$
       and user_id = p_user_id
       and status = 'active'
       and role in ('owner', 'admin')
-  ) and p_user_id = auth.uid();
+  ) and p_user_id = (select auth.uid());
 $$;
 
 create or replace function public.authorize_generation(
@@ -869,6 +871,23 @@ begin
 end;
 $$;
 
+-- The legacy brand knowledge table has no tenant key. Preserve its data, but
+-- close direct Data API access until it is migrated to organization ownership.
+do $
+declare v_policy record;
+begin
+  if to_regclass('public.brand_knowledge') is not null then
+    for v_policy in
+      select policyname from pg_policies
+      where schemaname = 'public' and tablename = 'brand_knowledge'
+    loop
+      execute format('drop policy if exists %I on public.brand_knowledge', v_policy.policyname);
+    end loop;
+    execute 'alter table public.brand_knowledge enable row level security';
+    execute 'revoke all on table public.brand_knowledge from public, anon, authenticated';
+  end if;
+end $;
+
 -- Row-level access. Assets are deliberately personal even inside a shared organization.
 alter table public.plan_catalog enable row level security;
 alter table public.organizations enable row level security;
@@ -896,43 +915,43 @@ drop policy if exists plan_catalog_read on public.plan_catalog;
 create policy plan_catalog_read on public.plan_catalog for select to authenticated using (active);
 
 drop policy if exists profiles_read_own on public.profiles;
-create policy profiles_read_own on public.profiles for select to authenticated using (user_id = auth.uid());
+create policy profiles_read_own on public.profiles for select to authenticated using (user_id = (select auth.uid()));
 drop policy if exists profiles_update_own on public.profiles;
 create policy profiles_update_own on public.profiles for update to authenticated
-using (user_id = auth.uid()) with check (
-  user_id = auth.uid()
-  and public.is_organization_member(default_organization_id, auth.uid())
+using (user_id = (select auth.uid())) with check (
+  user_id = (select auth.uid())
+  and public.is_organization_member(default_organization_id, (select auth.uid()))
 );
 
 drop policy if exists organizations_member_read on public.organizations;
 create policy organizations_member_read on public.organizations for select to authenticated using (
-  public.is_organization_member(id, auth.uid())
+  public.is_organization_member(id, (select auth.uid()))
 );
 drop policy if exists organizations_admin_update on public.organizations;
 create policy organizations_admin_update on public.organizations for update to authenticated using (
-  public.is_organization_admin(id, auth.uid())
+  public.is_organization_admin(id, (select auth.uid()))
 );
 
 drop policy if exists organization_members_member_read on public.organization_members;
 create policy organization_members_member_read on public.organization_members for select to authenticated using (
-  public.is_organization_member(organization_id, auth.uid())
+  public.is_organization_member(organization_id, (select auth.uid()))
 );
 
 drop policy if exists subscriptions_member_read on public.subscriptions;
 create policy subscriptions_member_read on public.subscriptions for select to authenticated using (
-  public.is_organization_member(organization_id, auth.uid())
+  public.is_organization_member(organization_id, (select auth.uid()))
 );
 
-create policy assets_select_own on public.assets for select to authenticated using (user_id = auth.uid());
-create policy assets_insert_own on public.assets for insert to authenticated with check (user_id = auth.uid());
+create policy assets_select_own on public.assets for select to authenticated using (user_id = (select auth.uid()));
+create policy assets_insert_own on public.assets for insert to authenticated with check (user_id = (select auth.uid()));
 create policy assets_update_own on public.assets for update to authenticated
-using (user_id = auth.uid()) with check (user_id = auth.uid());
-create policy assets_delete_own on public.assets for delete to authenticated using (user_id = auth.uid());
+using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
+create policy assets_delete_own on public.assets for delete to authenticated using (user_id = (select auth.uid()));
 
 drop policy if exists ai_usage_read_own on public.ai_usage_log;
-create policy ai_usage_read_own on public.ai_usage_log for select to authenticated using (user_id = auth.uid());
+create policy ai_usage_read_own on public.ai_usage_log for select to authenticated using (user_id = (select auth.uid()));
 drop policy if exists credit_ledger_read_own on public.credit_ledger;
-create policy credit_ledger_read_own on public.credit_ledger for select to authenticated using (user_id = auth.uid());
+create policy credit_ledger_read_own on public.credit_ledger for select to authenticated using (user_id = (select auth.uid()));
 
 revoke all on table public.plan_catalog, public.organizations, public.profiles,
   public.organization_members, public.subscriptions, public.assets,
@@ -967,6 +986,11 @@ begin
     execute format('drop policy if exists %I on storage.objects', v_policy.policyname);
   end loop;
 end $$;
+
+-- Remove only the two known policies from the legacy BrieFlow deployment.
+-- The generic safety check below still blocks any other permissive policy.
+drop policy if exists "Permitir leitura pública 8vmd40_0" on storage.objects;
+drop policy if exists "Permitir upload de usuários logados 8vmd40_0" on storage.objects;
 
 -- A generic permissive storage policy would be OR'ed with the bucket policies
 -- below and silently defeat isolation. Fail deployment instead of accepting it.
@@ -1011,22 +1035,40 @@ from legacy_owners
 where o.id = legacy_owners.id;
 
 create policy campaign_assets_select_own on storage.objects for select to authenticated
-using (bucket_id = 'campaign-assets' and (storage.foldername(name))[1] = auth.uid()::text);
+using (bucket_id = 'campaign-assets' and (storage.foldername(name))[1] = (select auth.uid())::text);
 -- Backward compatibility for files uploaded before user-prefixed paths existed.
 -- A legacy object is readable only by the authenticated owner recorded by Storage.
 create policy campaign_assets_select_legacy_reference on storage.objects for select to authenticated
 using (
   bucket_id = 'campaign-assets'
-  and (storage.foldername(name))[1] is distinct from auth.uid()::text
-  and owner_id = auth.uid()::text
+  and (storage.foldername(name))[1] is distinct from (select auth.uid())::text
+  and owner_id = (select auth.uid())::text
 );
 create policy campaign_assets_insert_own on storage.objects for insert to authenticated
-with check (bucket_id = 'campaign-assets' and (storage.foldername(name))[1] = auth.uid()::text);
+with check (bucket_id = 'campaign-assets' and (storage.foldername(name))[1] = (select auth.uid())::text);
 create policy campaign_assets_update_own on storage.objects for update to authenticated
-using (bucket_id = 'campaign-assets' and (storage.foldername(name))[1] = auth.uid()::text)
-with check (bucket_id = 'campaign-assets' and (storage.foldername(name))[1] = auth.uid()::text);
+using (bucket_id = 'campaign-assets' and (storage.foldername(name))[1] = (select auth.uid())::text)
+with check (bucket_id = 'campaign-assets' and (storage.foldername(name))[1] = (select auth.uid())::text);
 create policy campaign_assets_delete_own on storage.objects for delete to authenticated
-using (bucket_id = 'campaign-assets' and (storage.foldername(name))[1] = auth.uid()::text);
+using (bucket_id = 'campaign-assets' and (storage.foldername(name))[1] = (select auth.uid())::text);
+
+-- Trigger functions do not need to be callable through the Data API.
+revoke all on function public.handle_new_user() from public, anon, authenticated;
+revoke all on function public.prepare_asset() from public, anon, authenticated;
+revoke all on function public.enforce_organization_member_limit() from public, anon, authenticated;
+revoke all on function public.set_updated_at() from public, anon, authenticated;
+
+-- Lock down helpers left by the legacy schema without making fresh installs fail.
+do $
+begin
+  if to_regprocedure('public.deduct_user_credit(integer)') is not null then
+    execute 'revoke all on function public.deduct_user_credit(integer) from public, anon, authenticated';
+    execute 'alter function public.deduct_user_credit(integer) set search_path = public, auth, pg_temp';
+  end if;
+  if to_regprocedure('public.rls_auto_enable()') is not null then
+    execute 'revoke all on function public.rls_auto_enable() from public, anon, authenticated';
+  end if;
+end $;
 
 revoke all on function public.provision_user_account(uuid, text, jsonb) from public, anon, authenticated;
 revoke all on function public.authorize_generation(uuid, text, text, jsonb) from public, anon, authenticated;
