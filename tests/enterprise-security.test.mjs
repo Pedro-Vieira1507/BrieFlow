@@ -74,7 +74,10 @@ test("database migration enforces personal library RLS and private media", async
   assert.match(migration, /claim_stripe_webhook/);
   assert.match(migration, /stripe_event_created bigint/);
   assert.match(migration, /organization_identity_immutable/);
-  assert.match(migration, /drop trigger if exists on_auth_user_created on auth\.users/);
+  assert.match(
+    migration,
+    /drop trigger if exists on_auth_user_created on auth\.users/,
+  );
   assert.match(
     migration,
     /drop policy if exists "Permitir leitura pública 8vmd40_0" on storage\.objects/,
