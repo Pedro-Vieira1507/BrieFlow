@@ -33,3 +33,4 @@ npm-debug.log*
 coverage/
 repomix-output.xml
 *.tsbuildinfo
+supabase/.temp/
