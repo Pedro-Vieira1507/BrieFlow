@@ -873,7 +873,7 @@ $$;
 
 -- The legacy brand knowledge table has no tenant key. Preserve its data, but
 -- close direct Data API access until it is migrated to organization ownership.
-do $
+do $brand_knowledge$
 declare v_policy record;
 begin
   if to_regclass('public.brand_knowledge') is not null then
@@ -886,7 +886,7 @@ begin
     execute 'alter table public.brand_knowledge enable row level security';
     execute 'revoke all on table public.brand_knowledge from public, anon, authenticated';
   end if;
-end $;
+end $brand_knowledge$;
 
 -- Row-level access. Assets are deliberately personal even inside a shared organization.
 alter table public.plan_catalog enable row level security;
@@ -1059,7 +1059,7 @@ revoke all on function public.enforce_organization_member_limit() from public, a
 revoke all on function public.set_updated_at() from public, anon, authenticated;
 
 -- Lock down helpers left by the legacy schema without making fresh installs fail.
-do $
+do $legacy_helpers$
 begin
   if to_regprocedure('public.deduct_user_credit(integer)') is not null then
     execute 'revoke all on function public.deduct_user_credit(integer) from public, anon, authenticated';
@@ -1068,7 +1068,7 @@ begin
   if to_regprocedure('public.rls_auto_enable()') is not null then
     execute 'revoke all on function public.rls_auto_enable() from public, anon, authenticated';
   end if;
-end $;
+end $legacy_helpers$;
 
 revoke all on function public.provision_user_account(uuid, text, jsonb) from public, anon, authenticated;
 revoke all on function public.authorize_generation(uuid, text, text, jsonb) from public, anon, authenticated;
