@@ -485,6 +485,8 @@ create trigger organization_members_enforce_limit
 before insert or update of status, organization_id, user_id on public.organization_members
 for each row execute function public.enforce_organization_member_limit();
 
+-- The legacy RPC returned fewer columns, so it cannot be replaced in place.
+drop function if exists public.get_user_plan();
 create or replace function public.get_user_plan()
 returns table (
   plan text,
