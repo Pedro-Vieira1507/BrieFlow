@@ -245,14 +245,20 @@ test("authentication submit reads autofilled values from the form", async () => 
 });
 
 test("development tunnels keep bounded host validation and edge env files private", async () => {
-  const [viteConfig, gitignore, edgeEnv] = await Promise.all([
+  const [viteConfig, gitignore, edgeEnv, edgeHttp] = await Promise.all([
     readFile(new URL("../vite.config.ts", import.meta.url), "utf8"),
     readFile(new URL("../.gitignore", import.meta.url), "utf8"),
     readFile(new URL("../supabase/.env.example", import.meta.url), "utf8"),
+    readFile(
+      new URL("../supabase/functions/_shared/http.ts", import.meta.url),
+      "utf8",
+    ),
   ]);
 
   assert.match(viteConfig, /allowedHosts:\s*\["\.trycloudflare\.com"\]/);
   assert.match(gitignore, /supabase\/\.env\.\*/);
   assert.doesNotMatch(edgeEnv, /VITE_/);
   assert.doesNotMatch(edgeEnv, /YOUR_SUPABASE_ANON_KEY/);
+  assert.match(edgeHttp, /\.map\(normalizeConfiguredOrigin\)/);
+  assert.match(edgeHttp, /return url\.origin/);
 });
