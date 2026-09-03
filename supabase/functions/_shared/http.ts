@@ -13,19 +13,33 @@ export interface RequestContext {
   service: ServiceClient;
 }
 
+function normalizeConfiguredOrigin(value: string): string | null {
+  const candidate = value.trim();
+  if (!candidate) return null;
+
+  try {
+    const url = new URL(candidate);
+    if (
+      !["http:", "https:"].includes(url.protocol) ||
+      url.username ||
+      url.password
+    ) {
+      return null;
+    }
+    return url.origin;
+  } catch {
+    return null;
+  }
+}
+
 const configuredOrigins = (() => {
   const values = (Deno.env.get("ALLOWED_ORIGINS") ?? "")
     .split(",")
-    .map((value) => value.trim())
-    .filter(Boolean);
+    .map(normalizeConfiguredOrigin)
+    .filter((value): value is string => value !== null);
   const appUrl = Deno.env.get("APP_URL");
-  if (appUrl) {
-    try {
-      values.push(new URL(appUrl).origin);
-    } catch {
-      // Invalid deployment configuration is reported by the billing function.
-    }
-  }
+  const appOrigin = appUrl ? normalizeConfiguredOrigin(appUrl) : null;
+  if (appOrigin) values.push(appOrigin);
   return new Set(values);
 })();
 
@@ -49,7 +63,7 @@ export function responseHeaders(req: Request): HeadersInit {
     ...(origin ? { "Access-Control-Allow-Origin": origin } : {}),
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     "Access-Control-Allow-Headers":
-      "authorization, apikey, content-type, x-client-version, x-request-id",
+      "authorization, apikey, content-type, x-client-info, x-client-version, x-request-id",
     "Access-Control-Max-Age": "86400",
     "Content-Type": "application/json; charset=utf-8",
     "Cache-Control": "no-store",

@@ -28,6 +28,27 @@ function applicationUrl(): URL {
   return url;
 }
 
+async function createPortalSession(
+  customerId: string,
+  organizationId: string,
+  requestId: string,
+  appUrl: URL,
+): Promise<StripeResource> {
+  const form = new URLSearchParams();
+  form.set("customer", customerId);
+  form.set("return_url", new URL("/app", appUrl).toString());
+  const session = await stripeRequest<StripeResource>(
+    "/billing_portal/sessions",
+    {
+      method: "POST",
+      form,
+      idempotencyKey: `brieflow_portal_${organizationId}_${requestId}`,
+    },
+  );
+  if (!session.url) throw new Error("stripe_missing_url");
+  return session;
+}
+
 Deno.serve(async (req: Request) => {
   const optionsResponse = preflight(req);
   if (optionsResponse) return optionsResponse;
@@ -116,18 +137,12 @@ Deno.serve(async (req: Request) => {
     }
 
     if (body.action === "portal") {
-      const form = new URLSearchParams();
-      form.set("customer", customerId);
-      form.set("return_url", new URL("/app", appUrl).toString());
-      const session = await stripeRequest<StripeResource>(
-        "/billing_portal/sessions",
-        {
-          method: "POST",
-          form,
-          idempotencyKey: `brieflow_portal_${organizationId}_${requestId}`,
-        },
+      const session = await createPortalSession(
+        customerId,
+        organizationId,
+        requestId,
+        appUrl,
       );
-      if (!session.url) throw new Error("stripe_missing_url");
       return json(req, 200, { url: session.url });
     }
 
@@ -135,17 +150,23 @@ Deno.serve(async (req: Request) => {
     if (!["basic", "pro", "agency"].includes(selectedPlan)) {
       return json(req, 400, { error: "invalid_plan" });
     }
-    const priceId = stripePriceForPlan(selectedPlan);
-    if (!priceId) return json(req, 503, { error: "plan_price_not_configured" });
     if (
       subscription.stripe_subscription_id &&
       ["active", "trialing", "past_due"].includes(subscription.status)
     ) {
-      return json(req, 409, {
-        error: "subscription_already_exists",
-        message: "Use o portal de cobrança para alterar seu plano.",
+      const session = await createPortalSession(
+        customerId,
+        organizationId,
+        requestId,
+        appUrl,
+      );
+      return json(req, 200, {
+        url: session.url,
+        mode: "portal",
       });
     }
+    const priceId = stripePriceForPlan(selectedPlan);
+    if (!priceId) return json(req, 503, { error: "plan_price_not_configured" });
 
     const form = new URLSearchParams();
     form.set("mode", "subscription");

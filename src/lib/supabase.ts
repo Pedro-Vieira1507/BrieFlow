@@ -110,7 +110,10 @@ export async function invokeEdgeFunction<T>(
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
       apikey: supabaseAnonKey,
-      "X-Client-Version": "brieflow-web/3",
+      // Supabase Edge Functions and the previous BrieFlow deployment already
+      // allow this conventional header. Keeping it stable prevents CORS
+      // failures while frontend and functions are rolled out independently.
+      "X-Client-Info": "brieflow-web/3",
     },
     body: JSON.stringify(body),
     signal,
@@ -271,8 +274,10 @@ async function refreshPrivateUrls(
   }));
 }
 
-const SAVED_ASSET_COLUMNS =
-  "id,user_id,organization_id,name,type,content,status,created_at,updated_at";
+// Keep reads compatible with the schema that existed before the enterprise
+// migration. organization_id and updated_at are server-managed metadata and
+// are not required to render or isolate the personal library.
+const SAVED_ASSET_COLUMNS = "id,user_id,name,type,content,status,created_at";
 const DEFAULT_LIBRARY_PAGE_SIZE = 50;
 const MAX_LIBRARY_PAGE_SIZE = 100;
 
