@@ -97,6 +97,31 @@ test("database migration enforces personal library RLS and private media", async
   );
 });
 
+test("tenant relations and legacy plan reads stay scalable", async () => {
+  const migration = await readFile(
+    new URL(
+      "../supabase/migrations/20260903111628_enterprise_performance_hardening.sql",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  for (const index of [
+    "organizations_owner_user_idx",
+    "profiles_default_organization_idx",
+    "organization_members_user_idx",
+    "organization_members_invited_by_idx",
+    "subscriptions_plan_idx",
+  ]) {
+    assert.match(migration, new RegExp(index));
+  }
+  assert.match(
+    migration,
+    /create policy legacy_user_plans_select_own[\s\S]*user_id = \(select auth\.uid\(\)\)/,
+  );
+  assert.match(migration, /revoke all on table public\.user_plans from anon/);
+});
+
 test("library queries stay user-scoped and use bounded cursor pagination", async () => {
   const client = await readFile(
     new URL("../src/lib/supabase.ts", import.meta.url),
