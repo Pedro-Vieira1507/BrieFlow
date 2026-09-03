@@ -55,25 +55,39 @@ test("database migration enforces personal library RLS and private media", async
 
   assert.match(
     migration,
-    /create policy assets_select_own[\s\S]*user_id = auth\.uid\(\)/,
+    /create policy assets_select_own[\s\S]*user_id = \(select auth\.uid\(\)\)/,
   );
   assert.match(
     migration,
-    /create policy assets_delete_own[\s\S]*user_id = auth\.uid\(\)/,
+    /create policy assets_delete_own[\s\S]*user_id = \(select auth\.uid\(\)\)/,
   );
   assert.match(migration, /'campaign-assets', 'campaign-assets', false/);
   assert.match(
     migration,
-    /storage\.foldername\(name\)\)\[1\] = auth\.uid\(\)::text/,
+    /storage\.foldername\(name\)\)\[1\] = \(select auth\.uid\(\)\)::text/,
   );
   assert.match(migration, /campaign_assets_select_legacy_reference/);
-  assert.match(migration, /owner_id = auth\.uid\(\)::text/);
+  assert.match(migration, /owner_id = \(select auth\.uid\(\)\)::text/);
   assert.match(migration, /unique \(user_id, request_id, entry_type\)/);
   assert.match(migration, /false, 'duplicate_request'/);
   assert.match(migration, /false, 'membership_inactive'/);
   assert.match(migration, /claim_stripe_webhook/);
   assert.match(migration, /stripe_event_created bigint/);
   assert.match(migration, /organization_identity_immutable/);
+  assert.match(migration, /drop trigger if exists on_auth_user_created on auth\.users/);
+  assert.match(
+    migration,
+    /drop policy if exists "Permitir leitura pública 8vmd40_0" on storage\.objects/,
+  );
+  assert.match(
+    migration,
+    /revoke all on function public\.handle_new_user\(\) from public, anon, authenticated/,
+  );
+  assert.match(migration, /public\.deduct_user_credit\(integer\)/);
+  assert.match(
+    migration,
+    /revoke all on table public\.brand_knowledge from public, anon, authenticated/,
+  );
   assert.match(
     migration,
     /assets_user_created_id_idx[\s\S]*user_id, created_at desc, id desc/,
