@@ -38,6 +38,17 @@ test("uses the real provider error and keeps legacy failures recoverable", () =>
   );
 });
 
+test("discovery keeps typed AI errors and omits the empty UI placeholder", () => {
+  const source = readFileSync(
+    new URL("../src/lib/ollama.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(source, /const compactHistory = history\.filter/);
+  assert.match(source, /message\.content\.trim\(\)\.length > 0/);
+  assert.match(source, /if \(error instanceof AiClientError\) throw error/);
+});
+
 test("failed legacy asset inherits the brand from the same campaign", () => {
   assert.equal(
     getCampaignBrandName([

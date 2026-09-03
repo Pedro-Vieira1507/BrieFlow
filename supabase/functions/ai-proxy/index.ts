@@ -252,10 +252,10 @@ function buildAttempts(options: {
       options.stage === "discovery"
         ? [env("GROQ_DISCOVERY_MODEL")]
         : [
-            env("GROQ_PRIMARY_MODEL"),
-            env("GROQ_FIRST_FALLBACK_MODEL"),
-            env("GROQ_SECOND_FALLBACK_MODEL"),
-          ];
+          env("GROQ_PRIMARY_MODEL"),
+          env("GROQ_FIRST_FALLBACK_MODEL"),
+          env("GROQ_SECOND_FALLBACK_MODEL"),
+        ];
     for (const model of [
       ...new Set(modelNames.filter((value): value is string => Boolean(value))),
     ]) {
@@ -389,10 +389,20 @@ Deno.serve(async (req: Request) => {
         },
       },
     );
-    if (authorizationError) throw new Error("authorization_failed");
+
+    // 👇 BLOCO ADICIONADO PARA DEVOLVER O ERRO BRUTO DO BANCO
+    if (authorizationError) {
+      console.error("ERRO FATAL NA RPC:", JSON.stringify(authorizationError));
+      return json(req, 500, { 
+        error: "db_error", 
+        detalhe_banco: authorizationError 
+      });
+    }
+
     const authorization = (
       Array.isArray(data) ? data[0] : data
     ) as AuthorizationResult | null;
+    
     if (!authorization?.ok) {
       const code = authorization?.code ?? "authorization_failed";
       const status =
@@ -403,10 +413,10 @@ Deno.serve(async (req: Request) => {
             : code === "duplicate_request"
               ? 409
               : [
-                    "format_not_allowed",
-                    "subscription_inactive",
-                    "membership_inactive",
-                  ].includes(code)
+                "format_not_allowed",
+                "subscription_inactive",
+                "membership_inactive",
+              ].includes(code)
                 ? 403
                 : 500;
       return json(req, status, {
@@ -449,6 +459,7 @@ Deno.serve(async (req: Request) => {
       maxTokens,
       jsonMode,
     });
+    
     if (attempts.length === 0) throw new Error("no_provider_configured");
 
     let result: ProviderResult | null = null;

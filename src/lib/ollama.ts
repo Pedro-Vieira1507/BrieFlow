@@ -23,7 +23,11 @@ import type { AiAssetType, AiGenerationMeta, AiIntent } from "@/types/ai";
 import { parseStructuredJson } from "@/lib/structuredOutput";
 import { extractMaterialBriefing } from "@/lib/marketingPromptCore";
 import { isMaterialType } from "@/types/brief";
-import { requestAiCompletion, type AiProviderName } from "@/lib/aiClient";
+import {
+  AiClientError,
+  requestAiCompletion,
+  type AiProviderName,
+} from "@/lib/aiClient";
 
 // ============================================================
 // PROMPTS
@@ -418,7 +422,14 @@ export async function sendToOllama(
       ? EXECUTION_AGENT_PROMPT(brandContext, currentPlan, targetAsset, options)
       : DISCOVERY_AGENT_PROMPT(currentPlan, brandContext);
 
-  const recentUserBriefing = history
+  // The UI creates an empty assistant placeholder while the request is in
+  // flight. Never send that rendering detail to the provider: older gateways
+  // reject empty messages and some models interpret it as an extra turn.
+  const compactHistory = history.filter(
+    (message) => message.content.trim().length > 0,
+  );
+
+  const recentUserBriefing = compactHistory
     .filter((m) => m.role === "user")
     .slice(-3)
     .map((m) => m.content)
@@ -440,7 +451,7 @@ export async function sendToOllama(
         ]
       : [
           { role: "system" as const, content: systemPrompt },
-          ...history.slice(-6).map((m) => ({
+          ...compactHistory.slice(-6).map((m) => ({
             role: m.role as "user" | "assistant",
             content: m.content,
           })),
@@ -520,9 +531,12 @@ export async function sendToOllama(
       },
     };
   } catch (error: unknown) {
-    if ((error as { name?: string }).name === "AbortError")
-      throw new Error("Tempo excedido.");
-    throw new Error(`Falha no pipeline de IA: ${String(error)}`);
+    if (error instanceof AiClientError) throw error;
+    if ((error as { name?: string }).name === "AbortError") {
+      throw new AiClientError("Tempo excedido.", "TIMEOUT", error);
+    }
+    if (error instanceof Error) throw error;
+    throw new Error("Falha inesperada no pipeline de IA.");
   } finally {
     clearTimeout(timeoutId);
   }

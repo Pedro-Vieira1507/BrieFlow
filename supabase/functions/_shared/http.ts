@@ -49,7 +49,7 @@ export function responseHeaders(req: Request): HeadersInit {
     ...(origin ? { "Access-Control-Allow-Origin": origin } : {}),
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     "Access-Control-Allow-Headers":
-      "authorization, apikey, content-type, x-client-version, x-request-id",
+      "authorization, apikey, content-type, x-client-info, x-client-version, x-request-id",
     "Access-Control-Max-Age": "86400",
     "Content-Type": "application/json; charset=utf-8",
     "Cache-Control": "no-store",
