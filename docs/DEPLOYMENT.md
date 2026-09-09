@@ -1,5 +1,16 @@
 # Implantação segura
 
+## 0. Pré-requisitos comerciais
+
+Não abra cadastro pago enquanto algum destes itens estiver pendente:
+
+- use ao menos o plano Supabase Pro para evitar pausa por inatividade, ter uma política de backup adequada e habilitar a proteção contra senhas vazadas;
+- configure SMTP próprio, confirmação de e-mail e autenticação multifator para os operadores;
+- escolha um único projeto Vercel como origem do domínio oficial e remova ou desconecte deploys duplicados depois de confirmar qual projeto está ativo;
+- publique Termos de Uso, Política de Privacidade, política de cancelamento/reembolso e um canal de suporte com dados reais da empresa, revisados por responsável jurídico;
+- configure alertas de erro, disponibilidade, latência e falhas de webhook sem registrar campanhas, JWTs ou segredos;
+- execute teste de carga em staging com limites e volume próximos do lançamento, nunca contra a base principal sem janela aprovada.
+
 ## 1. Preparar o Supabase
 
 Teste primeiro em um projeto de staging com cópia anonimizada do schema. Faça backup e aplique:
