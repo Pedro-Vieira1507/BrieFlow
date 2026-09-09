@@ -5,6 +5,7 @@ import {
   buildSocialExportText,
   calculatePreviewScale,
   escapeHtml,
+  getRasterExportSize,
   sanitizeFilenamePart,
 } from "../src/lib/export-utils.ts";
 
@@ -35,6 +36,33 @@ test("sanitizeFilenamePart creates a safe, stable filename segment", () => {
     "cafe-verao-2026",
   );
   assert.equal(sanitizeFilenamePart("///", "asset"), "asset");
+});
+
+test("raster exports use exact production dimensions", () => {
+  assert.deepEqual(
+    getRasterExportSize({
+      material: "social",
+      device: "desktop",
+      format: "png",
+    }),
+    { width: 1080, height: 1350 },
+  );
+  assert.deepEqual(
+    getRasterExportSize({
+      material: "banner",
+      device: "mobile",
+      format: "png",
+    }),
+    { width: 1080, height: 1920 },
+  );
+  assert.deepEqual(
+    getRasterExportSize({
+      material: "banner",
+      device: "desktop",
+      format: "jpg",
+    }),
+    { width: 1200, height: 600 },
+  );
 });
 
 test("buildSocialExportText merges and deduplicates hashtags", () => {

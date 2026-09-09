@@ -70,6 +70,21 @@ test("saved campaigns recover their brand from the approved discovery plan", () 
   );
 });
 
+test("single-format generation distinguishes a new piece from a retry", () => {
+  const source = readFileSync(
+    new URL("../src/hooks/useBriefflowAgent.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(source, /isRegeneration = false/);
+  assert.match(source, /isRegeneration[\s\S]*Vou regenerar apenas/);
+  assert.match(source, /: `Ok! Vou gerar o/);
+  assert.match(
+    source,
+    /currentChatHistory\(\),\s*channel,\s*\["all"\],\s*"omniroute",\s*true/,
+  );
+});
+
 test("retry regenerates only the failed channel without another discovery call", () => {
   const source = readFileSync(
     new URL("../src/hooks/useBriefflowAgent.ts", import.meta.url),

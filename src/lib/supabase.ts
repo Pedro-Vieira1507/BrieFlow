@@ -154,6 +154,7 @@ function normalizeAssetName(name: string, state: BuilderState): string {
 export async function saveAssetToLibrary(
   name: string,
   state: BuilderState,
+  existingAssetId?: string | null,
 ): Promise<SavedLibraryAsset> {
   if (!supabase) throw new Error("Supabase não configurado.");
   const user = await requireUser();
@@ -165,17 +166,22 @@ export async function saveAssetToLibrary(
     );
   }
 
-  const { data, error } = await supabase
-    .from("assets")
-    .insert({
-      user_id: user.id,
-      name: normalizeAssetName(name, state),
-      type: state.type,
-      content: state,
-      status: "draft",
-    })
-    .select()
-    .single();
+  const payload = {
+    name: normalizeAssetName(name, state),
+    type: state.type,
+    content: state,
+    status: "draft",
+  };
+
+  const query = existingAssetId
+    ? supabase
+        .from("assets")
+        .update(payload)
+        .eq("id", existingAssetId)
+        .eq("user_id", user.id)
+    : supabase.from("assets").insert({ user_id: user.id, ...payload });
+
+  const { data, error } = await query.select().single();
 
   if (error) {
     if (error.message.includes("asset_limit_reached")) {

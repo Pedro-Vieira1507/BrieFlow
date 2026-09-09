@@ -115,7 +115,7 @@ export const CONTENT_FORMATS: Record<MaterialType, ContentFormatDefinition> = {
 
 export interface PlanDefinition {
   label: string;
-  monthlyCredits: number;
+  dailyCredits: number;
   maxMembers: number;
   maxSavedAssets: number;
   allowedFormats: readonly MaterialType[];
@@ -138,35 +138,35 @@ const PRO_FORMATS: readonly MaterialType[] = [
 export const PLAN_CATALOG: Record<PlanId, PlanDefinition> = {
   free: {
     label: "Gratuito",
-    monthlyCredits: 20,
+    dailyCredits: 20,
     maxMembers: 1,
     maxSavedAssets: 20,
     allowedFormats: FREE_FORMATS,
   },
   basic: {
     label: "Básico",
-    monthlyCredits: 150,
+    dailyCredits: 150,
     maxMembers: 1,
     maxSavedAssets: 250,
     allowedFormats: BASIC_FORMATS,
   },
   pro: {
     label: "Pro",
-    monthlyCredits: 600,
+    dailyCredits: 600,
     maxMembers: 5,
     maxSavedAssets: 2_000,
     allowedFormats: PRO_FORMATS,
   },
   agency: {
     label: "Agência",
-    monthlyCredits: 2_500,
+    dailyCredits: 2_500,
     maxMembers: 25,
     maxSavedAssets: 10_000,
     allowedFormats: MATERIAL_TYPES,
   },
   enterprise: {
     label: "Enterprise",
-    monthlyCredits: 10_000,
+    dailyCredits: 10_000,
     maxMembers: 250,
     maxSavedAssets: 100_000,
     allowedFormats: MATERIAL_TYPES,

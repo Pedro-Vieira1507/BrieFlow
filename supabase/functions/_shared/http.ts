@@ -46,13 +46,20 @@ const configuredOrigins = (() => {
 function allowedOrigin(req: Request): string | null {
   const origin = req.headers.get("Origin");
   if (!origin) return null;
-  if (configuredOrigins.has(origin)) return origin;
+  let parsedOrigin: URL;
+  try {
+    parsedOrigin = new URL(origin);
+  } catch {
+    return null;
+  }
+  if (configuredOrigins.has(parsedOrigin.origin)) return parsedOrigin.origin;
   if (
     configuredOrigins.size === 0 &&
     Deno.env.get("ENVIRONMENT") !== "production"
   ) {
-    if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin))
-      return origin;
+    if (/^(localhost|127\.0\.0\.1)$/i.test(parsedOrigin.hostname)) {
+      return parsedOrigin.origin;
+    }
   }
   return null;
 }

@@ -162,6 +162,7 @@ export function useBriefflowAgent() {
       only?: CampaignChannel,
       targetKeys: string[] = ["all"],
       provider: "ollama" | "omniroute" = "omniroute",
+      isRegeneration = false,
     ) => {
       const plan = discoveryPlanRef.current ?? builderRef.current.discoveryPlan;
 
@@ -226,7 +227,9 @@ export function useBriefflowAgent() {
         id: assistantId,
         role: "assistant",
         content: only
-          ? `Ok! Vou regerar apenas o **${channelLabel(only)}** – as outras peças permanecem como estão.`
+          ? isRegeneration
+            ? `Ok! Vou regenerar apenas o **${channelLabel(only)}** – as outras peças permanecem como estão.`
+            : `Ok! Vou gerar o **${channelLabel(only)}**.`
           : `Mão na massa! Gerando ${channels.length} peças sequencialmente.`,
       });
 
@@ -617,10 +620,14 @@ Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo terri
       updateMessage(assistantId, {
         content: hasErrors
           ? only
-            ? `Não consegui regerar o ${channelLabel(only)} agora. Tente novamente.`
+            ? isRegeneration
+              ? `Não consegui regenerar o ${channelLabel(only)} agora. Tente novamente.`
+              : `Não consegui gerar o ${channelLabel(only)} agora. Tente novamente.`
             : "Processo concluído, mas uma ou mais peças falharam. Você pode pedir para regenerar."
           : only
-            ? `${channelLabel(only)} atualizado com sucesso.`
+            ? isRegeneration
+              ? `${channelLabel(only)} atualizado com sucesso.`
+              : `${channelLabel(only)} criado com sucesso.`
             : "Campanha finalizada! Navegue pelas abas ao lado.",
       });
 
@@ -943,6 +950,7 @@ Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo terri
         channel,
         ["all"],
         "omniroute",
+        true,
       );
     },
     [currentChatHistory, generateCampaignSafely],

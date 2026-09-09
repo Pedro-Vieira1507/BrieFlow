@@ -40,6 +40,8 @@ export function PageBuilder({
     generatingLabel,
     patchBuilder,
     setAuthOpen,
+    activeLibraryAssetId,
+    setActiveLibraryAssetId,
     setBuilder,
   } = useBriefflowStore();
 
@@ -77,11 +79,18 @@ export function PageBuilder({
     const toastId = toast.loading("Salvando campanha na biblioteca...");
     try {
       const brandName = getBuilderCampaignBrandName(builder);
-      await saveAssetToLibrary(
+      const savedAsset = await saveAssetToLibrary(
         brandName ? `Campanha ${brandName}` : "Campanha AI",
         builder,
+        activeLibraryAssetId,
       );
-      toast.success("Salvo na biblioteca com sucesso!", { id: toastId });
+      setActiveLibraryAssetId(savedAsset.id);
+      toast.success(
+        activeLibraryAssetId
+          ? "Campanha atualizada na biblioteca!"
+          : "Salvo na biblioteca com sucesso!",
+        { id: toastId },
+      );
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "Erro ao salvar a campanha",

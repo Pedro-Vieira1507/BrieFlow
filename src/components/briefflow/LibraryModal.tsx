@@ -41,7 +41,14 @@ import { getBuilderCampaignBrandName } from "@/lib/campaignGeneration";
 import type { BuilderState, CampaignAsset } from "@/types/builder";
 
 export function LibraryModal() {
-  const { libraryOpen, setLibraryOpen, setBuilder, user } = useBriefflowStore();
+  const {
+    activeLibraryAssetId,
+    libraryOpen,
+    setActiveLibraryAssetId,
+    setLibraryOpen,
+    setBuilder,
+    user,
+  } = useBriefflowStore();
   const [items, setItems] = useState<SavedLibraryAsset[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -143,6 +150,9 @@ export function LibraryModal() {
       const removedIndex = items.findIndex(
         (item) => item.id === pendingDelete.id,
       );
+      if (activeLibraryAssetId === pendingDelete.id) {
+        setActiveLibraryAssetId(null);
+      }
       const updated = items.filter((item) => item.id !== pendingDelete.id);
       setItems(updated);
       setSelectedIndex((current) => {
@@ -162,8 +172,9 @@ export function LibraryModal() {
     }
   };
 
-  const handleApplyToCanvas = (state: BuilderState) => {
-    setBuilder(state);
+  const handleApplyToCanvas = (item: SavedLibraryAsset) => {
+    setBuilder(item.content);
+    setActiveLibraryAssetId(item.id);
     toast.success("Campanha carregada no Canvas com sucesso!");
     setLibraryOpen(false);
   };
@@ -258,29 +269,35 @@ export function LibraryModal() {
                   return (
                     <div
                       key={item.id}
-                      onClick={() => setSelectedIndex(idx)}
-                      // UX: Efeito tátil de clique (active:scale-[0.98])
                       className={cn(
-                        "group relative flex min-w-[220px] cursor-pointer flex-col gap-1.5 rounded-xl border p-3 transition-all duration-200 active:scale-[0.98] md:min-w-0",
+                        "group relative flex min-w-[220px] flex-col gap-1.5 rounded-xl border p-3 transition-all duration-200 md:min-w-0",
                         isSelected
                           ? "bg-surface-3 border-brand shadow-md"
                           : "bg-surface-2/80 border-border-subtle hover:border-border-strong hover:bg-surface-3/50",
                       )}
                     >
-                      <div className="flex justify-between items-start">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedIndex(idx)}
+                        aria-current={isSelected ? "true" : undefined}
+                        aria-label={`Visualizar ${brand}, salva em ${dateStr}`}
+                        className="absolute inset-0 z-0 cursor-pointer rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                      />
+                      <div className="pointer-events-none relative z-10 flex items-start justify-between">
                         <span className="font-semibold text-xs text-fg-primary truncate max-w-[170px]">
                           {brand}
                         </span>
                         <button
+                          type="button"
                           onClick={(e) => requestDelete(item.id, brand, e)}
-                          className="rounded-md p-1 text-fg-muted opacity-100 transition-colors hover:bg-rose-500/10 hover:text-rose-400 md:opacity-0 md:group-hover:opacity-100 md:focus:opacity-100"
+                          className="pointer-events-auto relative z-20 rounded-md p-1 text-fg-muted opacity-100 transition-colors hover:bg-rose-500/10 hover:text-rose-400 md:opacity-0 md:group-hover:opacity-100 md:focus:opacity-100"
                           title="Excluir da biblioteca"
                           aria-label={`Excluir ${brand}`}
                         >
                           <Trash2 className="size-3.5" />
                         </button>
                       </div>
-                      <div className="flex items-center gap-1.5 text-[10px] text-fg-tertiary">
+                      <div className="pointer-events-none relative z-10 flex items-center gap-1.5 text-[10px] text-fg-tertiary">
                         <Calendar className="size-3" />
                         <span>{dateStr}</span>
                       </div>
@@ -324,7 +341,7 @@ export function LibraryModal() {
                       </div>
                       <Button
                         size="sm"
-                        onClick={() => handleApplyToCanvas(selectedState)}
+                        onClick={() => handleApplyToCanvas(selectedItem)}
                         className="w-full rounded-xl bg-brand text-xs font-semibold text-brand-fg shadow-[var(--shadow-brand)] transition-all duration-200 hover:brightness-110 active:scale-[0.98] sm:w-auto"
                       >
                         Carregar no Canvas{" "}

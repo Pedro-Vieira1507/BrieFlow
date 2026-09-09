@@ -250,12 +250,15 @@ export function SocialPreview({
                 </span>
               </div>
             </div>
-            <button className="p-2 rounded-full transition-colors hover:bg-black/10">
+            <span
+              aria-hidden="true"
+              className="p-2 rounded-full transition-colors"
+            >
               <MoreHorizontal
                 className="size-5"
                 style={{ color: textColor, opacity: 0.6 }}
               />
-            </button>
+            </span>
           </div>
         )}
 
@@ -421,6 +424,10 @@ export function SocialPreview({
                 <button
                   type="button"
                   onClick={() => setLiked((v) => !v)}
+                  aria-label={
+                    liked ? "Remover curtida da prévia" : "Curtir prévia"
+                  }
+                  aria-pressed={liked}
                   className="p-2 rounded-full transition-all active:scale-75 hover:bg-black/10"
                 >
                   <Heart
@@ -432,28 +439,26 @@ export function SocialPreview({
                     strokeWidth={liked ? 1 : 2}
                   />
                 </button>
-                <button
-                  type="button"
-                  className="p-2 rounded-full transition-all active:scale-95 hover:bg-black/10"
-                >
+                <span aria-hidden="true" className="p-2 rounded-full">
                   <MessageCircle
                     className="size-6"
                     style={{ color: textColor }}
                   />
-                </button>
-                <button
-                  type="button"
-                  className="p-2 rounded-full transition-all active:scale-95 hover:bg-black/10"
-                >
+                </span>
+                <span aria-hidden="true" className="p-2 rounded-full">
                   <Send
                     className="size-6 -rotate-12 -mt-1 ml-0.5"
                     style={{ color: textColor }}
                   />
-                </button>
+                </span>
               </div>
               <button
                 type="button"
                 onClick={() => setSaved((v) => !v)}
+                aria-label={
+                  saved ? "Remover dos salvos da prévia" : "Salvar prévia"
+                }
+                aria-pressed={saved}
                 className="p-2 rounded-full transition-all active:scale-75 hover:bg-black/10"
               >
                 <Bookmark

@@ -31,6 +31,7 @@ import {
   downloadBlob,
   escapeHtml,
   finishExport,
+  getRasterExportSize,
   sanitizeFilenamePart,
   serializeElementWithInlineStyles,
   triggerDownload,
@@ -316,24 +317,20 @@ export function DesignExporter({
       );
       const currentState = activeTab === "banner" ? bannerState : socialState;
       const brandSlug = sanitizeFilenamePart(currentState?.brandName);
-      const targetWidth =
-        activeTab === "social"
-          ? 1080
-          : device === "mobile"
-            ? format === "png"
-              ? 1080
-              : 540
-            : format === "png"
-              ? 2400
-              : 1200;
-      const pixelRatio = targetWidth / width;
+      const outputSize = getRasterExportSize({
+        material: activeTab,
+        device,
+        format,
+      });
       const backgroundColor =
         currentState?.boxColor || (format === "jpg" ? "#ffffff" : undefined);
 
       const options: NonNullable<Parameters<typeof toPng>[1]> = {
         width,
         height,
-        pixelRatio,
+        canvasWidth: outputSize.width,
+        canvasHeight: outputSize.height,
+        pixelRatio: 1,
         backgroundColor,
         cacheBust: true,
         includeQueryParams: true,
@@ -354,9 +351,7 @@ export function DesignExporter({
         format === "png"
           ? await toPng(exportNode, options)
           : await toJpeg(exportNode, options);
-      const outputWidth = Math.round(width * pixelRatio);
-      const outputHeight = Math.round(height * pixelRatio);
-      const filename = `${activeTab}_${activeTab === "banner" ? device : "4x5"}_${brandSlug}_${outputWidth}x${outputHeight}.${format}`;
+      const filename = `${activeTab}_${activeTab === "banner" ? device : "4x5"}_${brandSlug}_${outputSize.width}x${outputSize.height}.${format}`;
 
       triggerDownload(dataUrl, filename);
       toast.success("Arte exportada com sucesso!", { id: toastId });

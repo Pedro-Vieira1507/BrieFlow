@@ -36,6 +36,7 @@ type SubscriptionRow = {
   status: string;
   credits_monthly: number;
   credits_remaining: number;
+  last_credit_reset_on: string;
   current_period_start: string;
   current_period_end: string;
   stripe_customer_id: string | null;

@@ -38,10 +38,13 @@ O `config.toml` exige JWT nas quatro funções chamadas pelo app. Somente o webh
 ## 4. Configurar Stripe
 
 - crie preços recorrentes para Básico, Pro e Agência;
+- em produção, use uma chave `sk_live_` ou `rk_live_`; chaves de teste são recusadas quando `ENVIRONMENT=production`;
 - grave os IDs em `STRIPE_PRICE_BASIC`, `STRIPE_PRICE_PRO` e `STRIPE_PRICE_AGENCY`;
 - aponte o webhook para `/functions/v1/stripe-webhook`;
 - assine `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.paid` e `invoice.payment_failed`;
 - configure `STRIPE_WEBHOOK_SECRET` com o segredo do endpoint.
+
+O endpoint autenticado `billing` consulta os Prices no Stripe e só libera um plano quando o Price está ativo, é recorrente, tem valor positivo e pertence ao mesmo modo (teste ou produção). A interface usa esse retorno como fonte do preço exibido. Se chave, webhook, `APP_URL` ou Price estiverem ausentes/inválidos, o checkout fica desabilitado sem criar Customer e sem iniciar cobrança.
 
 Faça um ciclo completo em modo teste: checkout, webhook, alteração via portal, falha de pagamento e cancelamento.
 
@@ -59,13 +62,27 @@ No Supabase Auth:
 
 Configure apenas `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY`. Execute `npm run validate` e então publique o build.
 
+Promova o artefato Vercel de `npm run build`; nunca trate `vite dev` exposto por túnel como produção. Rode `npm run preview` depois do build para validar localmente o mesmo handler e os mesmos arquivos estáticos. Após a publicação, confirme que a interface mostra “créditos diários” e que a resposta HTML contém CSP, `X-Content-Type-Options`, proteção contra framing e HSTS. Essa verificação detecta imediatamente um processo antigo ou uma branch incorreta sendo servida.
+
+Mantenha `APP_URL` e cada item de `ALLOWED_ORIGINS` como origens exatas. A Function normaliza barras finais, mas rejeita curingas. Em homologação com um novo túnel, substitua somente a origem temporária e preserve a origem oficial de produção.
+
 ## 7. Retenção e operação
 
-Agende uma rotina diária, pelo Supabase Cron ou pelo orquestrador da infraestrutura, para remover janelas de rate limit com mais de dois dias e cache expirado. Defina com jurídico/compliance a retenção de `ai_usage_log`, `credit_ledger` e eventos Stripe antes de automatizar a exclusão desses registros auditáveis.
+Os jobs `brieflow-reset-daily-credits` e `brieflow-clean-ephemeral-data`, instalados pelas migrações, devem permanecer ativos no Supabase Cron. O primeiro usa `0 3 * * *` (00:00 em `America/Sao_Paulo`); o segundo roda no minuto 17 de cada hora e remove, em lotes limitados, janelas de rate limit com mais de dois dias e caches de scraping expirados. Monitore `cron.job_run_details`; a leitura do plano e a autorização de geração fornecem recuperação automática caso o reset seja atrasado.
+
+Defina com jurídico/compliance a retenção de `ai_usage_log`, `credit_ledger`, histórico do Cron e eventos Stripe antes de automatizar a exclusão desses registros auditáveis.
 
 Monitore taxa de erro e p95 de latência por função, falhas por provedor/modelo, saldo e estornos, `stripe_webhook_events.status = 'failed'`, crescimento do Storage e rejeições de rate limit. Os logs não devem receber prompts, conteúdo de campanhas, JWTs ou segredos.
 
 ## Verificações pós-deploy
+
+Rode primeiro o gate público automatizado:
+
+```bash
+npm run check:launch -- https://app.example.com YOUR_PROJECT_REF
+```
+
+Ele exige HTTPS e os headers do frontend, valida CORS positivo e negativo nas quatro funções privadas e confirma que o webhook está configurado (uma assinatura ausente deve receber 401, nunca 503).
 
 - dois usuários não conseguem listar, ler, alterar ou excluir assets um do outro;
 - URLs do bucket expiram e os caminhos começam pelo UUID correto;
@@ -75,7 +92,12 @@ Monitore taxa de erro e p95 de latência por função, falhas por provedor/model
 - falha de todos os provedores estorna o saldo;
 - URLs privadas/localhost são rejeitadas pelo scraper;
 - CORS rejeita uma origem fora da lista;
-- webhook com assinatura inválida retorna 401.
+- webhook sem configuração retorna 503 e, após configurar o segredo, assinatura ausente ou inválida retorna 401;
+- a tela de planos exibe exatamente os valores recorrentes cadastrados no Stripe e desabilita qualquer Price inativo, avulso, zerado ou do modo incorreto;
+- salvar duas vezes a mesma campanha atualiza o mesmo ID e não aumenta a contagem da Biblioteca;
+- exportação Social gera PNG exatamente em 1080×1350 e legenda TXT em UTF-8;
+- o Advisor do Supabase não aponta extensão no schema `public` nem helpers internos expostos como RPC;
+- `anon` não possui privilégios em tabelas públicas e `authenticated` possui DML direto somente em `assets`.
 
 ## Rollback
 

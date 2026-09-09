@@ -40,6 +40,50 @@ const SELLABLE_PLANS = [
   "agency",
 ] as const satisfies readonly PlanId[];
 
+type SellablePlan = (typeof SELLABLE_PLANS)[number];
+
+interface BillingAvailability {
+  portal_available: boolean;
+  checkout_plans: Record<SellablePlan, boolean>;
+  prices: Record<SellablePlan, RecurringPrice | null>;
+}
+
+interface RecurringPrice {
+  currency: string;
+  interval: "day" | "week" | "month" | "year";
+  interval_count: number;
+  unit_amount: number;
+}
+
+const BILLING_UNAVAILABLE: BillingAvailability = {
+  portal_available: false,
+  checkout_plans: { basic: false, pro: false, agency: false },
+  prices: { basic: null, pro: null, agency: null },
+};
+
+function formatRecurringPrice(price: RecurringPrice): {
+  amount: string;
+  interval: string;
+} {
+  const amount = new Intl.NumberFormat("pt-BR", {
+    style: "currency",
+    currency: price.currency.toUpperCase(),
+  }).format(price.unit_amount / 100);
+  const intervalName = {
+    day: { singular: "dia", plural: "dias" },
+    week: { singular: "semana", plural: "semanas" },
+    month: { singular: "mês", plural: "meses" },
+    year: { singular: "ano", plural: "anos" },
+  }[price.interval];
+  return {
+    amount,
+    interval:
+      price.interval_count === 1
+        ? `por ${intervalName.singular}`
+        : `a cada ${price.interval_count} ${intervalName.plural}`,
+  };
+}
+
 const PLAN_COPY: Record<
   (typeof SELLABLE_PLANS)[number],
   { description: string; highlights: string[] }
@@ -66,6 +110,8 @@ export function ProfileSettingsModal({ open, onOpenChange }: Props) {
   const [framework, setFramework] = useState(brandContext.framework);
   const [isUpgrading, setIsUpgrading] = useState(false);
   const [billingAction, setBillingAction] = useState<string | null>(null);
+  const [billingAvailability, setBillingAvailability] =
+    useState<BillingAvailability | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -75,6 +121,29 @@ export function ProfileSettingsModal({ open, onOpenChange }: Props) {
     setIsUpgrading(false);
     setBillingAction(null);
   }, [open, brandContext]);
+
+  useEffect(() => {
+    if (!open || !user) {
+      setBillingAvailability(null);
+      return;
+    }
+
+    const controller = new AbortController();
+    setBillingAvailability(null);
+    void invokeEdgeFunction<BillingAvailability>(
+      "billing",
+      { action: "status" },
+      controller.signal,
+    )
+      .then((status) => setBillingAvailability(status))
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === "AbortError")
+          return;
+        setBillingAvailability(BILLING_UNAVAILABLE);
+      });
+
+    return () => controller.abort();
+  }, [open, user]);
 
   const handleSave = () => {
     setBrandContext({ ...brandContext, persona, tone, framework });
@@ -210,11 +279,11 @@ export function ProfileSettingsModal({ open, onOpenChange }: Props) {
 
                 <div className="flex items-end justify-between">
                   <span className="text-sm text-fg-secondary">
-                    Créditos mensais
+                    Créditos diários
                   </span>
                   <strong className="text-lg">
                     {plan
-                      ? `${plan.creditsRemaining} / ${plan.creditsMonthly}`
+                      ? `${plan.creditsRemaining} / ${plan.creditsDaily}`
                       : "0 / 0"}
                   </strong>
                 </div>
@@ -244,7 +313,10 @@ export function ProfileSettingsModal({ open, onOpenChange }: Props) {
                 {plan && plan.plan !== "free" ? (
                   <Button
                     variant="outline"
-                    disabled={billingAction === "portal:current"}
+                    disabled={
+                      !billingAvailability?.portal_available ||
+                      billingAction === "portal:current"
+                    }
                     onClick={() => void openBilling("portal")}
                     className="h-11 rounded-xl border-border-strong bg-surface-2"
                   >
@@ -273,7 +345,13 @@ export function ProfileSettingsModal({ open, onOpenChange }: Props) {
                   Escolha seu plano
                 </h3>
                 <p className="text-sm text-fg-tertiary">
-                  Preço e impostos são confirmados no checkout seguro.
+                  {billingAvailability === null
+                    ? "Verificando a disponibilidade do checkout seguro…"
+                    : Object.values(billingAvailability.checkout_plans).some(
+                          Boolean,
+                        )
+                      ? "Preço e impostos são confirmados no checkout seguro."
+                      : "Novas assinaturas estão temporariamente indisponíveis. Nenhuma cobrança será iniciada."}
                 </p>
               </div>
             </div>
@@ -284,6 +362,13 @@ export function ProfileSettingsModal({ open, onOpenChange }: Props) {
                 const copy = PLAN_COPY[planId];
                 const isCurrent = plan?.plan === planId;
                 const loading = billingAction === `checkout:${planId}`;
+                const checkoutAvailable = Boolean(
+                  billingAvailability?.checkout_plans[planId],
+                );
+                const recurringPrice = billingAvailability?.prices[planId];
+                const formattedPrice = recurringPrice
+                  ? formatRecurringPrice(recurringPrice)
+                  : null;
                 return (
                   <div
                     key={planId}
@@ -305,11 +390,17 @@ export function ProfileSettingsModal({ open, onOpenChange }: Props) {
                     <p className="min-h-10 text-xs leading-5 text-fg-tertiary">
                       {copy.description}
                     </p>
-                    <p className="mt-5 text-3xl font-black">
-                      {definition.monthlyCredits.toLocaleString("pt-BR")}
+                    <p className="mt-5 text-3xl font-black" aria-live="polite">
+                      {formattedPrice?.amount ?? "—"}
                     </p>
                     <p className="text-[10px] uppercase tracking-wider text-fg-muted">
-                      créditos por mês
+                      {formattedPrice?.interval ?? "preço indisponível"}
+                    </p>
+                    <p className="mt-4 text-2xl font-black">
+                      {definition.dailyCredits.toLocaleString("pt-BR")}
+                    </p>
+                    <p className="text-[10px] uppercase tracking-wider text-fg-muted">
+                      créditos por dia
                     </p>
                     <ul className="my-5 flex-1 space-y-3 text-xs leading-5 text-fg-secondary">
                       {copy.highlights.map((highlight) => (
@@ -320,7 +411,11 @@ export function ProfileSettingsModal({ open, onOpenChange }: Props) {
                       ))}
                     </ul>
                     <Button
-                      disabled={isCurrent || Boolean(billingAction)}
+                      disabled={
+                        isCurrent ||
+                        !checkoutAvailable ||
+                        Boolean(billingAction)
+                      }
                       onClick={() => void openBilling("checkout", planId)}
                       variant={planId === "pro" ? "default" : "outline"}
                       className="h-11 rounded-xl"
@@ -330,7 +425,9 @@ export function ProfileSettingsModal({ open, onOpenChange }: Props) {
                       )}
                       {isCurrent
                         ? "Plano atual"
-                        : `Escolher ${definition.label}`}
+                        : checkoutAvailable
+                          ? `Escolher ${definition.label}`
+                          : "Temporariamente indisponível"}
                     </Button>
                   </div>
                 );

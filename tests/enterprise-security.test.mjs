@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { isPrivateAddress } from "../supabase/functions/_shared/urls.ts";
+import { withSecurityHeaders } from "../src/lib/securityHeaders.ts";
 import { useBriefflowStore } from "../src/store/briefflow.ts";
 
 test("browser bundle delegates AI calls and contains no provider secret variables", async () => {
@@ -25,6 +26,45 @@ test("browser bundle delegates AI calls and contains no provider secret variable
   assert.match(supabaseClient, /"X-Client-Info": "brieflow-web\/3"/);
   assert.doesNotMatch(supabaseClient, /"X-Client-Version":/);
   assert.match(edgeHttp, /x-client-info, x-client-version/);
+  assert.match(edgeHttp, /\.map\(normalizeConfiguredOrigin\)/);
+  assert.match(edgeHttp, /return url\.origin/);
+  assert.doesNotMatch(edgeHttp, /trycloudflare|allowCloudflarePreviews/);
+});
+
+test("production responses include a minimum browser security baseline", async () => {
+  const secured = withSecurityHeaders(
+    new Request("https://brieflow.example/"),
+    new Response("ok", { status: 201, headers: { "X-Existing": "yes" } }),
+  );
+
+  assert.equal(secured.status, 201);
+  assert.equal(await secured.text(), "ok");
+  assert.equal(secured.headers.get("X-Existing"), "yes");
+  assert.equal(secured.headers.get("X-Content-Type-Options"), "nosniff");
+  assert.equal(secured.headers.get("X-Frame-Options"), "DENY");
+  assert.match(
+    secured.headers.get("Content-Security-Policy") ?? "",
+    /frame-ancestors 'none'/,
+  );
+  assert.equal(
+    secured.headers.get("Strict-Transport-Security"),
+    "max-age=31536000",
+  );
+
+  const local = withSecurityHeaders(
+    new Request("http://localhost:3000/"),
+    new Response("ok"),
+  );
+  assert.equal(local.headers.get("Strict-Transport-Security"), null);
+
+  const server = await readFile(
+    new URL("../src/server.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    server,
+    /withSecurityHeaders\([\s\S]*normalizeCatastrophicSsrResponse/,
+  );
 });
 
 test("AI proxy authorizes atomically, falls back server-side and refunds failures", async () => {
@@ -47,7 +87,7 @@ test("AI proxy authorizes atomically, falls back server-side and refunds failure
 test("database migration enforces personal library RLS and private media", async () => {
   const migration = await readFile(
     new URL(
-      "../supabase/migrations/202609010001_enterprise_foundation.sql",
+      "../supabase/migrations/20260903110835_enterprise_foundation.sql",
       import.meta.url,
     ),
     "utf8",
@@ -122,6 +162,84 @@ test("tenant relations and legacy plan reads stay scalable", async () => {
   assert.match(migration, /revoke all on table public\.user_plans from anon/);
 });
 
+test("internal operational tables are unavailable through the Data API", async () => {
+  const migration = await readFile(
+    new URL(
+      "../supabase/migrations/20260908121114_internal_table_access_hardening.sql",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  for (const table of [
+    "brand_knowledge",
+    "rate_limit_windows",
+    "scrape_cache",
+    "stripe_webhook_events",
+  ]) {
+    assert.match(migration, new RegExp(`public\\.${table}`));
+  }
+  assert.match(migration, /from public, anon, authenticated/);
+});
+
+test("tenant helpers and browser grants follow least privilege", async () => {
+  const migration = await readFile(
+    new URL(
+      "../supabase/migrations/20260908171901_least_privilege_hardening.sql",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(
+    migration,
+    /private\.is_organization_member\(\s*p_organization_id uuid/,
+  );
+  assert.match(
+    migration,
+    /private\.is_organization_admin\(\s*p_organization_id uuid/,
+  );
+  assert.match(migration, /set search_path = ''/);
+  assert.match(
+    migration,
+    /drop function public\.is_organization_member\(uuid, uuid\)/,
+  );
+  assert.match(
+    migration,
+    /alter function public\.get_user_plan\(\) set search_path = ''/,
+  );
+  assert.match(
+    migration,
+    /revoke all on table[\s\S]*public\.subscriptions[\s\S]*from public, anon, authenticated/,
+  );
+  assert.match(
+    migration,
+    /grant select, insert, update, delete on table public\.assets\s+to authenticated/,
+  );
+  assert.match(migration, /alter default privileges for role postgres/);
+  assert.match(migration, /alter extension vector set schema extensions/);
+});
+
+test("ephemeral operational data is cleaned in bounded batches", async () => {
+  const migration = await readFile(
+    new URL(
+      "../supabase/migrations/20260908123521_operational_data_retention.sql",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(migration, /private\.cleanup_ephemeral_data/);
+  assert.match(migration, /limit v_batch_size[\s\S]*for update skip locked/g);
+  assert.match(migration, /window_started_at < v_as_of - interval '2 days'/);
+  assert.match(migration, /expires_at < v_as_of/);
+  assert.match(migration, /brieflow-clean-ephemeral-data[\s\S]*17 \* \* \* \*/);
+  assert.doesNotMatch(
+    migration,
+    /delete from public\.(?:assets|credit_ledger|ai_usage_log|stripe_webhook_events)/,
+  );
+});
+
 test("library queries stay user-scoped and use bounded cursor pagination", async () => {
   const client = await readFile(
     new URL("../src/lib/supabase.ts", import.meta.url),
@@ -147,6 +265,7 @@ test("switching authenticated identities clears private in-memory content", () =
     messages: [{ id: "private", role: "user", content: "conteúdo privado" }],
     builder: { type: "banner", title: "Campanha privada" },
     uploadedImage: "data:image/png;base64,private",
+    activeLibraryAssetId: "saved-private-campaign",
   });
 
   useBriefflowStore.getState().setUser({ id: "second-user" });
@@ -155,8 +274,60 @@ test("switching authenticated identities clears private in-memory content", () =
   assert.deepEqual(state.messages, []);
   assert.deepEqual(state.builder, { type: "none" });
   assert.equal(state.uploadedImage, null);
+  assert.equal(state.activeLibraryAssetId, null);
 
   state.setUser(null);
+});
+
+test("saving a loaded campaign updates it instead of creating duplicates", async () => {
+  const [client, builder, library] = await Promise.all([
+    readFile(new URL("../src/lib/supabase.ts", import.meta.url), "utf8"),
+    readFile(
+      new URL("../src/components/briefflow/PageBuilder.tsx", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL("../src/components/briefflow/LibraryModal.tsx", import.meta.url),
+      "utf8",
+    ),
+  ]);
+
+  assert.match(client, /existingAssetId\?[\s\S]*\.update\(payload\)/);
+  assert.match(
+    client,
+    /\.eq\("id", existingAssetId\)[\s\S]*\.eq\("user_id", user\.id\)/,
+  );
+  assert.match(builder, /saveAssetToLibrary\([\s\S]*activeLibraryAssetId/);
+  assert.match(builder, /setActiveLibraryAssetId\(savedAsset\.id\)/);
+  assert.match(library, /setActiveLibraryAssetId\(item\.id\)/);
+});
+
+test("interactive previews and library cards expose accessible names", async () => {
+  const [social, library] = await Promise.all([
+    readFile(
+      new URL("../src/components/briefflow/SocialPreview.tsx", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL("../src/components/briefflow/LibraryModal.tsx", import.meta.url),
+      "utf8",
+    ),
+  ]);
+
+  assert.match(
+    social,
+    /aria-label=\{[\s\S]*?liked[\s\S]*?"Remover curtida da prévia"/,
+  );
+  assert.match(social, /aria-pressed=\{liked\}/);
+  assert.match(
+    social,
+    /aria-label=\{[\s\S]*?saved[\s\S]*?"Remover dos salvos da prévia"/,
+  );
+  assert.match(social, /aria-pressed=\{saved\}/);
+  assert.match(
+    library,
+    /aria-label=\{`Visualizar \$\{brand\}, salva em \$\{dateStr\}`\}/,
+  );
 });
 
 test("scraping validates DNS and every redirect before downloading", async () => {
@@ -202,7 +373,7 @@ test("billing webhooks are atomically claimed and ignore older signed events", a
     ),
     readFile(
       new URL(
-        "../supabase/migrations/202609010001_enterprise_foundation.sql",
+        "../supabase/migrations/20260903110835_enterprise_foundation.sql",
         import.meta.url,
       ),
       "utf8",
@@ -213,6 +384,8 @@ test("billing webhooks are atomically claimed and ignore older signed events", a
   assert.match(webhook, /sync_stripe_subscription/);
   assert.match(webhook, /eventCreated: event\.created/);
   assert.match(webhook, /json\(req, 409, \{ error: "event_processing" \}\)/);
+  assert.match(webhook, /code === "webhook_not_configured"/);
+  assert.match(webhook, /unavailable \? 503 : unauthorized \? 401 : 400/);
   assert.doesNotMatch(webhook, /stripe_webhook_events"\)\.upsert/);
   assert.match(migration, /s\.stripe_event_created <= p_event_created/);
   assert.match(migration, /s\.current_period_start < p_period_start/);
@@ -230,6 +403,39 @@ test("existing paid subscriptions change plans through the billing portal", asyn
     /subscription\.stripe_subscription_id[\s\S]*createPortalSession\(/,
   );
   assert.doesNotMatch(billing, /subscription_already_exists/);
+});
+
+test("commercial billing fails closed until live Stripe and webhooks are configured", async () => {
+  const [billing, settings] = await Promise.all([
+    readFile(
+      new URL("../supabase/functions/billing/index.ts", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL(
+        "../src/components/briefflow/ProfileSettingsModal.tsx",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+  ]);
+
+  assert.match(billing, /action\?: "checkout" \| "portal" \| "status"/);
+  assert.match(billing, /\["development", "test", "staging"\]\.includes/);
+  assert.match(billing, /\(nonProductionMode && \/\^\(\?:sk\|rk\)_test_\//);
+  assert.match(billing, /validWebhookSecret/);
+  assert.match(billing, /checkoutFoundation &&/);
+  assert.match(billing, /verifiedBillingAvailability/);
+  assert.match(billing, /price\.type === "recurring"/);
+  assert.match(billing, /price\.livemode === expectsLivePrices/);
+  assert.match(billing, /verifiedBillingAvailability\(\)\)\.checkout_plans/);
+  assert.match(settings, /action: "status"/);
+  assert.match(settings, /!checkoutAvailable/);
+  assert.match(settings, /formatRecurringPrice/);
+  assert.match(
+    settings,
+    /Novas assinaturas estão temporariamente indisponíveis/,
+  );
 });
 
 test("authentication submit reads autofilled values from the form", async () => {
@@ -261,4 +467,38 @@ test("development tunnels keep bounded host validation and edge env files privat
   assert.doesNotMatch(edgeEnv, /YOUR_SUPABASE_ANON_KEY/);
   assert.match(edgeHttp, /\.map\(normalizeConfiguredOrigin\)/);
   assert.match(edgeHttp, /return url\.origin/);
+});
+
+test("production builds and previews use the Vercel artifact", async () => {
+  const [viteConfig, packageJson, gitignore, eslintConfig] = await Promise.all([
+    readFile(new URL("../vite.config.ts", import.meta.url), "utf8"),
+    readFile(new URL("../package.json", import.meta.url), "utf8"),
+    readFile(new URL("../.gitignore", import.meta.url), "utf8"),
+    readFile(new URL("../eslint.config.mjs", import.meta.url), "utf8"),
+  ]);
+  const pkg = JSON.parse(packageJson);
+
+  assert.match(viteConfig, /nitro:\s*\{ preset: "vercel" \}/);
+  assert.match(pkg.scripts.preview, /^srvx serve /);
+  assert.match(
+    pkg.scripts.preview,
+    /\.vercel\/output\/functions\/__server\.func\/index\.mjs/,
+  );
+  assert.match(pkg.scripts.preview, /--static=\.\.\/\.\.\/static/);
+  assert.equal(pkg.devDependencies.srvx, "^0.11.22");
+  assert.match(gitignore, /^\.vercel\/$/m);
+  assert.match(eslintConfig, /"\.vercel\/\*\*"/);
+});
+
+test("the launch gate checks headers, CORS and Stripe webhook readiness", async () => {
+  const [manifest, launchCheck] = await Promise.all([
+    readFile(new URL("../package.json", import.meta.url), "utf8"),
+    readFile(new URL("../scripts/check-launch.mjs", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(manifest, /"check:launch": "node scripts\/check-launch\.mjs"/);
+  assert.match(launchCheck, /content-security-policy/);
+  assert.match(launchCheck, /CORS rejeita origem externa/);
+  assert.match(launchCheck, /STRIPE_WEBHOOK_SECRET ausente/);
+  assert.match(launchCheck, /response\.status === 401/);
 });

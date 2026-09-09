@@ -7,6 +7,30 @@ export interface SocialExportContent {
   hashtags?: unknown;
 }
 
+export type RasterExportMaterial = "banner" | "social";
+export type RasterExportDevice = "desktop" | "mobile";
+export type RasterExportFormat = "png" | "jpg";
+
+export function getRasterExportSize({
+  material,
+  device,
+  format,
+}: {
+  material: RasterExportMaterial;
+  device: RasterExportDevice;
+  format: RasterExportFormat;
+}): { width: number; height: number } {
+  if (material === "social") return { width: 1080, height: 1350 };
+  if (device === "mobile") {
+    return format === "png"
+      ? { width: 1080, height: 1920 }
+      : { width: 540, height: 960 };
+  }
+  return format === "png"
+    ? { width: 2400, height: 1200 }
+    : { width: 1200, height: 600 };
+}
+
 export function sanitizeFilenamePart(
   value: unknown,
   fallback = "marca",

@@ -29,6 +29,12 @@ npm run validate
 npm run security:audit
 ```
 
+Antes de promover produção, rode também o gate público descrito em [implantação](docs/DEPLOYMENT.md):
+
+```bash
+npm run check:launch -- https://app.example.com YOUR_PROJECT_REF
+```
+
 ## Ordem obrigatória de implantação
 
 1. aplicar a migração em `supabase/migrations`;

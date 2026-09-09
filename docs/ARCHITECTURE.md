@@ -21,6 +21,8 @@ flowchart TD
 - `subscriptions` centraliza plano, ciclo e saldo da organização.
 - `profiles.default_organization_id` seleciona o workspace atual.
 - `assets` guarda o autor e a organização, mas as políticas dão acesso **somente ao autor**. Compartilhamento futuro deve usar uma tabela explícita, nunca relaxar essa política.
+- O navegador recebe privilégios diretos somente de `SELECT`, `INSERT`, `UPDATE` e `DELETE` em `assets`; plano, saldo e relações multiempresa são lidos pelo RPC autenticado `get_user_plan`.
+- Helpers usados por RLS vivem no schema não exposto `private`, verificam `auth.uid()` internamente e usam `search_path` vazio.
 
 ## Geração
 
@@ -32,6 +34,13 @@ flowchart TD
 
 Prompts e conteúdo gerado não são persistidos em logs de uso.
 
+## Ciclo diário de créditos
+
+- `private.reset_daily_credits` repõe, de forma idempotente, cada workspace ativo ao limite definido em `plan_catalog`.
+- O job `brieflow-reset-daily-credits` roda às 03:00 UTC, equivalente a 00:00 em `America/Sao_Paulo`.
+- `get_user_plan` e `authorize_generation` também executam a verificação sob lock. Assim, uma falha ou atraso do Cron é reparado antes de exibir ou consumir o saldo.
+- Cada reposição que aumenta o saldo gera uma entrada `grant` no `credit_ledger`; o período mensal do Stripe permanece independente.
+
 ## Conteúdo avançado
 
 Roteiros e documentos usam `StructuredContentDocument`: título, resumo, duração, seções, timing, direção visual, notas, CTA, palavras-chave e ressalvas. A representação comum permite edição, exportação TXT/JSON e futuras integrações de renderização sem alterar campanhas existentes.
@@ -41,6 +50,7 @@ Roteiros e documentos usam `StructuredContentDocument`: título, resumo, duraç�
 - limites por minuto são contadores atômicos por usuário;
 - débitos usam row locks e idempotência;
 - biblioteca usa paginação por cursor em lotes de 50 itens, com ordenação estável e índice por usuário/data/ID;
+- o primeiro salvamento cria o asset e os seguintes atualizam o mesmo ID, evitando cópias acidentais e consumo indevido da cota;
 - scraping usa cache de quatro horas;
 - webhooks Stripe usam claim atômico, lease de recuperação e ordenação pelo timestamp assinado do evento;
 - mídia é armazenada em vez de embutida em JSON e tem limite de 10 MB;
