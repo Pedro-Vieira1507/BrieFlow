@@ -164,18 +164,18 @@ const ADVANCED_FORMAT_PLAYBOOKS: Record<
   Exclude<MaterialType, "banner" | "social" | "email">,
   string
 > = {
-  reel: `FORMATO — REEL VERTICAL:
-- Construa um roteiro de 15–60 segundos em 4–8 cenas, com gancho nos primeiros 2 segundos.
-- Cada seção representa uma cena. timing contém o intervalo; body contém a locução; items contém textos curtos em tela; visualDirection descreve enquadramento, ação e transição.
-- O roteiro deve ser filmável em 9:16 e manter uma única ideia. Não invente trends, depoimentos ou resultados.`,
-  video: `FORMATO — VÍDEO:
-- Construa um roteiro de 45–180 segundos com abertura, desenvolvimento, demonstração/prova disponível e fechamento.
-- Cada seção representa uma cena ou sequência. Especifique timing, locução em body, elementos em tela em items e direção executável em visualDirection.
-- Inclua notas de produção somente quando forem úteis; não prometa imagens, falas ou dados que não estejam no briefing.`,
-  podcast: `FORMATO — PODCAST:
-- Estruture pauta e roteiro para 8–25 minutos, com abertura, blocos temáticos e encerramento.
-- Cada seção representa um bloco. body contém o roteiro do host; items contém perguntas ou talking points; timing traz a duração; speakerNotes orienta ritmo e transições.
-- Preserve tom conversacional, evite monólogo publicitário e não invente convidados, citações ou pesquisas.`,
+  reel: `FORMATO — REEL VERTICAL (PLANO INTERNO DE RENDERIZAÇÃO):
+- Estruture um vídeo curto de 6–10 segundos em 2–4 cenas, com impacto visual imediato.
+- Cada seção alimenta o renderizador: timing define o ritmo; body registra a mensagem/locução desejada; items descrevem elementos relevantes; visualDirection descreve enquadramento, ação, luz, movimento de câmera e transição.
+- A saída textual é apenas um plano técnico intermediário. O resultado apresentado ao usuário será o vídeo 9:16 renderizado. Não invente trends, depoimentos ou resultados.`,
+  video: `FORMATO — VÍDEO (PLANO INTERNO DE RENDERIZAÇÃO):
+- Estruture um vídeo publicitário curto de 8–10 segundos com abertura visual, desenvolvimento e fechamento.
+- Cada seção alimenta o renderizador: especifique timing, mensagem/locução em body, elementos relevantes em items e direção cinematográfica executável em visualDirection.
+- A saída textual é apenas um plano técnico intermediário. O resultado apresentado ao usuário será o vídeo 16:9 renderizado. Não prometa imagens, falas ou dados que não estejam no briefing.`,
+  podcast: `FORMATO — PODCAST (PLANO INTERNO DE RENDERIZAÇÃO):
+- Estruture um episódio conciso, com abertura, 2–5 blocos temáticos e encerramento, pensado para síntese de voz natural.
+- Cada seção alimenta o renderizador de áudio. body deve conter a fala completa do host; items servem apenas como apoio editorial; speakerNotes orienta ritmo e transições.
+- A saída textual é apenas um plano técnico intermediário. O resultado apresentado ao usuário será o áudio final do podcast. Preserve tom conversacional e não invente convidados, citações ou pesquisas.`,
   slides: `FORMATO — APRESENTAÇÃO EM SLIDES:
 - Crie de 6 a 15 slides com arco narrativo: contexto, tensão, ideia, desenvolvimento, evidência disponível e próximo passo.
 - Cada seção representa um slide. title é a mensagem do slide; body é o texto essencial; items são bullets; visualDirection orienta o layout; speakerNotes contém a fala do apresentador.
