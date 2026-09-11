@@ -131,11 +131,7 @@ export interface StructuredContentDocument {
 }
 
 export type MediaRenderStatus =
-  | "idle"
-  | "queued"
-  | "processing"
-  | "ready"
-  | "failed";
+  "idle" | "queued" | "processing" | "ready" | "failed";
 
 export interface MediaRenderState {
   kind: "video" | "audio";
