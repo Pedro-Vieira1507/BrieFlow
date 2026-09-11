@@ -80,7 +80,11 @@ export async function getAuthToken(): Promise<string | null> {
 }
 
 type EdgeFunctionName =
-  | "ai-proxy"\n  | "scrape-proxy"\n  | "image-search"\n  | "billing"\n  | "media-render";
+  | "ai-proxy"
+  | "scrape-proxy"
+  | "image-search"
+  | "billing"
+  | "media-render";
 
 export async function invokeEdgeFunction<T>(
   name: EdgeFunctionName,
