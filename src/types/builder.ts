@@ -130,6 +130,24 @@ export interface StructuredContentDocument {
   disclaimer?: string;
 }
 
+export type MediaRenderStatus =
+  | "idle"
+  | "queued"
+  | "processing"
+  | "ready"
+  | "failed";
+
+export interface MediaRenderState {
+  kind: "video" | "audio";
+  status: MediaRenderStatus;
+  provider: "runway";
+  taskId?: string;
+  url?: string;
+  mimeType?: string;
+  error?: string;
+  generatedAt?: string;
+}
+
 export interface BannerFontSizes {
   title?: number;
   subtitle?: number;
@@ -206,6 +224,7 @@ export interface BuilderState {
   fontFamily?: string;
   bannerFontSizes?: BannerFontSizes;
   structuredContent?: StructuredContentDocument;
+  mediaRender?: MediaRenderState;
 }
 
 export interface SiteBrandData {
