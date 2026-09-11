@@ -6,6 +6,7 @@ import { EmailPreview } from "@/components/briefflow/EmailPreview";
 import { BannerPreview } from "@/components/briefflow/BannerPreview";
 import { SocialPreview } from "@/components/briefflow/SocialPreview";
 import { StructuredContentPreview } from "@/components/briefflow/StructuredContentPreview";
+import { MediaPreview } from "@/components/briefflow/MediaPreview";
 import { cn } from "@/lib/utils";
 import {
   AlertTriangle,
@@ -172,6 +173,8 @@ export function CampaignTabs({
                 state={asset.content}
                 onChange={(patch) => onAssetChange(asset.id, patch)}
               />
+            ) : ["reel", "video", "podcast"].includes(asset.type) ? (
+              <MediaPreview state={asset.content} />
             ) : (
               <StructuredContentPreview
                 state={asset.content}

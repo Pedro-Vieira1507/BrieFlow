@@ -1,6 +1,6 @@
 # BrieFlow
 
-Plataforma multiempresa para transformar briefings em campanhas consistentes, editáveis e rastreáveis. O BrieFlow gera banners, e-mails, posts sociais, WhatsApp, artigos, fichas técnicas, apresentações e roteiros de Reels, vídeos e podcasts, com disponibilidade e consumo definidos pelo plano.
+Plataforma multiempresa para transformar briefings em campanhas consistentes, editáveis e rastreáveis. O BrieFlow gera banners, e-mails, posts sociais, WhatsApp, artigos, fichas técnicas, apresentações, Reels, vídeos e podcasts finalizados, com disponibilidade e consumo definidos pelo plano.
 
 ## Arquitetura
 

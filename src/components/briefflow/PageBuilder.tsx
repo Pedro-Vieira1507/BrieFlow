@@ -102,17 +102,54 @@ export function PageBuilder({
     }
   };
 
-  const handleExportClick = () => {
+  const handleExportClick = async () => {
     if (!(CORE_MATERIAL_TYPES as readonly string[]).includes(activeTab)) {
       const asset =
         builder.type === "campaign"
           ? builder.campaignAssets?.find((entry) => entry.type === activeTab)
           : undefined;
       const document = asset?.content.structuredContent;
-      if (!document) {
+      if (!asset || !document) {
         toast.error("Conteúdo não encontrado para exportação.");
         return;
       }
+
+      if (["reel", "video", "podcast"].includes(activeTab)) {
+        const media = asset.content.mediaRender;
+        if (media?.status !== "ready" || !media.url) {
+          toast.error("A mídia final ainda não está pronta para exportação.");
+          return;
+        }
+
+        setIsExporting(true);
+        try {
+          const response = await fetch(media.url);
+          if (!response.ok) throw new Error("media_download_failed");
+          const blob = await response.blob();
+          const extension =
+            activeTab === "podcast"
+              ? media.mimeType?.includes("wav")
+                ? "wav"
+                : "mp3"
+              : media.mimeType?.includes("webm")
+                ? "webm"
+                : "mp4";
+          const brand = asset.content.brandName || document.title;
+          downloadBlob(
+            blob,
+            `${activeTab}_${sanitizeFilenamePart(brand)}.${extension}`,
+          );
+          toast.success(
+            activeTab === "podcast" ? "Podcast exportado." : "Vídeo exportado.",
+          );
+        } catch {
+          toast.error("Não foi possível baixar a mídia final.");
+        } finally {
+          setIsExporting(false);
+        }
+        return;
+      }
+
       const brand = asset.content.brandName || document.title;
       downloadBlob(
         new Blob([formatStructuredContentText(document)], {

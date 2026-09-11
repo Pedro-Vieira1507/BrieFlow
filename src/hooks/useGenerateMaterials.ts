@@ -21,6 +21,7 @@ import {
 } from "@/types/generatedContent";
 import type { MarketingBrief, MaterialType } from "@/types/brief";
 import type { BuilderState } from "@/types/builder";
+import { isRenderableMediaMaterial, renderFinalMedia } from "@/lib/mediaRender";
 
 export interface GenerateMaterialParams<T extends MaterialType = MaterialType> {
   brief: MarketingBrief;
@@ -169,14 +170,31 @@ export function useGenerateMaterials(): UseGenerateMaterialsResult {
 
         useCreditsStore.getState().refresh();
 
+        const content = toBuilderContent(
+          material,
+          safeData,
+          toRenderContext(brief, images),
+        );
+
+        if (isRenderableMediaMaterial(material) && content.structuredContent) {
+          content.mediaRender = await renderFinalMedia({
+            material,
+            document: content.structuredContent,
+            brandName: content.brandName,
+            referenceImageUrl: content.productImageUrl,
+            signal: controller.signal,
+          });
+          if (content.mediaRender.status === "failed") {
+            content.generationError =
+              content.mediaRender.error ??
+              "Não foi possível renderizar a mídia final.";
+          }
+        }
+
         return {
           material,
           copy: safeData,
-          content: toBuilderContent(
-            material,
-            safeData,
-            toRenderContext(brief, images),
-          ),
+          content,
           meta,
         };
       } catch (error) {
