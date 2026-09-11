@@ -51,15 +51,15 @@ export function buildMediaRenderPrompt(
       .filter(Boolean);
 
     return [
-      \`Podcast em Português do Brasil para \${plainText(brandName) || "a marca"}.\`,
-      document.title ? \`Tema: \${plainText(document.title)}.\` : "",
+      `Podcast em Português do Brasil para ${plainText(brandName) || "a marca"}.`,
+      document.title ? `Tema: ${plainText(document.title)}.` : "",
       document.subtitle ? plainText(document.subtitle) : "",
       ...spokenBlocks,
       document.cta ? plainText(document.cta) : "",
       document.disclaimer ? plainText(document.disclaimer) : "",
     ]
       .filter(Boolean)
-      .join("\\n\\n")
+      .join("\n\n")
       .slice(0, 12_000);
   }
 
@@ -71,29 +71,29 @@ export function buildMediaRenderPrompt(
   const scenes = document.sections
     .map((section, index) => {
       const parts = [
-        \`Cena \${index + 1}: \${plainText(section.title)}.\`,
+        `Cena ${index + 1}: ${plainText(section.title)}.`,
         section.visualDirection
-          ? \`Visual: \${plainText(section.visualDirection)}.\`
+          ? `Visual: ${plainText(section.visualDirection)}.`
           : "",
-        section.body ? \`Mensagem: \${plainText(section.body)}.\` : "",
+        section.body ? `Mensagem: ${plainText(section.body)}.` : "",
         section.items?.length
-          ? \`Elementos: \${section.items.map(plainText).filter(Boolean).join(", ")}.\`
+          ? `Elementos: ${section.items.map(plainText).filter(Boolean).join(", ")}.`
           : "",
       ];
       return parts.filter(Boolean).join(" ");
     })
     .filter(Boolean)
-    .join("\\n");
+    .join("\n");
 
   return [
     orientation,
-    \`Marca: \${plainText(brandName) || "não especificada"}.\`,
-    document.summary ? \`Objetivo: \${plainText(document.summary)}.\` : "",
+    `Marca: ${plainText(brandName) || "não especificada"}.`,
+    document.summary ? `Objetivo: ${plainText(document.summary)}.` : "",
     scenes,
     "Não renderize legendas, logos ou textos ilegíveis dentro da imagem. Preserve aparência natural, continuidade visual e movimentos de câmera plausíveis.",
   ]
     .filter(Boolean)
-    .join("\\n")
+    .join("\n")
     .slice(0, 3_500);
 }
 
