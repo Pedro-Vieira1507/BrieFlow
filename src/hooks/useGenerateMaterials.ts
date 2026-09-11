@@ -190,6 +190,11 @@ export function useGenerateMaterials(): UseGenerateMaterialsResult {
             referenceImageUrl: content.productImageUrl,
             signal: controller.signal,
           });
+          if (content.mediaRender.status === "failed") {
+            content.generationError =
+              content.mediaRender.error ??
+              "Não foi possível renderizar a mídia final.";
+          }
         }
 
         return {
