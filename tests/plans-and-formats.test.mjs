@@ -32,10 +32,10 @@ test("every plan and format has positive production limits", () => {
   }
 });
 
-test("advanced content schema normalizes a production-ready script", () => {
+test("advanced content schema normalizes a production-ready media plan", () => {
   const parsed = StructuredCopySchema.parse({
     title: "Da ideia ao primeiro corte",
-    summary: "Roteiro objetivo para apresentar a proposta.",
+    summary: "Plano objetivo para apresentar a proposta.",
     duration: "45 segundos",
     sections: [
       {
