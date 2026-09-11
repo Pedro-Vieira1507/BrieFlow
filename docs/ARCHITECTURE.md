@@ -43,7 +43,7 @@ Prompts e conteúdo gerado não são persistidos em logs de uso.
 
 ## Conteúdo avançado
 
-Roteiros e documentos usam `StructuredContentDocument`: título, resumo, duração, seções, timing, direção visual, notas, CTA, palavras-chave e ressalvas. A representação comum permite edição, exportação TXT/JSON e futuras integrações de renderização sem alterar campanhas existentes.
+Documentos e planos técnicos de mídia usam `StructuredContentDocument`: título, resumo, duração, seções, timing, direção visual, notas, CTA, palavras-chave e ressalvas. Para Reel, vídeo e podcast, essa estrutura fica interna e alimenta `media-render`; o usuário recebe a mídia final, que é persistida no Storage privado antes da reprodução ou exportação.
 
 ## Escala
 
