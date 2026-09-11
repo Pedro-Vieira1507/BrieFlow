@@ -140,9 +140,7 @@ export function PageBuilder({
             `${activeTab}_${sanitizeFilenamePart(brand)}.${extension}`,
           );
           toast.success(
-            activeTab === "podcast"
-              ? "Podcast exportado."
-              : "Vídeo exportado.",
+            activeTab === "podcast" ? "Podcast exportado." : "Vídeo exportado.",
           );
         } catch {
           toast.error("Não foi possível baixar a mídia final.");
