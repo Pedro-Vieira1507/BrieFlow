@@ -105,7 +105,8 @@ export const CONTENT_FORMATS: Record<MaterialType, ContentFormatDefinition> = {
   podcast: {
     label: "Podcast",
     shortLabel: "Podcast",
-    description: "Áudio de podcast finalizado, com locução natural e estrutura editorial.",
+    description:
+      "Áudio de podcast finalizado, com locução natural e estrutura editorial.",
     prompt: "Gere um podcast em áudio finalizado para esta campanha.",
     creditCost: 12,
     minPlan: "agency",
