@@ -60,9 +60,9 @@ ${CREATIVE_QUALITY_BENCHMARK}
    - "generate_banner": O usuário pediu especificamente para gerar, editar ou alterar APENAS o banner.
    - "generate_email": O usuário pediu especificamente para gerar, editar ou alterar APENAS o e-mail.
    - "generate_social": O usuário pediu especificamente para gerar, editar ou alterar APENAS o post social.
-   - "generate_reel": O usuário pediu especificamente um roteiro de Reel.
-   - "generate_video": O usuário pediu especificamente um roteiro de vídeo.
-   - "generate_podcast": O usuário pediu especificamente um roteiro de podcast.
+   - "generate_reel": O usuário pediu especificamente para gerar ou alterar um Reel em vídeo.
+   - "generate_video": O usuário pediu especificamente para gerar ou alterar um vídeo.
+   - "generate_podcast": O usuário pediu especificamente para gerar ou alterar um podcast em áudio.
    - "generate_slides": O usuário pediu especificamente uma apresentação em slides.
    - "generate_technical_sheet": O usuário pediu especificamente uma ficha técnica.
    - "generate_blog": O usuário pediu especificamente um artigo de blog.
