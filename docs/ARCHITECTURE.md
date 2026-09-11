@@ -43,7 +43,7 @@ Prompts e conteúdo gerado não são persistidos em logs de uso.
 
 ## Conteúdo avançado
 
-Documentos e planos técnicos de mídia usam `StructuredContentDocument`: título, resumo, duração, seções, timing, direção visual, notas, CTA, palavras-chave e ressalvas. Para Reel, vídeo e podcast, essa estrutura fica interna e alimenta `media-render`; o usuário recebe a mídia final, que é persistida no Storage privado antes da reprodução ou exportação.
+Documentos e planos técnicos de mídia usam `StructuredContentDocument`: título, resumo, duração, seções, timing, direção visual, notas, CTA, palavras-chave e ressalvas. Para Reel, vídeo e podcast, essa estrutura fica interna e alimenta `media-render`; o usuário recebe a mídia final, que é persistida no Storage privado antes da reprodução ou exportação. A função usa `gemini-omni-1.1-flash` para vídeo 9:16/16:9 e `gemini-3.1-flash-tts-preview` para podcast, mantendo Runway como fallback administrado. Modelos e vozes são definidos somente por segredos do servidor.
 
 ## Escala
 

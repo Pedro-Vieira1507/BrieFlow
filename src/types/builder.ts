@@ -136,7 +136,7 @@ export type MediaRenderStatus =
 export interface MediaRenderState {
   kind: "video" | "audio";
   status: MediaRenderStatus;
-  provider: "runway";
+  provider: "gemini" | "runway";
   taskId?: string;
   url?: string;
   mimeType?: string;

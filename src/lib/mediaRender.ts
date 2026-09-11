@@ -15,6 +15,7 @@ interface StartResponse {
   signature: string;
   status: "queued";
   kind: "video" | "audio";
+  provider?: "gemini" | "runway";
 }
 
 interface StatusResponse {
@@ -25,6 +26,7 @@ interface StatusResponse {
   mimeType?: string;
   generatedAt?: string;
   error?: string;
+  provider?: "gemini" | "runway";
 }
 
 const MAX_STATUS_CHECKS = 48;
@@ -51,9 +53,12 @@ export function buildMediaRenderPrompt(
       .filter(Boolean);
 
     return [
-      `Podcast em Português do Brasil para ${plainText(brandName) || "a marca"}.`,
-      document.title ? `Tema: ${plainText(document.title)}.` : "",
-      document.subtitle ? plainText(document.subtitle) : "",
+      "Sintetize uma locução de podcast natural. Fale somente o conteúdo após o marcador TRANSCRIÇÃO; não leia estas instruções nem os marcadores.",
+      "DIREÇÃO: Português do Brasil, voz calorosa, segura e conversacional, ritmo moderado, pausas naturais e acabamento de estúdio.",
+      `CONTEXTO: Podcast para ${plainText(brandName) || "a marca"}.`,
+      "TRANSCRIÇÃO:",
+      document.title ? `${plainText(document.title)}.` : "",
+      document.subtitle ? `${plainText(document.subtitle)}.` : "",
       ...spokenBlocks,
       document.cta ? plainText(document.cta) : "",
       document.disclaimer ? plainText(document.disclaimer) : "",
@@ -177,7 +182,7 @@ export async function renderFinalMedia(params: {
         return {
           kind: started.kind,
           status: "ready",
-          provider: "runway",
+          provider: status.provider ?? started.provider ?? "runway",
           taskId: started.taskId,
           url: status.url,
           mimeType: status.mimeType,
@@ -189,7 +194,7 @@ export async function renderFinalMedia(params: {
         return {
           kind: started.kind,
           status: "failed",
-          provider: "runway",
+          provider: status.provider ?? started.provider ?? "runway",
           taskId: started.taskId,
           error: status.error ?? "A renderização não foi concluída.",
         };
@@ -199,7 +204,7 @@ export async function renderFinalMedia(params: {
     return {
       kind: started.kind,
       status: "failed",
-      provider: "runway",
+      provider: started.provider ?? "runway",
       taskId: started.taskId,
       error:
         "A renderização demorou mais que o esperado. Gere novamente para tentar de novo.",
@@ -208,7 +213,7 @@ export async function renderFinalMedia(params: {
     return {
       kind: params.material === "podcast" ? "audio" : "video",
       status: "failed",
-      provider: "runway",
+      provider: "gemini",
       error: userFacingRenderError(error),
     };
   }

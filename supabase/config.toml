@@ -10,5 +10,8 @@ verify_jwt = true
 [functions.billing]
 verify_jwt = true
 
+[functions.media-render]
+verify_jwt = true
+
 [functions.stripe-webhook]
 verify_jwt = false

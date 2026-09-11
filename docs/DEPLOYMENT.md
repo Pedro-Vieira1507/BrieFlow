@@ -32,7 +32,7 @@ Copie `supabase/.env.example` para um arquivo fora do Git, preencha os valores e
 supabase secrets set --env-file supabase/.env.production
 ```
 
-Configure `APP_URL` e uma lista exata de origens HTTPS em `ALLOWED_ORIGINS`. Defina pelo menos um provedor de IA. Nunca use prefixo `VITE_` para esses segredos.
+Configure `APP_URL` e uma lista exata de origens HTTPS em `ALLOWED_ORIGINS`. Defina pelo menos um provedor de IA. A mesma `GEMINI_API_KEY` habilita o provedor audiovisual principal; `GEMINI_VIDEO_MODEL` e `GEMINI_PODCAST_MODEL` permanecem no servidor. Runway é opcional e funciona como fallback. Nunca use prefixo `VITE_` para esses segredos.
 
 ## 3. Publicar funções
 
@@ -41,10 +41,11 @@ supabase functions deploy ai-proxy
 supabase functions deploy scrape-proxy
 supabase functions deploy image-search
 supabase functions deploy billing
+supabase functions deploy media-render
 supabase functions deploy stripe-webhook --no-verify-jwt
 ```
 
-O `config.toml` exige JWT nas quatro funções chamadas pelo app. Somente o webhook é público e ele valida a assinatura Stripe no corpo bruto.
+O `config.toml` exige JWT nas cinco funções chamadas pelo app. Somente o webhook é público e ele valida a assinatura Stripe no corpo bruto.
 
 ## 4. Configurar Stripe
 
