@@ -102,7 +102,7 @@ export interface SocialContent {
 export type AssetContent = BannerContent | EmailContent | SocialContent;
 export type CtaVariant = "primary" | "secondary" | "urgent" | "soft";
 
-/** Bloco reutilizável para roteiros, apresentações e documentos longos. */
+/** Bloco reutilizável para planos técnicos, apresentações e documentos longos. */
 export interface StructuredContentSection {
   id: string;
   title: string;
