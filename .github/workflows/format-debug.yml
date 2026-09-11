@@ -1,0 +1,22 @@
+name: Format Debug
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  format-diff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Show Prettier diff
+        run: |
+          npx prettier --write src/components/briefflow/PageBuilder.tsx src/hooks/useGenerateMaterials.ts src/lib/plans.ts src/lib/supabase.ts src/types/builder.ts supabase/functions/media-render/index.ts
+          git diff -- src/components/briefflow/PageBuilder.tsx src/hooks/useGenerateMaterials.ts src/lib/plans.ts src/lib/supabase.ts src/types/builder.ts supabase/functions/media-render/index.ts
