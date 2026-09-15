@@ -132,7 +132,7 @@ test("generated media storage accepts browser-playable audio and video", async (
   assert.match(migration, /'audio\/mpeg'/);
   assert.match(migration, /'video\/mp4'/);
   assert.match(client, /generated-reels/);
-  assert.match(client, /file\.size > 48 \* 1024 \* 1024/);
+  assert.match(client, /MAX_REEL_BYTES = 48_000_000/);
   assert.match(preview, /https:\/\/zsky\.ai\//);
   assert.match(preview, /Importar Reel final/);
   assert.match(builder, /saveAssetToLibrary\([\s\S]*nextBuilder/);

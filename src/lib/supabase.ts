@@ -439,6 +439,7 @@ const ALLOWED_REEL_TYPES = new Set([
   "video/webm",
   "video/quicktime",
 ]);
+const MAX_REEL_BYTES = 48_000_000;
 
 export async function uploadFinalReel(file: File): Promise<UploadedFinalReel> {
   if (!supabase) throw new Error("Supabase não configurado.");
@@ -447,7 +448,7 @@ export async function uploadFinalReel(file: File): Promise<UploadedFinalReel> {
   if (!ALLOWED_REEL_TYPES.has(mimeType)) {
     throw new Error("Formato não permitido. Use MP4, WebM ou MOV.");
   }
-  if (file.size <= 0 || file.size > 48 * 1024 * 1024) {
+  if (file.size <= 0 || file.size > MAX_REEL_BYTES) {
     throw new Error("O Reel final deve ter no máximo 48 MB.");
   }
 
