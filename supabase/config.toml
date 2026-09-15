@@ -13,5 +13,8 @@ verify_jwt = true
 [functions.media-render]
 verify_jwt = true
 
+[functions.multimodal]
+verify_jwt = true
+
 [functions.stripe-webhook]
 verify_jwt = false

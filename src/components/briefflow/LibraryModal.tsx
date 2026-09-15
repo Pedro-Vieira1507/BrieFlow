@@ -18,9 +18,11 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { useBriefflowStore } from "@/store/briefflow";
 import {
   deleteSavedAsset,
+  getSavedAssetsByIds,
   getSavedAssetsPage,
   type SavedAssetsCursor,
   type SavedLibraryAsset,
@@ -34,11 +36,17 @@ import {
   Calendar,
   Sparkles,
   ShieldCheck,
+  Search,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { getBuilderCampaignBrandName } from "@/lib/campaignGeneration";
 import type { BuilderState, CampaignAsset } from "@/types/builder";
+import {
+  multimodalErrorMessage,
+  semanticLibrarySearch,
+} from "@/lib/multimodal";
 
 export function LibraryModal() {
   const {
@@ -60,6 +68,10 @@ export function LibraryModal() {
     name: string;
   } | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searching, setSearching] = useState(false);
+  const [searchResultIds, setSearchResultIds] = useState<string[] | null>(null);
+  const [searchScores, setSearchScores] = useState<Record<string, number>>({});
   const loadRequestRef = useRef(0);
 
   const loadLibrary = useCallback(async () => {
@@ -79,6 +91,9 @@ export function LibraryModal() {
       setItems(page.items);
       setNextCursor(page.nextCursor);
       setSelectedIndex(0);
+      setSearchQuery("");
+      setSearchResultIds(null);
+      setSearchScores({});
     } catch (error) {
       if (request !== loadRequestRef.current) return;
       toast.error("Erro ao carregar a biblioteca", {
@@ -180,6 +195,11 @@ export function LibraryModal() {
   };
 
   const selectedItem = items[selectedIndex];
+  const displayedItems = searchResultIds
+    ? searchResultIds
+        .map((id) => items.find((item) => item.id === id))
+        .filter((item): item is SavedLibraryAsset => Boolean(item))
+    : items;
   const selectedState: BuilderState | undefined = selectedItem?.content;
   const campaignAssets =
     selectedState?.type === "campaign"
@@ -198,6 +218,49 @@ export function LibraryModal() {
     const updatedItems = [...items];
     updatedItems[selectedIndex] = { ...selectedItem, content: nextState };
     setItems(updatedItems);
+  };
+
+  const runSemanticSearch = async () => {
+    const query = searchQuery.trim();
+    if (query.length < 2 || searching) return;
+    setSearching(true);
+    try {
+      const matches = await semanticLibrarySearch(query);
+      const resultItems = await getSavedAssetsByIds(
+        matches.map((match) => match.assetId),
+      );
+      setItems((current) => {
+        const resultIds = new Set(resultItems.map((item) => item.id));
+        return [
+          ...resultItems,
+          ...current.filter((item) => !resultIds.has(item.id)),
+        ];
+      });
+      setSearchResultIds(matches.map((match) => match.assetId));
+      setSearchScores(
+        Object.fromEntries(
+          matches.map((match) => [match.assetId, match.similarity]),
+        ),
+      );
+      if (resultItems.length > 0) setSelectedIndex(0);
+      if (matches.length === 0)
+        toast.info(
+          "Nenhuma campanha semanticamente relacionada foi encontrada.",
+        );
+    } catch (error) {
+      toast.error("Não foi possível pesquisar a Biblioteca", {
+        description: multimodalErrorMessage(error),
+      });
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const clearSemanticSearch = () => {
+    setSearchQuery("");
+    setSearchResultIds(null);
+    setSearchScores({});
+    setSelectedIndex(0);
   };
 
   return (
@@ -246,11 +309,50 @@ export function LibraryModal() {
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden md:flex-row">
               {/* PAINEL LATERAL DE CAMPANHAS SALVAS */}
               <div className="flex max-h-52 w-full shrink-0 gap-2 overflow-x-auto border-b border-border-subtle bg-surface-2/35 p-3 md:max-h-none md:w-[286px] md:flex-col md:overflow-x-hidden md:overflow-y-auto md:border-b-0 md:border-r">
+                <form
+                  className="relative min-w-[250px] shrink-0 md:min-w-0"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void runSemanticSearch();
+                  }}
+                >
+                  <Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-fg-muted" />
+                  <Input
+                    value={searchQuery}
+                    onChange={(event) => setSearchQuery(event.target.value)}
+                    placeholder="Buscar por ideia, público ou tema"
+                    aria-label="Busca semântica na Biblioteca"
+                    className="h-10 rounded-xl border-border-strong bg-surface-1 pl-9 pr-9 text-xs"
+                  />
+                  {searchQuery ? (
+                    <button
+                      type="button"
+                      onClick={clearSemanticSearch}
+                      aria-label="Limpar busca"
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-md p-1 text-fg-muted hover:text-fg-primary"
+                    >
+                      <X className="size-3.5" />
+                    </button>
+                  ) : null}
+                  <button type="submit" className="sr-only">
+                    Pesquisar
+                  </button>
+                </form>
+                {searching && (
+                  <div className="flex min-w-[180px] items-center gap-2 px-2 text-[10px] text-brand md:min-w-0">
+                    <Loader2 className="size-3 animate-spin" /> Buscando por
+                    significado...
+                  </div>
+                )}
                 <div className="hidden px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-fg-muted md:block">
-                  Campanhas salvas ({items.length}
+                  {searchResultIds
+                    ? "Resultados semânticos"
+                    : "Campanhas salvas"}{" "}
+                  ({displayedItems.length}
                   {nextCursor ? "+" : ""})
                 </div>
-                {items.map((item, idx) => {
+                {displayedItems.map((item) => {
+                  const idx = items.findIndex((entry) => entry.id === item.id);
                   const isSelected = idx === selectedIndex;
                   const dateStr = item.created_at
                     ? new Date(item.created_at).toLocaleDateString("pt-BR", {
@@ -300,6 +402,16 @@ export function LibraryModal() {
                       <div className="pointer-events-none relative z-10 flex items-center gap-1.5 text-[10px] text-fg-tertiary">
                         <Calendar className="size-3" />
                         <span>{dateStr}</span>
+                        {searchResultIds &&
+                        searchScores[item.id] !== undefined ? (
+                          <span className="ml-auto text-brand">
+                            {Math.round(
+                              Math.max(0, Math.min(1, searchScores[item.id])) *
+                                100,
+                            )}
+                            % relevante
+                          </span>
+                        ) : null}
                       </div>
                     </div>
                   );

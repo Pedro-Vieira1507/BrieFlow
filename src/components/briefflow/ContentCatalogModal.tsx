@@ -22,7 +22,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useCredits } from "@/hooks/useCredits";
-import { CONTENT_FORMATS, PLAN_CATALOG, canUseMaterial } from "@/lib/plans";
+import {
+  CONTENT_FORMATS,
+  PLAN_CATALOG,
+  canUseMaterial,
+  isMaterialOperational,
+} from "@/lib/plans";
 import { MATERIAL_TYPES, type MaterialType } from "@/types/brief";
 
 const FORMAT_ICONS: Record<MaterialType, typeof Sparkles> = {
@@ -51,6 +56,13 @@ export function ContentCatalogModal({ open, onOpenChange, onSelect }: Props) {
   const selectFormat = (material: MaterialType) => {
     if (loading) return;
     const definition = CONTENT_FORMATS[material];
+    if (!isMaterialOperational(material)) {
+      toast.info(`${definition.label} está em stand by`, {
+        description:
+          "A interface foi preservada, mas a geração ficará desativada até o provedor de vídeo receber cota.",
+      });
+      return;
+    }
     const allowed = canUseMaterial(currentPlan, material, plan?.allowedFormats);
     if (!allowed) {
       toast.info(
@@ -86,6 +98,7 @@ export function ContentCatalogModal({ open, onOpenChange, onSelect }: Props) {
           {MATERIAL_TYPES.map((material) => {
             const definition = CONTENT_FORMATS[material];
             const Icon = FORMAT_ICONS[material];
+            const operational = isMaterialOperational(material);
             const allowed = canUseMaterial(
               currentPlan,
               material,
@@ -110,7 +123,7 @@ export function ContentCatalogModal({ open, onOpenChange, onSelect }: Props) {
                     </span>
                     {loading ? (
                       <Loader2 className="size-3.5 shrink-0 animate-spin text-fg-muted" />
-                    ) : !allowed ? (
+                    ) : !allowed || !operational ? (
                       <LockKeyhole className="size-3.5 shrink-0 text-fg-muted" />
                     ) : null}
                   </span>
@@ -118,8 +131,10 @@ export function ContentCatalogModal({ open, onOpenChange, onSelect }: Props) {
                     {definition.description}
                   </span>
                   <span className="mt-2 block text-[10px] font-semibold uppercase tracking-wider text-fg-muted">
-                    {definition.creditCost} créditos
-                    {!allowed
+                    {!operational
+                      ? "Em stand by · sem consumo de créditos"
+                      : `${definition.creditCost} créditos`}
+                    {operational && !allowed
                       ? ` · Plano ${PLAN_CATALOG[definition.minPlan].label}`
                       : ""}
                   </span>

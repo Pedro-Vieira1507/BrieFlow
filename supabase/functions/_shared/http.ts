@@ -5,12 +5,14 @@ import {
 } from "npm:@supabase/supabase-js@2.110.5";
 
 import type { Database } from "./database.ts";
+import { previewOrigins } from "./preview-origins.ts";
 
 export type ServiceClient = SupabaseClient<Database>;
 
 export interface RequestContext {
   user: User;
   service: ServiceClient;
+  token: string;
 }
 
 function normalizeConfiguredOrigin(value: string): string | null {
@@ -33,8 +35,10 @@ function normalizeConfiguredOrigin(value: string): string | null {
 }
 
 const configuredOrigins = (() => {
-  const values = (Deno.env.get("ALLOWED_ORIGINS") ?? "")
-    .split(",")
+  const values = [
+    ...(Deno.env.get("ALLOWED_ORIGINS") ?? "").split(","),
+    ...previewOrigins,
+  ]
     .map(normalizeConfiguredOrigin)
     .filter((value): value is string => value !== null);
   const appUrl = Deno.env.get("APP_URL");
@@ -140,7 +144,7 @@ export async function authenticate(
   const service = createServiceClient();
   const { data, error } = await service.auth.getUser(token);
   if (error || !data.user) return null;
-  return { user: data.user, service };
+  return { user: data.user, service, token };
 }
 
 export function createServiceClient(): ServiceClient {

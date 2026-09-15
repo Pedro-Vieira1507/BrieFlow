@@ -398,7 +398,9 @@ Deno.serve(async (req: Request) => {
       const status =
         code === "rate_limit_exceeded"
           ? 429
-          : code === "insufficient_credits"
+          : ["insufficient_credits", "monthly_credit_limit_exceeded"].includes(
+                code,
+              )
             ? 402
             : code === "duplicate_request"
               ? 409

@@ -45,6 +45,11 @@ interface StoredMedia {
   mimeType: string;
 }
 
+interface CreatedTask {
+  task: ProviderTask;
+  interaction?: GeminiInteraction;
+}
+
 const GEMINI_API = "https://generativelanguage.googleapis.com/v1beta";
 const GEMINI_VIDEO_MODEL =
   Deno.env.get("GEMINI_VIDEO_MODEL") || "gemini-omni-1.1-flash";
@@ -206,7 +211,7 @@ async function createGeminiTask(
   material: MediaMaterial,
   prompt: string,
   referenceImageUrl?: string | null,
-): Promise<ProviderTask> {
+): Promise<CreatedTask> {
   const isPodcast = material === "podcast";
   const referenceImage = isPodcast
     ? null
@@ -246,7 +251,13 @@ async function createGeminiTask(
       .json()
       .catch(() => ({}))) as GeminiInteraction;
     if (response.ok && payload.id) {
-      return { provider: "gemini", id: payload.id };
+      return {
+        task: { provider: "gemini", id: payload.id },
+        // TTS interactions are commonly unary: the POST already contains the
+        // complete PCM audio. Preserve it so it can be stored before returning
+        // instead of relying on a later GET to repeat the binary payload.
+        interaction: payload,
+      };
     }
     if (isPodcast && attempt === 0 && response.status >= 500) continue;
     throw providerError(response.status);
@@ -286,7 +297,7 @@ async function createRunwayTask(
   material: MediaMaterial,
   prompt: string,
   referenceImageUrl?: string | null,
-): Promise<ProviderTask> {
+): Promise<CreatedTask> {
   const isPodcast = material === "podcast";
   const body = isPodcast
     ? {
@@ -314,7 +325,7 @@ async function createRunwayTask(
 
   const id = typeof payload.id === "string" ? payload.id : "";
   if (!id) throw new Error("media_provider_invalid_response");
-  return { provider: "runway", id };
+  return { task: { provider: "runway", id } };
 }
 
 async function getRunwayTask(taskId: string): Promise<RunwayTask> {
@@ -330,11 +341,11 @@ async function createTask(
   material: MediaMaterial,
   prompt: string,
   referenceImageUrl?: string | null,
-): Promise<ProviderTask> {
+): Promise<CreatedTask> {
   const attempts: Array<{
     provider: MediaProvider;
     configured: boolean;
-    execute: () => Promise<ProviderTask>;
+    execute: () => Promise<CreatedTask>;
   }> = [
     {
       provider: "gemini",
@@ -540,16 +551,42 @@ Deno.serve(async (req: Request) => {
         /^https:\/\//i.test(body.referenceImageUrl)
           ? body.referenceImageUrl.slice(0, 4_000)
           : null;
-      const task = await createTask(body.material, prompt, image);
+      const created = await createTask(body.material, prompt, image);
+      const task = created.task;
       const taskId = encodeTaskHandle(task);
       const signature = await signTask(context.user.id, taskId, body.material);
+
+      const kind = body.material === "podcast" ? "audio" : "video";
+      if (
+        task.provider === "gemini" &&
+        created.interaction &&
+        findGeminiMediaOutput(created.interaction, kind)
+      ) {
+        const stored = await persistGeminiOutput(
+          context.service,
+          context.user.id,
+          body.material,
+          task.id,
+          created.interaction,
+        );
+        return json(req, 200, {
+          taskId,
+          signature,
+          provider: task.provider,
+          status: "ready",
+          kind,
+          url: stored.url,
+          mimeType: stored.mimeType,
+          generatedAt: new Date().toISOString(),
+        });
+      }
 
       return json(req, 202, {
         taskId,
         signature,
         provider: task.provider,
         status: "queued",
-        kind: body.material === "podcast" ? "audio" : "video",
+        kind,
       });
     }
 

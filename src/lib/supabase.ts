@@ -80,7 +80,12 @@ export async function getAuthToken(): Promise<string | null> {
 }
 
 type EdgeFunctionName =
-  "ai-proxy" | "scrape-proxy" | "image-search" | "billing" | "media-render";
+  | "ai-proxy"
+  | "scrape-proxy"
+  | "image-search"
+  | "billing"
+  | "media-render"
+  | "multimodal";
 
 export async function invokeEdgeFunction<T>(
   name: EdgeFunctionName,
@@ -194,7 +199,18 @@ export async function saveAssetToLibrary(
     }
     throw error;
   }
-  return data as SavedLibraryAsset;
+  const saved = data as SavedLibraryAsset;
+  try {
+    await invokeEdgeFunction<{ indexed: boolean }>("multimodal", {
+      action: "index_asset",
+      assetId: saved.id,
+    });
+  } catch (error) {
+    // A campanha continua salva mesmo se o provedor de embeddings estiver
+    // temporariamente indisponível. A busca semântica reindexa sob demanda.
+    console.warn("Não foi possível indexar a campanha agora.", error);
+  }
+  return saved;
 }
 
 const STORAGE_MARKERS = [
@@ -349,6 +365,32 @@ export async function getSavedAssets(): Promise<SavedLibraryAsset[]> {
   return page.items;
 }
 
+export async function getSavedAssetsByIds(
+  ids: readonly string[],
+): Promise<SavedLibraryAsset[]> {
+  if (!supabase) throw new Error("Supabase não configurado.");
+  const user = await requireUser();
+  const requestedIds = Array.from(new Set(ids)).filter((id) =>
+    /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id),
+  );
+  if (requestedIds.length === 0) return [];
+
+  const { data, error } = await supabase
+    .from("assets")
+    .select(SAVED_ASSET_COLUMNS)
+    .eq("user_id", user.id)
+    .in("id", requestedIds.slice(0, 50));
+  if (error) throw error;
+
+  const refreshed = await refreshPrivateUrls(
+    (data ?? []) as SavedLibraryAsset[],
+  );
+  const byId = new Map(refreshed.map((item) => [item.id, item]));
+  return requestedIds
+    .map((id) => byId.get(id))
+    .filter((item): item is SavedLibraryAsset => Boolean(item));
+}
+
 export async function deleteSavedAsset(id: string): Promise<void> {
   if (!supabase) throw new Error("Supabase não configurado.");
   const user = await requireUser();
@@ -366,6 +408,64 @@ const ALLOWED_IMAGE_TYPES = new Set([
   "image/webp",
   "image/gif",
 ]);
+
+const ALLOWED_MULTIMODAL_TYPES = new Set([
+  "audio/mpeg",
+  "audio/mp3",
+  "audio/wav",
+  "audio/x-wav",
+  "audio/ogg",
+  "audio/webm",
+  "video/mp4",
+  "video/webm",
+  "video/quicktime",
+]);
+
+export interface UploadedMultimodalInput {
+  path: string;
+  mimeType: string;
+  name: string;
+  size: number;
+}
+
+export async function uploadMultimodalInput(
+  file: File,
+): Promise<UploadedMultimodalInput> {
+  if (!supabase) throw new Error("Supabase não configurado.");
+  const user = await requireUser();
+  const mimeType = file.type.split(";", 1)[0].toLowerCase();
+  if (!ALLOWED_MULTIMODAL_TYPES.has(mimeType)) {
+    throw new Error(
+      "Formato não permitido. Use MP3, WAV, OGG, WebM, MP4 ou MOV.",
+    );
+  }
+  if (file.size <= 0 || file.size > 18 * 1024 * 1024) {
+    throw new Error(
+      "O arquivo deve ter no máximo 18 MB para processamento por IA.",
+    );
+  }
+
+  const extension =
+    file.name
+      .split(".")
+      .pop()
+      ?.toLowerCase()
+      .replace(/[^a-z0-9]/g, "") || "bin";
+  const uniqueName =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const path = `${user.id}/multimodal-inputs/${uniqueName}.${extension}`;
+  const { error } = await supabase.storage
+    .from("campaign-assets")
+    .upload(path, file, {
+      contentType: mimeType,
+      cacheControl: "3600",
+      upsert: false,
+    });
+  if (error) throw error;
+  return { path, mimeType, name: file.name.slice(0, 160), size: file.size };
+}
 
 export async function uploadCampaignAsset(
   file: File,

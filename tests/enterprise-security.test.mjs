@@ -259,6 +259,37 @@ test("library queries stay user-scoped and use bounded cursor pagination", async
   assert.doesNotMatch(client, /\.limit\(500\)/);
 });
 
+test("multimodal workflows keep media private and semantic search tenant-scoped", async () => {
+  const [migration, edge, client] = await Promise.all([
+    readFile(
+      new URL(
+        "../supabase/migrations/20260915122850_multimodal_audio_and_semantic_library.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+    readFile(
+      new URL("../supabase/functions/multimodal/index.ts", import.meta.url),
+      "utf8",
+    ),
+    readFile(new URL("../src/lib/liveAudio.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(migration, /asset_embeddings[\s\S]*enable row level security/);
+  assert.match(
+    migration,
+    /asset_embeddings_read_own[\s\S]*user_id = \(select auth\.uid\(\)\)/,
+  );
+  assert.match(migration, /security invoker/);
+  assert.match(migration, /operator\(extensions\.<=>\)/);
+  assert.doesNotMatch(migration, /security definer/);
+  assert.match(edge, /storagePath\.startsWith\(`\$\{context\.user\.id\}/);
+  assert.match(edge, /GEMINI_EMBEDDING_MODEL/);
+  assert.match(edge, /liveConnectConstraints/);
+  assert.doesNotMatch(client, /GEMINI_API_KEY/);
+  assert.match(client, /requestLiveAudioToken/);
+});
+
 test("switching authenticated identities clears private in-memory content", () => {
   useBriefflowStore.setState({
     user: { id: "first-user" },
@@ -451,15 +482,23 @@ test("authentication submit reads autofilled values from the form", async () => 
 });
 
 test("development tunnels keep bounded host validation and edge env files private", async () => {
-  const [viteConfig, gitignore, edgeEnv, edgeHttp] = await Promise.all([
-    readFile(new URL("../vite.config.ts", import.meta.url), "utf8"),
-    readFile(new URL("../.gitignore", import.meta.url), "utf8"),
-    readFile(new URL("../supabase/.env.example", import.meta.url), "utf8"),
-    readFile(
-      new URL("../supabase/functions/_shared/http.ts", import.meta.url),
-      "utf8",
-    ),
-  ]);
+  const [viteConfig, gitignore, edgeEnv, edgeHttp, previewOrigins] =
+    await Promise.all([
+      readFile(new URL("../vite.config.ts", import.meta.url), "utf8"),
+      readFile(new URL("../.gitignore", import.meta.url), "utf8"),
+      readFile(new URL("../supabase/.env.example", import.meta.url), "utf8"),
+      readFile(
+        new URL("../supabase/functions/_shared/http.ts", import.meta.url),
+        "utf8",
+      ),
+      readFile(
+        new URL(
+          "../supabase/functions/_shared/preview-origins.ts",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+    ]);
 
   assert.match(viteConfig, /allowedHosts:\s*\["\.trycloudflare\.com"\]/);
   assert.match(gitignore, /supabase\/\.env\.\*/);
@@ -467,6 +506,15 @@ test("development tunnels keep bounded host validation and edge env files privat
   assert.doesNotMatch(edgeEnv, /YOUR_SUPABASE_ANON_KEY/);
   assert.match(edgeHttp, /\.map\(normalizeConfiguredOrigin\)/);
   assert.match(edgeHttp, /return url\.origin/);
+  assert.match(
+    previewOrigins,
+    /https:\/\/blonde-mounting-infant-traveler\.trycloudflare\.com/,
+  );
+  assert.match(
+    previewOrigins,
+    /https:\/\/brieflow-ds6dm6up8-pedro-vieira1507s-projects\.vercel\.app/,
+  );
+  assert.doesNotMatch(previewOrigins, /https:\/\/\*\./);
 });
 
 test("production builds and previews use the Vercel artifact", async () => {

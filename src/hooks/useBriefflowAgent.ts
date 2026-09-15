@@ -14,7 +14,11 @@ import {
   type MaterialType,
 } from "@/types/brief";
 import { useCreditsStore } from "@/hooks/useCredits";
-import { CONTENT_FORMATS, canUseMaterial } from "@/lib/plans";
+import {
+  CONTENT_FORMATS,
+  canUseMaterial,
+  isMaterialOperational,
+} from "@/lib/plans";
 import {
   extractUrlsFromText,
   scrapeProductByUrlFn,
@@ -167,6 +171,16 @@ export function useBriefflowAgent() {
       const plan = discoveryPlanRef.current ?? builderRef.current.discoveryPlan;
 
       const channels: CampaignChannel[] = only ? [only] : ALL_CHANNELS;
+      const paused = channels.find(
+        (channel) => !isMaterialOperational(channel),
+      );
+      if (paused) {
+        toast.info(`${channelLabel(paused)} está em stand by.`, {
+          description:
+            "A geração de vídeo foi pausada até o provedor disponibilizar cota.",
+        });
+        return;
+      }
       const accountPlan = useCreditsStore.getState().plan;
       const blocked = channels.find(
         (channel) =>

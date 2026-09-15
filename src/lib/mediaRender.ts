@@ -13,8 +13,11 @@ export type RenderableMediaMaterial = Extract<
 interface StartResponse {
   taskId: string;
   signature: string;
-  status: "queued";
+  status: "queued" | "ready";
   kind: "video" | "audio";
+  url?: string;
+  mimeType?: string;
+  generatedAt?: string;
   provider?: "gemini" | "runway";
 }
 
@@ -161,6 +164,18 @@ export async function renderFinalMedia(params: {
       },
       params.signal,
     );
+
+    if (started.status === "ready" && started.url) {
+      return {
+        kind: started.kind,
+        status: "ready",
+        provider: started.provider ?? "gemini",
+        taskId: started.taskId,
+        url: started.url,
+        mimeType: started.mimeType,
+        generatedAt: started.generatedAt ?? new Date().toISOString(),
+      };
+    }
 
     for (let attempt = 0; attempt < MAX_STATUS_CHECKS; attempt += 1) {
       await wait(

@@ -76,7 +76,7 @@ Configure apenas `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY`. Execute `npm ru
 
 Promova o artefato Vercel de `npm run build`; nunca trate `vite dev` exposto por túnel como produção. Rode `npm run preview` depois do build para validar localmente o mesmo handler e os mesmos arquivos estáticos. Após a publicação, confirme que a interface mostra “créditos diários” e que a resposta HTML contém CSP, `X-Content-Type-Options`, proteção contra framing e HSTS. Essa verificação detecta imediatamente um processo antigo ou uma branch incorreta sendo servida.
 
-Mantenha `APP_URL` e cada item de `ALLOWED_ORIGINS` como origens exatas. A Function normaliza barras finais, mas rejeita curingas. Em homologação com um novo túnel, substitua somente a origem temporária e preserve a origem oficial de produção.
+Mantenha `APP_URL` e cada item de `ALLOWED_ORIGINS` como origens exatas. A Function normaliza barras finais, mas rejeita curingas. Os previews ativos versionados em `supabase/functions/_shared/preview-origins.ts` também devem usar origens HTTPS exatas; remova o túnel anterior quando ele for substituído e publique novamente as Functions consumidas pelo navegador.
 
 ## 7. Retenção e operação
 

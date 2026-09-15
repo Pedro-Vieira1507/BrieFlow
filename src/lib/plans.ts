@@ -18,6 +18,7 @@ export interface ContentFormatDefinition {
   creditCost: number;
   minPlan: PlanId;
   category: "design" | "social" | "audiovisual" | "document";
+  availability?: "active" | "standby";
 }
 
 export const CONTENT_FORMATS: Record<MaterialType, ContentFormatDefinition> = {
@@ -83,6 +84,7 @@ export const CONTENT_FORMATS: Record<MaterialType, ContentFormatDefinition> = {
     creditCost: 6,
     minPlan: "pro",
     category: "audiovisual",
+    availability: "standby",
   },
   video: {
     label: "Vídeo",
@@ -92,6 +94,7 @@ export const CONTENT_FORMATS: Record<MaterialType, ContentFormatDefinition> = {
     creditCost: 10,
     minPlan: "pro",
     category: "audiovisual",
+    availability: "standby",
   },
   slides: {
     label: "Apresentação em slides",
@@ -113,6 +116,10 @@ export const CONTENT_FORMATS: Record<MaterialType, ContentFormatDefinition> = {
     category: "audiovisual",
   },
 };
+
+export function isMaterialOperational(material: MaterialType): boolean {
+  return CONTENT_FORMATS[material].availability !== "standby";
+}
 
 export interface PlanDefinition {
   label: string;

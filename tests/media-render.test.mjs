@@ -93,9 +93,11 @@ test("media rendering selects Gemini output models first and keeps server-side f
   assert.match(edge, /"gemini-omni-1\.1-flash"/);
   assert.match(edge, /"gemini-3\.1-flash-tts-preview"/);
   assert.match(edge, /provider: "gemini"[\s\S]*provider: "runway"/);
+  assert.match(edge, /created\.interaction[\s\S]*persistGeminiOutput/);
   assert.match(edge, /fetchPublicResource\(referenceImageUrl/);
   assert.match(edge, /hostname !== "generativelanguage\.googleapis\.com"/);
   assert.match(client, /status\.provider \?\? started\.provider \?\? "runway"/);
+  assert.match(client, /started\.status === "ready" && started\.url/);
   assert.doesNotMatch(client, /GEMINI_API_KEY|RUNWAYML_API_SECRET/);
   assert.match(envExample, /GEMINI_VIDEO_MODEL=gemini-omni-1\.1-flash/);
   assert.match(
@@ -103,4 +105,19 @@ test("media rendering selects Gemini output models first and keeps server-side f
     /GEMINI_PODCAST_MODEL=gemini-3\.1-flash-tts-preview/,
   );
   assert.match(config, /\[functions\.media-render\][\s\S]*verify_jwt = true/);
+});
+
+test("generated media storage accepts browser-playable audio and video", async () => {
+  const migration = await readFile(
+    new URL(
+      "../supabase/migrations/20260914120252_enable_generated_media_storage.sql",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(migration, /file_size_limit = 50000000/);
+  assert.match(migration, /'audio\/wav'/);
+  assert.match(migration, /'audio\/mpeg'/);
+  assert.match(migration, /'video\/mp4'/);
 });
