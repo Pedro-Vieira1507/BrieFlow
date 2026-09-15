@@ -428,6 +428,59 @@ export interface UploadedMultimodalInput {
   size: number;
 }
 
+export interface UploadedFinalReel {
+  url: string;
+  mimeType: string;
+  path: string;
+}
+
+const ALLOWED_REEL_TYPES = new Set([
+  "video/mp4",
+  "video/webm",
+  "video/quicktime",
+]);
+
+export async function uploadFinalReel(file: File): Promise<UploadedFinalReel> {
+  if (!supabase) throw new Error("Supabase não configurado.");
+  const user = await requireUser();
+  const mimeType = file.type.split(";", 1)[0].toLowerCase();
+  if (!ALLOWED_REEL_TYPES.has(mimeType)) {
+    throw new Error("Formato não permitido. Use MP4, WebM ou MOV.");
+  }
+  if (file.size <= 0 || file.size > 48 * 1024 * 1024) {
+    throw new Error("O Reel final deve ter no máximo 48 MB.");
+  }
+
+  const extension =
+    file.name
+      .split(".")
+      .pop()
+      ?.toLowerCase()
+      .replace(/[^a-z0-9]/g, "") || "mp4";
+  const uniqueName =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const path = `${user.id}/generated-reels/${uniqueName}.${extension}`;
+  const { error } = await supabase.storage
+    .from("campaign-assets")
+    .upload(path, file, {
+      contentType: mimeType,
+      cacheControl: "3600",
+      upsert: false,
+    });
+  if (error) throw error;
+
+  const { data, error: signError } = await supabase.storage
+    .from("campaign-assets")
+    .createSignedUrl(path, 60 * 60);
+  if (signError || !data?.signedUrl) {
+    throw signError ?? new Error("Não foi possível abrir o Reel enviado.");
+  }
+
+  return { url: data.signedUrl, mimeType, path };
+}
+
 export async function uploadMultimodalInput(
   file: File,
 ): Promise<UploadedMultimodalInput> {

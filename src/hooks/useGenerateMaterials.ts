@@ -22,6 +22,7 @@ import {
 import type { MarketingBrief, MaterialType } from "@/types/brief";
 import type { BuilderState } from "@/types/builder";
 import { isRenderableMediaMaterial, renderFinalMedia } from "@/lib/mediaRender";
+import { isMaterialAssisted } from "@/lib/plans";
 
 export interface GenerateMaterialParams<T extends MaterialType = MaterialType> {
   brief: MarketingBrief;
@@ -177,13 +178,19 @@ export function useGenerateMaterials(): UseGenerateMaterialsResult {
         );
 
         if (isRenderableMediaMaterial(material) && content.structuredContent) {
-          content.mediaRender = await renderFinalMedia({
-            material,
-            document: content.structuredContent,
-            brandName: content.brandName,
-            referenceImageUrl: content.productImageUrl,
-            signal: controller.signal,
-          });
+          content.mediaRender = isMaterialAssisted(material)
+            ? {
+                kind: "video",
+                status: "idle",
+                provider: "zsky",
+              }
+            : await renderFinalMedia({
+                material,
+                document: content.structuredContent,
+                brandName: content.brandName,
+                referenceImageUrl: content.productImageUrl,
+                signal: controller.signal,
+              });
           if (content.mediaRender.status === "failed") {
             content.generationError =
               content.mediaRender.error ??

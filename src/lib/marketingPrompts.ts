@@ -165,7 +165,7 @@ const ADVANCED_FORMAT_PLAYBOOKS: Record<
   string
 > = {
   reel: `FORMATO — REEL VERTICAL (PLANO INTERNO DE RENDERIZAÇÃO):
-- Estruture um vídeo curto de 6–10 segundos em 2–4 cenas, com impacto visual imediato.
+- Estruture um vídeo de 5 segundos em 2–3 cenas, com impacto visual imediato e áudio sincronizado. Esse limite mantém compatibilidade com o plano gratuito do ZSky.
 - Cada seção alimenta o renderizador: timing define o ritmo; body registra a mensagem/locução desejada; items descrevem elementos relevantes; visualDirection descreve enquadramento, ação, luz, movimento de câmera e transição.
 - A saída textual é apenas um plano técnico intermediário. O resultado apresentado ao usuário será o vídeo 9:16 renderizado. Não invente trends, depoimentos ou resultados.`,
   video: `FORMATO — VÍDEO (PLANO INTERNO DE RENDERIZAÇÃO):

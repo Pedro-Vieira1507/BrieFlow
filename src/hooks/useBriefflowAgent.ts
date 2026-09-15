@@ -17,6 +17,7 @@ import { useCreditsStore } from "@/hooks/useCredits";
 import {
   CONTENT_FORMATS,
   canUseMaterial,
+  isMaterialAssisted,
   isMaterialOperational,
 } from "@/lib/plans";
 import {
@@ -639,9 +640,11 @@ Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo terri
               : `Não consegui gerar o ${channelLabel(only)} agora. Tente novamente.`
             : "Processo concluído, mas uma ou mais peças falharam. Você pode pedir para regenerar."
           : only
-            ? isRegeneration
-              ? `${channelLabel(only)} atualizado com sucesso.`
-              : `${channelLabel(only)} criado com sucesso.`
+            ? isMaterialAssisted(only)
+              ? "Direção do Reel preparada. Gere gratuitamente no ZSky e importe o vídeo final na aba Reel."
+              : isRegeneration
+                ? `${channelLabel(only)} atualizado com sucesso.`
+                : `${channelLabel(only)} criado com sucesso.`
             : "Campanha finalizada! Navegue pelas abas ao lado.",
       });
 

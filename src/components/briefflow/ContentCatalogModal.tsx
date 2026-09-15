@@ -26,6 +26,7 @@ import {
   CONTENT_FORMATS,
   PLAN_CATALOG,
   canUseMaterial,
+  isMaterialAssisted,
   isMaterialOperational,
 } from "@/lib/plans";
 import { MATERIAL_TYPES, type MaterialType } from "@/types/brief";
@@ -99,6 +100,7 @@ export function ContentCatalogModal({ open, onOpenChange, onSelect }: Props) {
             const definition = CONTENT_FORMATS[material];
             const Icon = FORMAT_ICONS[material];
             const operational = isMaterialOperational(material);
+            const assisted = isMaterialAssisted(material);
             const allowed = canUseMaterial(
               currentPlan,
               material,
@@ -133,7 +135,9 @@ export function ContentCatalogModal({ open, onOpenChange, onSelect }: Props) {
                   <span className="mt-2 block text-[10px] font-semibold uppercase tracking-wider text-fg-muted">
                     {!operational
                       ? "Em stand by · sem consumo de créditos"
-                      : `${definition.creditCost} créditos`}
+                      : assisted
+                        ? `${definition.creditCost} créditos · vídeo grátis no ZSky`
+                        : `${definition.creditCost} créditos`}
                     {operational && !allowed
                       ? ` · Plano ${PLAN_CATALOG[definition.minPlan].label}`
                       : ""}

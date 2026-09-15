@@ -73,7 +73,7 @@ export function buildMediaRenderPrompt(
 
   const orientation =
     material === "reel"
-      ? "Vídeo vertical 9:16 para Reel, ritmo dinâmico e leitura mobile."
+      ? "Vídeo vertical 9:16 de 5 segundos para Reel, ritmo dinâmico e leitura mobile."
       : "Vídeo horizontal 16:9, acabamento publicitário profissional.";
 
   const scenes = document.sections
@@ -98,6 +98,9 @@ export function buildMediaRenderPrompt(
     `Marca: ${plainText(brandName) || "não especificada"}.`,
     document.summary ? `Objetivo: ${plainText(document.summary)}.` : "",
     scenes,
+    material === "reel"
+      ? "Inclua desenho de som ou trilha coerente com o ritmo, sem locução ou letras inventadas."
+      : "",
     "Não renderize legendas, logos ou textos ilegíveis dentro da imagem. Preserve aparência natural, continuidade visual e movimentos de câmera plausíveis.",
   ]
     .filter(Boolean)

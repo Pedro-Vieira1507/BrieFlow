@@ -5,6 +5,7 @@ import {
   CONTENT_FORMATS,
   PLAN_CATALOG,
   canUseMaterial,
+  isMaterialAssisted,
   isMaterialOperational,
   planMeetsMinimum,
 } from "../src/lib/plans.ts";
@@ -21,11 +22,13 @@ test("plans unlock formats cumulatively without exposing premium formats for fre
   assert.equal(planMeetsMinimum("enterprise", "agency"), true);
 });
 
-test("video formats remain entitled but operationally paused", () => {
+test("long video remains paused while Reel uses the assisted free provider", () => {
   assert.equal(canUseMaterial("enterprise", "video"), true);
   assert.equal(canUseMaterial("enterprise", "reel"), true);
   assert.equal(isMaterialOperational("video"), false);
-  assert.equal(isMaterialOperational("reel"), false);
+  assert.equal(isMaterialOperational("reel"), true);
+  assert.equal(isMaterialAssisted("reel"), true);
+  assert.equal(isMaterialAssisted("video"), false);
   assert.equal(isMaterialOperational("podcast"), true);
 });
 

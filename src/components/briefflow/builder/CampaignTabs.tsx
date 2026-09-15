@@ -37,6 +37,7 @@ interface Props {
   onTabChange: (tab: CampaignAsset["type"]) => void;
   loading?: boolean;
   onRetry?: (channel: CampaignAsset["type"]) => void | Promise<void>;
+  onImportReel?: (assetId: string, file: File) => Promise<void>;
 }
 
 const CHANNELS: Array<{
@@ -63,6 +64,7 @@ export function CampaignTabs({
   onTabChange,
   loading = false,
   onRetry,
+  onImportReel,
 }: Props) {
   const previousAssetIdsRef = useRef<string[]>([]);
   const campaignBrandName = getCampaignBrandName(assets);
@@ -174,7 +176,15 @@ export function CampaignTabs({
                 onChange={(patch) => onAssetChange(asset.id, patch)}
               />
             ) : ["reel", "video", "podcast"].includes(asset.type) ? (
-              <MediaPreview state={asset.content} />
+              <MediaPreview
+                state={asset.content}
+                onImportReel={
+                  asset.type === "reel"
+                    ? (file) =>
+                        onImportReel?.(asset.id, file) ?? Promise.resolve()
+                    : undefined
+                }
+              />
             ) : (
               <StructuredContentPreview
                 state={asset.content}

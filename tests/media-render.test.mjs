@@ -108,16 +108,32 @@ test("media rendering selects Gemini output models first and keeps server-side f
 });
 
 test("generated media storage accepts browser-playable audio and video", async () => {
-  const migration = await readFile(
-    new URL(
-      "../supabase/migrations/20260914120252_enable_generated_media_storage.sql",
-      import.meta.url,
+  const [migration, client, preview, builder] = await Promise.all([
+    readFile(
+      new URL(
+        "../supabase/migrations/20260914120252_enable_generated_media_storage.sql",
+        import.meta.url,
+      ),
+      "utf8",
     ),
-    "utf8",
-  );
+    readFile(new URL("../src/lib/supabase.ts", import.meta.url), "utf8"),
+    readFile(
+      new URL("../src/components/briefflow/MediaPreview.tsx", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL("../src/components/briefflow/PageBuilder.tsx", import.meta.url),
+      "utf8",
+    ),
+  ]);
 
   assert.match(migration, /file_size_limit = 50000000/);
   assert.match(migration, /'audio\/wav'/);
   assert.match(migration, /'audio\/mpeg'/);
   assert.match(migration, /'video\/mp4'/);
+  assert.match(client, /generated-reels/);
+  assert.match(client, /file\.size > 48 \* 1024 \* 1024/);
+  assert.match(preview, /https:\/\/zsky\.ai\//);
+  assert.match(preview, /Importar Reel final/);
+  assert.match(builder, /saveAssetToLibrary\([\s\S]*nextBuilder/);
 });

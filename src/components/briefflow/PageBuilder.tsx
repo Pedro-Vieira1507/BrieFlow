@@ -4,7 +4,11 @@ import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useBriefflowStore } from "@/store/briefflow";
-import { isSupabaseConfigured, saveAssetToLibrary } from "@/lib/supabase";
+import {
+  isSupabaseConfigured,
+  saveAssetToLibrary,
+  uploadFinalReel,
+} from "@/lib/supabase";
 import { getBuilderCampaignBrandName } from "@/lib/campaignGeneration";
 import { downloadBlob, sanitizeFilenamePart } from "@/lib/export-utils";
 import { formatStructuredContentText } from "@/lib/structuredContent";
@@ -16,7 +20,11 @@ import { DiscoveryPlanView } from "./builder/DiscoveryPlanView";
 import { BuilderEmptyState } from "./builder/BuilderEmptyState";
 import { CampaignTabs } from "./builder/CampaignTabs";
 
-import type { BuilderState, CampaignAsset } from "@/types/builder";
+import type {
+  BuilderState,
+  CampaignAsset,
+  MediaRenderState,
+} from "@/types/builder";
 
 interface Props {
   onGenerateCampaign: () => void | Promise<void>;
@@ -171,6 +179,61 @@ export function PageBuilder({
     setBuilder({ ...builder, campaignAssets: next });
   };
 
+  const handleImportReel = async (assetId: string, file: File) => {
+    if (!user) {
+      setAuthOpen(true);
+      throw new Error("Entre na sua conta para salvar o Reel.");
+    }
+
+    const uploaded = await uploadFinalReel(file);
+    const mediaRender: MediaRenderState = {
+      kind: "video",
+      status: "ready",
+      provider: "zsky",
+      taskId: `zsky:manual:${Date.now()}`,
+      url: uploaded.url,
+      mimeType: uploaded.mimeType,
+      generatedAt: new Date().toISOString(),
+    };
+    const currentBuilder = useBriefflowStore.getState().builder;
+    if (currentBuilder.type !== "campaign" || !currentBuilder.campaignAssets) {
+      throw new Error("A campanha atual não está disponível.");
+    }
+
+    const nextBuilder: BuilderState = {
+      ...currentBuilder,
+      campaignAssets: currentBuilder.campaignAssets.map((asset) =>
+        asset.id === assetId
+          ? {
+              ...asset,
+              content: {
+                ...asset.content,
+                generationError: undefined,
+                mediaRender,
+              },
+            }
+          : asset,
+      ),
+    };
+    setBuilder(nextBuilder);
+
+    try {
+      const brandName = getBuilderCampaignBrandName(nextBuilder);
+      const savedAsset = await saveAssetToLibrary(
+        brandName ? `Campanha ${brandName}` : "Campanha com Reel",
+        nextBuilder,
+        activeLibraryAssetId,
+      );
+      setActiveLibraryAssetId(savedAsset.id);
+    } catch (error) {
+      throw new Error(
+        `O vídeo foi importado no Canvas, mas a Biblioteca não confirmou o salvamento. ${
+          error instanceof Error ? error.message : "Use Salvar na Biblioteca."
+        }`,
+      );
+    }
+  };
+
   return (
     <div className="flex h-full min-h-0 flex-col bg-transparent">
       <BuilderHeader
@@ -212,6 +275,7 @@ export function PageBuilder({
                 onTabChange={setActiveTab}
                 loading={loading}
                 onRetry={onRetry}
+                onImportReel={handleImportReel}
               />
             </div>
           )}
