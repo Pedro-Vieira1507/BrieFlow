@@ -36,6 +36,7 @@ type SubscriptionRow = {
   status: string;
   credits_monthly: number;
   credits_remaining: number;
+  last_credit_reset_on: string;
   current_period_start: string;
   current_period_end: string;
   stripe_customer_id: string | null;
@@ -54,6 +55,27 @@ type SubscriptionRow = {
 export type Database = {
   public: {
     Tables: {
+      assets: Table<{
+        id: string;
+        user_id: string;
+        organization_id: string;
+        name: string;
+        type: string;
+        content: Json;
+        status: string;
+        size_bytes: number;
+        created_at: string;
+        updated_at: string;
+      }>;
+      asset_embeddings: Table<{
+        asset_id: string;
+        user_id: string;
+        organization_id: string;
+        source_text: string;
+        embedding: string;
+        created_at: string;
+        updated_at: string;
+      }>;
       ai_usage_log: Table<AiUsageRow>;
       organization_members: Table<{
         organization_id: string;
@@ -124,6 +146,16 @@ export type Database = {
           p_reason?: string;
         };
         Returns: boolean;
+      };
+      search_asset_embeddings: {
+        Args: {
+          p_query_embedding: string;
+          p_match_count?: number;
+        };
+        Returns: Array<{
+          asset_id: string;
+          similarity: number;
+        }>;
       };
       sync_stripe_subscription: {
         Args: {

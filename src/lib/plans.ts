@@ -18,6 +18,7 @@ export interface ContentFormatDefinition {
   creditCost: number;
   minPlan: PlanId;
   category: "design" | "social" | "audiovisual" | "document";
+  availability?: "active" | "assisted" | "standby";
 }
 
 export const CONTENT_FORMATS: Record<MaterialType, ContentFormatDefinition> = {
@@ -76,22 +77,24 @@ export const CONTENT_FORMATS: Record<MaterialType, ContentFormatDefinition> = {
     category: "document",
   },
   reel: {
-    label: "Roteiro de Reel",
+    label: "Reel",
     shortLabel: "Reel",
-    description: "Cenas, gancho, locução, texto em tela e timing vertical.",
-    prompt: "Gere apenas um roteiro de Reel vertical para esta campanha.",
+    description: "Vídeo vertical curto, finalizado e pronto para reprodução.",
+    prompt: "Gere um Reel vertical finalizado para esta campanha.",
     creditCost: 6,
     minPlan: "pro",
     category: "audiovisual",
+    availability: "assisted",
   },
   video: {
-    label: "Roteiro de vídeo",
+    label: "Vídeo",
     shortLabel: "Vídeo",
-    description: "Roteiro audiovisual com cenas, locução e direção visual.",
-    prompt: "Gere apenas um roteiro de vídeo para esta campanha.",
+    description: "Vídeo finalizado com narrativa, cenas e direção audiovisual.",
+    prompt: "Gere um vídeo finalizado para esta campanha.",
     creditCost: 10,
     minPlan: "pro",
     category: "audiovisual",
+    availability: "standby",
   },
   slides: {
     label: "Apresentação em slides",
@@ -103,19 +106,28 @@ export const CONTENT_FORMATS: Record<MaterialType, ContentFormatDefinition> = {
     category: "document",
   },
   podcast: {
-    label: "Roteiro de podcast",
+    label: "Podcast",
     shortLabel: "Podcast",
-    description: "Pauta, abertura, blocos, roteiro do host e show notes.",
-    prompt: "Gere apenas um roteiro de podcast para esta campanha.",
+    description:
+      "Áudio de podcast finalizado, com locução natural e estrutura editorial.",
+    prompt: "Gere um podcast em áudio finalizado para esta campanha.",
     creditCost: 12,
     minPlan: "agency",
     category: "audiovisual",
   },
 };
 
+export function isMaterialOperational(material: MaterialType): boolean {
+  return CONTENT_FORMATS[material].availability !== "standby";
+}
+
+export function isMaterialAssisted(material: MaterialType): boolean {
+  return CONTENT_FORMATS[material].availability === "assisted";
+}
+
 export interface PlanDefinition {
   label: string;
-  monthlyCredits: number;
+  dailyCredits: number;
   maxMembers: number;
   maxSavedAssets: number;
   allowedFormats: readonly MaterialType[];
@@ -138,35 +150,35 @@ const PRO_FORMATS: readonly MaterialType[] = [
 export const PLAN_CATALOG: Record<PlanId, PlanDefinition> = {
   free: {
     label: "Gratuito",
-    monthlyCredits: 20,
+    dailyCredits: 20,
     maxMembers: 1,
     maxSavedAssets: 20,
     allowedFormats: FREE_FORMATS,
   },
   basic: {
     label: "Básico",
-    monthlyCredits: 150,
+    dailyCredits: 150,
     maxMembers: 1,
     maxSavedAssets: 250,
     allowedFormats: BASIC_FORMATS,
   },
   pro: {
     label: "Pro",
-    monthlyCredits: 600,
+    dailyCredits: 600,
     maxMembers: 5,
     maxSavedAssets: 2_000,
     allowedFormats: PRO_FORMATS,
   },
   agency: {
     label: "Agência",
-    monthlyCredits: 2_500,
+    dailyCredits: 2_500,
     maxMembers: 25,
     maxSavedAssets: 10_000,
     allowedFormats: MATERIAL_TYPES,
   },
   enterprise: {
     label: "Enterprise",
-    monthlyCredits: 10_000,
+    dailyCredits: 10_000,
     maxMembers: 250,
     maxSavedAssets: 100_000,
     allowedFormats: MATERIAL_TYPES,

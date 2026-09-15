@@ -5,6 +5,8 @@ import {
   CONTENT_FORMATS,
   PLAN_CATALOG,
   canUseMaterial,
+  isMaterialAssisted,
+  isMaterialOperational,
   planMeetsMinimum,
 } from "../src/lib/plans.ts";
 import { formatStructuredContentText } from "../src/lib/structuredContent.ts";
@@ -20,9 +22,19 @@ test("plans unlock formats cumulatively without exposing premium formats for fre
   assert.equal(planMeetsMinimum("enterprise", "agency"), true);
 });
 
+test("long video remains paused while Reel uses the assisted free provider", () => {
+  assert.equal(canUseMaterial("enterprise", "video"), true);
+  assert.equal(canUseMaterial("enterprise", "reel"), true);
+  assert.equal(isMaterialOperational("video"), false);
+  assert.equal(isMaterialOperational("reel"), true);
+  assert.equal(isMaterialAssisted("reel"), true);
+  assert.equal(isMaterialAssisted("video"), false);
+  assert.equal(isMaterialOperational("podcast"), true);
+});
+
 test("every plan and format has positive production limits", () => {
   for (const plan of Object.values(PLAN_CATALOG)) {
-    assert.ok(plan.monthlyCredits > 0);
+    assert.ok(plan.dailyCredits > 0);
     assert.ok(plan.maxMembers > 0);
     assert.ok(plan.maxSavedAssets > 0);
   }
@@ -32,10 +44,10 @@ test("every plan and format has positive production limits", () => {
   }
 });
 
-test("advanced content schema normalizes a production-ready script", () => {
+test("advanced content schema normalizes a production-ready media plan", () => {
   const parsed = StructuredCopySchema.parse({
     title: "Da ideia ao primeiro corte",
-    summary: "Roteiro objetivo para apresentar a proposta.",
+    summary: "Plano objetivo para apresentar a proposta.",
     duration: "45 segundos",
     sections: [
       {

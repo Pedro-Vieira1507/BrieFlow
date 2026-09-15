@@ -14,7 +14,12 @@ import {
   type MaterialType,
 } from "@/types/brief";
 import { useCreditsStore } from "@/hooks/useCredits";
-import { CONTENT_FORMATS, canUseMaterial } from "@/lib/plans";
+import {
+  CONTENT_FORMATS,
+  canUseMaterial,
+  isMaterialAssisted,
+  isMaterialOperational,
+} from "@/lib/plans";
 import {
   extractUrlsFromText,
   scrapeProductByUrlFn,
@@ -162,10 +167,21 @@ export function useBriefflowAgent() {
       only?: CampaignChannel,
       targetKeys: string[] = ["all"],
       provider: "ollama" | "omniroute" = "omniroute",
+      isRegeneration = false,
     ) => {
       const plan = discoveryPlanRef.current ?? builderRef.current.discoveryPlan;
 
       const channels: CampaignChannel[] = only ? [only] : ALL_CHANNELS;
+      const paused = channels.find(
+        (channel) => !isMaterialOperational(channel),
+      );
+      if (paused) {
+        toast.info(`${channelLabel(paused)} está em stand by.`, {
+          description:
+            "A geração de vídeo foi pausada até o provedor disponibilizar cota.",
+        });
+        return;
+      }
       const accountPlan = useCreditsStore.getState().plan;
       const blocked = channels.find(
         (channel) =>
@@ -226,7 +242,9 @@ export function useBriefflowAgent() {
         id: assistantId,
         role: "assistant",
         content: only
-          ? `Ok! Vou regerar apenas o **${channelLabel(only)}** – as outras peças permanecem como estão.`
+          ? isRegeneration
+            ? `Ok! Vou regenerar apenas o **${channelLabel(only)}** – as outras peças permanecem como estão.`
+            : `Ok! Vou gerar o **${channelLabel(only)}**.`
           : `Mão na massa! Gerando ${channels.length} peças sequencialmente.`,
       });
 
@@ -617,10 +635,16 @@ Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo terri
       updateMessage(assistantId, {
         content: hasErrors
           ? only
-            ? `Não consegui regerar o ${channelLabel(only)} agora. Tente novamente.`
+            ? isRegeneration
+              ? `Não consegui regenerar o ${channelLabel(only)} agora. Tente novamente.`
+              : `Não consegui gerar o ${channelLabel(only)} agora. Tente novamente.`
             : "Processo concluído, mas uma ou mais peças falharam. Você pode pedir para regenerar."
           : only
-            ? `${channelLabel(only)} atualizado com sucesso.`
+            ? isMaterialAssisted(only)
+              ? "Direção do Reel preparada. Gere gratuitamente no ZSky e importe o vídeo final na aba Reel."
+              : isRegeneration
+                ? `${channelLabel(only)} atualizado com sucesso.`
+                : `${channelLabel(only)} criado com sucesso.`
             : "Campanha finalizada! Navegue pelas abas ao lado.",
       });
 
@@ -894,10 +918,11 @@ Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo terri
           }
         }
       } catch (err) {
-        toast.error("Falha ao processar", { description: String(err) });
+        const description = describeAiError(err);
+        toast.error("Falha ao processar", { description });
         if (!isHiddenAction) {
           updateMessage(assistantId, {
-            content: "Tive uma falha ao processar. Pode tentar reformular?",
+            content: `Não consegui concluir esta etapa. ${description}`,
           });
         }
       } finally {
@@ -942,6 +967,7 @@ Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo terri
         channel,
         ["all"],
         "omniroute",
+        true,
       );
     },
     [currentChatHistory, generateCampaignSafely],

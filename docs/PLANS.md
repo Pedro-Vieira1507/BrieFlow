@@ -2,7 +2,7 @@
 
 O catálogo existe no frontend para UX e em `plan_catalog` para autorização. O banco é a fonte de verdade; alterar somente a interface não libera uma função.
 
-| Plano      | Créditos/mês | Formatos                                 | Biblioteca | Membros |
+| Plano      | Créditos/dia | Formatos                                 | Biblioteca | Membros |
 | ---------- | -----------: | ---------------------------------------- | ---------: | ------: |
 | Gratuito   |           20 | Banner, e-mail, social                   |         20 |       1 |
 | Básico     |          150 | Gratuito + WhatsApp, blog, ficha técnica |        250 |       1 |
@@ -24,3 +24,5 @@ O catálogo existe no frontend para UX e em `plan_catalog` para autorização. O
 | Descoberta, análise de site ou busca de imagem |        1 |
 
 Os valores são configuráveis no banco. Mantenha `src/lib/plans.ts` sincronizado para que a previsão na interface continue correta; a cobrança final sempre vem do servidor.
+
+Os créditos são compartilhados pelo workspace e voltam ao limite do plano todos os dias às 00:00 no fuso `America/Sao_Paulo`. O ciclo de cobrança do Stripe continua mensal e não é alterado pela reposição diária.

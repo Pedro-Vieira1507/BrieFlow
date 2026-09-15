@@ -1,14 +1,15 @@
 // src/components/briefflow/chat/ChatInput.tsx
 import { useRef, useState } from "react";
-import { Send, Loader2 } from "lucide-react";
+import { Send, Loader2, Mic } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface Props {
   onSend: (text: string) => void;
   disabled?: boolean;
+  onOpenVoice?: () => void;
 }
 
-export function ChatInput({ onSend, disabled }: Props) {
+export function ChatInput({ onSend, disabled, onOpenVoice }: Props) {
   const [text, setText] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -50,6 +51,16 @@ export function ChatInput({ onSend, disabled }: Props) {
           "focus-within:border-brand focus-within:ring-2 focus-within:ring-brand/20",
         )}
       >
+        <button
+          type="button"
+          onClick={onOpenVoice}
+          disabled={disabled}
+          aria-label="Abrir estúdio de áudio com IA"
+          title="Briefing por voz, transcrição e tradução"
+          className="mb-0.5 flex size-10 shrink-0 items-center justify-center rounded-full text-brand transition hover:bg-brand-muted disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <Mic className="size-4" />
+        </button>
         <textarea
           ref={textareaRef}
           value={text}

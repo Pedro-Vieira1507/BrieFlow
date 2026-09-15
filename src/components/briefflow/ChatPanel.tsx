@@ -7,9 +7,10 @@ import { CreditsBar } from "./CreditsBar";
 
 interface Props {
   onSend: (text: string) => void;
+  onOpenVoice?: () => void;
 }
 
-export function ChatPanel({ onSend }: Props) {
+export function ChatPanel({ onSend, onOpenVoice }: Props) {
   // Trazemos o user e setAuthOpen para barrar no nível do Painel
   const { messages, builder, loading, scraping, user, setAuthOpen } =
     useBriefflowStore();
@@ -41,7 +42,17 @@ export function ChatPanel({ onSend }: Props) {
         scraping={scraping}
         onPickSuggestion={handleProtectedSend} // <-- Agora protegido
       />
-      <ChatInput disabled={busy} onSend={handleProtectedSend} />{" "}
+      <ChatInput
+        disabled={busy}
+        onSend={handleProtectedSend}
+        onOpenVoice={() => {
+          if (!user) {
+            setAuthOpen(true);
+            return;
+          }
+          onOpenVoice?.();
+        }}
+      />{" "}
       {/* <-- Agora protegido */}
     </div>
   );

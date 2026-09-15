@@ -15,6 +15,7 @@ import { LibraryModal } from "./LibraryModal";
 import { PageBuilder } from "./PageBuilder";
 import { ProfileSettingsModal } from "./ProfileSettingsModal";
 import { ContentCatalogModal } from "./ContentCatalogModal";
+import { MultimodalStudioModal } from "./MultimodalStudioModal";
 import { CONTENT_FORMATS } from "@/lib/plans";
 import type { MaterialType } from "@/types/brief";
 
@@ -26,6 +27,7 @@ export function WorkspaceShell() {
   const [mobileChatOpen, setMobileChatOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [catalogOpen, setCatalogOpen] = useState(false);
+  const [multimodalOpen, setMultimodalOpen] = useState(false);
 
   useEffect(() => {
     document.documentElement.classList.add("dark");
@@ -70,7 +72,10 @@ export function WorkspaceShell() {
         {brandContext.site?.colors && (
           <BrandPalette colors={brandContext.site.colors} />
         )}
-        <ChatPanel onSend={(text) => handleSend(text, false)} />
+        <ChatPanel
+          onSend={(text) => handleSend(text, false)}
+          onOpenVoice={() => setMultimodalOpen(true)}
+        />
       </aside>
 
       <section className="relative z-10 flex min-h-0 min-w-0 flex-1 flex-col">
@@ -109,7 +114,10 @@ export function WorkspaceShell() {
               {brandContext.site?.colors && (
                 <BrandPalette colors={brandContext.site.colors} />
               )}
-              <ChatPanel onSend={sendFromMobile} />
+              <ChatPanel
+                onSend={sendFromMobile}
+                onOpenVoice={() => setMultimodalOpen(true)}
+              />
             </SheetContent>
           </Sheet>
         </div>
@@ -125,6 +133,14 @@ export function WorkspaceShell() {
         open={catalogOpen}
         onOpenChange={setCatalogOpen}
         onSelect={handleSelectFormat}
+      />
+      <MultimodalStudioModal
+        open={multimodalOpen}
+        onOpenChange={setMultimodalOpen}
+        onUseBriefing={(text) => {
+          setMobileChatOpen(true);
+          void handleSend(text, false);
+        }}
       />
       <Toaster richColors position="top-right" theme="dark" />
     </main>

@@ -28,6 +28,7 @@ interface BriefflowState {
   uploadedImage: string | null;
   authOpen: boolean;
   libraryOpen: boolean;
+  activeLibraryAssetId: string | null;
   // actions
   setMessages: (
     updater: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[]),
@@ -55,6 +56,7 @@ interface BriefflowState {
   setUploadedImage: (img: string | null) => void;
   setAuthOpen: (v: boolean) => void;
   setLibraryOpen: (v: boolean) => void;
+  setActiveLibraryAssetId: (id: string | null) => void;
   reset: () => void;
 }
 
@@ -78,6 +80,7 @@ export const useBriefflowStore = create<BriefflowState>((set) => ({
   uploadedImage: null,
   authOpen: false,
   libraryOpen: false,
+  activeLibraryAssetId: null,
   setMessages: (updater) =>
     set((s) => ({
       messages: typeof updater === "function" ? updater(s.messages) : updater,
@@ -165,11 +168,14 @@ export const useBriefflowStore = create<BriefflowState>((set) => ({
         uploadedImage: null,
         authOpen: false,
         libraryOpen: false,
+        activeLibraryAssetId: null,
       };
     }),
   setUploadedImage: (img) => set({ uploadedImage: img }),
   setAuthOpen: (authOpen) => set({ authOpen }),
   setLibraryOpen: (libraryOpen) => set({ libraryOpen }),
+  setActiveLibraryAssetId: (activeLibraryAssetId) =>
+    set({ activeLibraryAssetId }),
   reset: () =>
     set({
       messages: [],
@@ -182,5 +188,6 @@ export const useBriefflowStore = create<BriefflowState>((set) => ({
       uploadedImage: null,
       authOpen: false,
       libraryOpen: false,
+      activeLibraryAssetId: null,
     }),
 }));

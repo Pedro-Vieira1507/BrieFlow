@@ -8,15 +8,48 @@ import {
 import { stripePriceForPlan, stripeRequest } from "../_shared/stripe.ts";
 
 interface BillingRequest {
-  action?: "checkout" | "portal";
+  action?: "checkout" | "portal" | "status";
   plan?: string;
   request_id?: string;
+}
+
+const SELLABLE_PLANS = ["basic", "pro", "agency"] as const;
+type SellablePlan = (typeof SELLABLE_PLANS)[number];
+
+interface BillingAvailability {
+  portal_available: boolean;
+  checkout_plans: Record<SellablePlan, boolean>;
+  prices: Record<SellablePlan, PublicRecurringPrice | null>;
+}
+
+interface PublicRecurringPrice {
+  currency: string;
+  interval: "day" | "week" | "month" | "year";
+  interval_count: number;
+  unit_amount: number;
 }
 
 interface StripeResource {
   id: string;
   url?: string;
 }
+
+interface StripePrice extends StripeResource {
+  active?: boolean;
+  currency?: string;
+  livemode?: boolean;
+  type?: string;
+  unit_amount?: number | null;
+  recurring?: {
+    interval?: string;
+    interval_count?: number;
+    usage_type?: string;
+  } | null;
+}
+
+let availabilityCache:
+  | { expiresAt: number; fingerprint: string; value: BillingAvailability }
+  | undefined;
 
 function applicationUrl(): URL {
   const raw = Deno.env.get("APP_URL")?.trim();
@@ -26,6 +59,143 @@ function applicationUrl(): URL {
     throw new Error("app_url_not_secure");
   }
   return url;
+}
+
+function configuredBillingAvailability(): BillingAvailability {
+  const environment = Deno.env.get("ENVIRONMENT")?.trim().toLowerCase();
+  const stripeKey = Deno.env.get("STRIPE_SECRET_KEY")?.trim() ?? "";
+  const webhookSecret = Deno.env.get("STRIPE_WEBHOOK_SECRET")?.trim() ?? "";
+  const validStripeKey = /^(?:sk|rk)_(?:test|live)_[A-Za-z0-9]+$/.test(
+    stripeKey,
+  );
+  const nonProductionMode = ["development", "test", "staging"].includes(
+    environment ?? "",
+  );
+  const correctStripeMode =
+    /^(?:sk|rk)_live_/.test(stripeKey) ||
+    (nonProductionMode && /^(?:sk|rk)_test_/.test(stripeKey));
+  const validWebhookSecret = /^whsec_[A-Za-z0-9]+$/.test(webhookSecret);
+
+  let validAppUrl = false;
+  try {
+    applicationUrl();
+    validAppUrl = true;
+  } catch {
+    validAppUrl = false;
+  }
+
+  const portalAvailable = validStripeKey && correctStripeMode && validAppUrl;
+  const checkoutFoundation = portalAvailable && validWebhookSecret;
+  const checkoutPlans = Object.fromEntries(
+    SELLABLE_PLANS.map((plan) => [
+      plan,
+      checkoutFoundation &&
+        /^price_[A-Za-z0-9]+$/.test(stripePriceForPlan(plan) ?? ""),
+    ]),
+  ) as Record<SellablePlan, boolean>;
+
+  return {
+    portal_available: portalAvailable,
+    checkout_plans: checkoutPlans,
+    prices: { basic: null, pro: null, agency: null },
+  };
+}
+
+function billingFingerprint(availability: BillingAvailability): string {
+  return JSON.stringify({
+    environment: Deno.env.get("ENVIRONMENT")?.trim().toLowerCase() ?? "",
+    app_url: Deno.env.get("APP_URL")?.trim() ?? "",
+    portal: availability.portal_available,
+    prices: SELLABLE_PLANS.map((plan) => stripePriceForPlan(plan)),
+    plans: availability.checkout_plans,
+  });
+}
+
+async function verifiedBillingAvailability(): Promise<BillingAvailability> {
+  const availability = configuredBillingAvailability();
+  const fingerprint = billingFingerprint(availability);
+  if (
+    availabilityCache &&
+    availabilityCache.expiresAt > Date.now() &&
+    availabilityCache.fingerprint === fingerprint
+  ) {
+    return availabilityCache.value;
+  }
+
+  const expectsLivePrices =
+    Deno.env.get("ENVIRONMENT")?.trim().toLowerCase() === "production";
+  await Promise.all(
+    SELLABLE_PLANS.map(async (plan) => {
+      if (!availability.checkout_plans[plan]) return;
+      const priceId = stripePriceForPlan(plan);
+      if (!priceId) {
+        availability.checkout_plans[plan] = false;
+        return;
+      }
+
+      try {
+        const price = await stripeRequest<StripePrice>(
+          `/prices/${encodeURIComponent(priceId)}`,
+        );
+        const interval = price.recurring?.interval;
+        const validInterval = ["day", "week", "month", "year"].includes(
+          interval ?? "",
+        );
+        const validPrice =
+          price.id === priceId &&
+          price.active === true &&
+          price.type === "recurring" &&
+          price.recurring?.usage_type === "licensed" &&
+          validInterval &&
+          Number.isInteger(price.recurring?.interval_count) &&
+          Number(price.recurring?.interval_count) > 0 &&
+          Number.isInteger(price.unit_amount) &&
+          Number(price.unit_amount) > 0 &&
+          /^[a-z]{3}$/.test(price.currency ?? "") &&
+          price.livemode === expectsLivePrices;
+        if (!validPrice) {
+          availability.checkout_plans[plan] = false;
+          return;
+        }
+        availability.prices[plan] = {
+          currency: price.currency!,
+          interval: interval as PublicRecurringPrice["interval"],
+          interval_count: price.recurring!.interval_count!,
+          unit_amount: price.unit_amount!,
+        };
+      } catch {
+        availability.checkout_plans[plan] = false;
+      }
+    }),
+  );
+
+  availabilityCache = {
+    expiresAt: Date.now() + 60_000,
+    fingerprint,
+    value: availability,
+  };
+  return availability;
+}
+
+async function createPortalSession(
+  customerId: string,
+  organizationId: string,
+  requestId: string,
+  appUrl: URL,
+): Promise<StripeResource> {
+  const form = new URLSearchParams();
+  form.set("customer", customerId);
+  form.set("return_url", new URL("/app", appUrl).toString());
+  const session = await stripeRequest<StripeResource>(
+    "/billing_portal/sessions",
+    {
+      method: "POST",
+      form,
+      idempotencyKey: `brieflow_portal_${organizationId}_${requestId}`,
+    },
+  );
+  if (!session.url) throw new Error("stripe_missing_url");
+  return session;
 }
 
 Deno.serve(async (req: Request) => {
@@ -39,8 +209,27 @@ Deno.serve(async (req: Request) => {
 
   try {
     const body = await readJson<BillingRequest>(req, 4_096);
-    if (!body.action || !["checkout", "portal"].includes(body.action)) {
+    if (
+      !body.action ||
+      !["checkout", "portal", "status"].includes(body.action)
+    ) {
       return json(req, 400, { error: "invalid_billing_action" });
+    }
+    if (body.action === "status") {
+      const { data: statusAllowed, error: statusRateError } =
+        await context.service.rpc("check_rate_limit", {
+          p_user_id: context.user.id,
+          p_scope: "billing_status",
+          p_limit: 30,
+        });
+      if (statusRateError) throw new Error("billing_rate_limit_failed");
+      if (!statusAllowed) {
+        return json(req, 429, {
+          error: "rate_limit_exceeded",
+          message: "Muitas consultas de cobrança. Aguarde um minuto.",
+        });
+      }
+      return json(req, 200, await verifiedBillingAvailability());
     }
     const requestId = body.request_id?.trim() || crypto.randomUUID();
     if (!/^[a-zA-Z0-9_-]{8,128}$/.test(requestId)) {
@@ -95,6 +284,27 @@ Deno.serve(async (req: Request) => {
     if (subscriptionError || !subscription)
       throw new Error("subscription_not_found");
 
+    const configuredAvailability = configuredBillingAvailability();
+    if (body.action === "portal" && !configuredAvailability.portal_available) {
+      return json(req, 503, { error: "billing_not_configured" });
+    }
+
+    const selectedPlan = body.plan?.toLowerCase() ?? "";
+    if (
+      body.action === "checkout" &&
+      !SELLABLE_PLANS.includes(selectedPlan as SellablePlan)
+    ) {
+      return json(req, 400, { error: "invalid_plan" });
+    }
+    if (
+      body.action === "checkout" &&
+      !(await verifiedBillingAvailability()).checkout_plans[
+        selectedPlan as SellablePlan
+      ]
+    ) {
+      return json(req, 503, { error: "billing_not_configured" });
+    }
+
     const appUrl = applicationUrl();
     let customerId = subscription.stripe_customer_id as string | null;
     if (!customerId) {
@@ -116,36 +326,32 @@ Deno.serve(async (req: Request) => {
     }
 
     if (body.action === "portal") {
-      const form = new URLSearchParams();
-      form.set("customer", customerId);
-      form.set("return_url", new URL("/app", appUrl).toString());
-      const session = await stripeRequest<StripeResource>(
-        "/billing_portal/sessions",
-        {
-          method: "POST",
-          form,
-          idempotencyKey: `brieflow_portal_${organizationId}_${requestId}`,
-        },
+      const session = await createPortalSession(
+        customerId,
+        organizationId,
+        requestId,
+        appUrl,
       );
-      if (!session.url) throw new Error("stripe_missing_url");
       return json(req, 200, { url: session.url });
     }
 
-    const selectedPlan = body.plan?.toLowerCase() ?? "";
-    if (!["basic", "pro", "agency"].includes(selectedPlan)) {
-      return json(req, 400, { error: "invalid_plan" });
-    }
-    const priceId = stripePriceForPlan(selectedPlan);
-    if (!priceId) return json(req, 503, { error: "plan_price_not_configured" });
     if (
       subscription.stripe_subscription_id &&
       ["active", "trialing", "past_due"].includes(subscription.status)
     ) {
-      return json(req, 409, {
-        error: "subscription_already_exists",
-        message: "Use o portal de cobrança para alterar seu plano.",
+      const session = await createPortalSession(
+        customerId,
+        organizationId,
+        requestId,
+        appUrl,
+      );
+      return json(req, 200, {
+        url: session.url,
+        mode: "portal",
       });
     }
+    const priceId = stripePriceForPlan(selectedPlan);
+    if (!priceId) return json(req, 503, { error: "billing_not_configured" });
 
     const form = new URLSearchParams();
     form.set("mode", "subscription");
@@ -174,6 +380,7 @@ Deno.serve(async (req: Request) => {
       "stripe_not_configured",
       "app_url_not_configured",
       "app_url_not_secure",
+      "billing_not_configured",
     ].includes(code);
     return json(req, configurationError ? 503 : 502, {
       error: configurationError ? code : "billing_failed",

@@ -2,12 +2,13 @@
 import { useEffect } from "react";
 import { create } from "zustand";
 import { supabase } from "@/lib/supabase";
+import { CREDIT_REFRESH_INTERVAL_MS, getCreditDayKey } from "@/lib/creditCycle";
 import { PLAN_CATALOG, normalizePlanId, type PlanId } from "@/lib/plans";
 import { isMaterialType, type MaterialType } from "@/types/brief";
 
 export interface UserPlan {
   plan: PlanId;
-  creditsMonthly: number;
+  creditsDaily: number;
   creditsRemaining: number;
   subscriptionStatus:
     "active" | "past_due" | "canceled" | "trialing" | "incomplete";
@@ -58,9 +59,7 @@ export const useCreditsStore = create<CreditsState>((set) => ({
       set({
         plan: {
           plan: planId,
-          creditsMonthly: Number(
-            row.credits_monthly ?? fallback.monthlyCredits,
-          ),
+          creditsDaily: Number(row.credits_monthly ?? fallback.dailyCredits),
           creditsRemaining: Number(row.credits_remaining ?? 0),
           subscriptionStatus: row.subscription_status ?? "active",
           allowedFormats:
@@ -86,7 +85,62 @@ export const useCreditsStore = create<CreditsState>((set) => ({
   },
 }));
 
-let initialized = false;
+let observedCreditDay = getCreditDayKey();
+let creditObserverUsers = 0;
+let stopCreditObserver: (() => void) | null = null;
+
+function startCreditObserver(refresh: () => Promise<void>): () => void {
+  if (!supabase) return () => undefined;
+
+  let active = true;
+  observedCreditDay = getCreditDayKey();
+
+  void supabase.auth.getSession().then(({ data: { session } }) => {
+    if (active && session) void refresh();
+  });
+
+  const {
+    data: { subscription },
+  } = supabase.auth.onAuthStateChange((_event, session) => {
+    if (!active) return;
+    if (session) {
+      void refresh();
+    } else {
+      refreshSequence += 1;
+      useCreditsStore.setState({
+        plan: null,
+        loading: false,
+        error: null,
+      });
+    }
+  });
+
+  const refreshAfterDayChange = () => {
+    const currentCreditDay = getCreditDayKey();
+    if (currentCreditDay === observedCreditDay) return;
+    observedCreditDay = currentCreditDay;
+    void refresh();
+  };
+
+  const interval = window.setInterval(
+    refreshAfterDayChange,
+    CREDIT_REFRESH_INTERVAL_MS,
+  );
+  const handleVisibilityChange = () => {
+    if (document.visibilityState === "visible") refreshAfterDayChange();
+  };
+
+  window.addEventListener("focus", refreshAfterDayChange);
+  document.addEventListener("visibilitychange", handleVisibilityChange);
+
+  return () => {
+    active = false;
+    window.clearInterval(interval);
+    window.removeEventListener("focus", refreshAfterDayChange);
+    document.removeEventListener("visibilitychange", handleVisibilityChange);
+    subscription.unsubscribe();
+  };
+}
 
 // 2. Hook de Consumo que gerencia a Sessão
 export function useCredits() {
@@ -94,31 +148,25 @@ export function useCredits() {
   const refresh = useCreditsStore((current) => current.refresh);
 
   useEffect(() => {
-    if (!supabase || initialized) return;
-    initialized = true;
+    if (!supabase) return;
+    creditObserverUsers += 1;
+    if (creditObserverUsers === 1) {
+      stopCreditObserver = startCreditObserver(refresh);
+    }
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) refresh();
-    });
-
-    supabase.auth.onAuthStateChange((_event, session) => {
-      if (session) {
-        refresh();
-      } else {
-        refreshSequence += 1;
-        useCreditsStore.setState({
-          plan: null,
-          loading: false,
-          error: null,
-        });
+    return () => {
+      creditObserverUsers = Math.max(0, creditObserverUsers - 1);
+      if (creditObserverUsers === 0) {
+        stopCreditObserver?.();
+        stopCreditObserver = null;
       }
-    });
+    };
   }, [refresh]);
 
   const creditsPercent =
-    state.plan && state.plan.creditsMonthly > 0
+    state.plan && state.plan.creditsDaily > 0
       ? Math.round(
-          (state.plan.creditsRemaining / state.plan.creditsMonthly) * 100,
+          (state.plan.creditsRemaining / state.plan.creditsDaily) * 100,
         )
       : 0;
   const isPastDue = state.plan?.subscriptionStatus === "past_due";

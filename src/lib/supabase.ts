@@ -80,7 +80,12 @@ export async function getAuthToken(): Promise<string | null> {
 }
 
 type EdgeFunctionName =
-  "ai-proxy" | "scrape-proxy" | "image-search" | "billing";
+  | "ai-proxy"
+  | "scrape-proxy"
+  | "image-search"
+  | "billing"
+  | "media-render"
+  | "multimodal";
 
 export async function invokeEdgeFunction<T>(
   name: EdgeFunctionName,
@@ -110,7 +115,10 @@ export async function invokeEdgeFunction<T>(
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
       apikey: supabaseAnonKey,
-      "X-Client-Version": "brieflow-web/3",
+      // Supabase Edge Functions and the previous BrieFlow deployment already
+      // allow this conventional header. Keeping it stable prevents CORS
+      // failures while frontend and functions are rolled out independently.
+      "X-Client-Info": "brieflow-web/3",
     },
     body: JSON.stringify(body),
     signal,
@@ -151,6 +159,7 @@ function normalizeAssetName(name: string, state: BuilderState): string {
 export async function saveAssetToLibrary(
   name: string,
   state: BuilderState,
+  existingAssetId?: string | null,
 ): Promise<SavedLibraryAsset> {
   if (!supabase) throw new Error("Supabase não configurado.");
   const user = await requireUser();
@@ -162,17 +171,22 @@ export async function saveAssetToLibrary(
     );
   }
 
-  const { data, error } = await supabase
-    .from("assets")
-    .insert({
-      user_id: user.id,
-      name: normalizeAssetName(name, state),
-      type: state.type,
-      content: state,
-      status: "draft",
-    })
-    .select()
-    .single();
+  const payload = {
+    name: normalizeAssetName(name, state),
+    type: state.type,
+    content: state,
+    status: "draft",
+  };
+
+  const query = existingAssetId
+    ? supabase
+        .from("assets")
+        .update(payload)
+        .eq("id", existingAssetId)
+        .eq("user_id", user.id)
+    : supabase.from("assets").insert({ user_id: user.id, ...payload });
+
+  const { data, error } = await query.select().single();
 
   if (error) {
     if (error.message.includes("asset_limit_reached")) {
@@ -185,7 +199,18 @@ export async function saveAssetToLibrary(
     }
     throw error;
   }
-  return data as SavedLibraryAsset;
+  const saved = data as SavedLibraryAsset;
+  try {
+    await invokeEdgeFunction<{ indexed: boolean }>("multimodal", {
+      action: "index_asset",
+      assetId: saved.id,
+    });
+  } catch (error) {
+    // A campanha continua salva mesmo se o provedor de embeddings estiver
+    // temporariamente indisponível. A busca semântica reindexa sob demanda.
+    console.warn("Não foi possível indexar a campanha agora.", error);
+  }
+  return saved;
 }
 
 const STORAGE_MARKERS = [
@@ -271,8 +296,10 @@ async function refreshPrivateUrls(
   }));
 }
 
-const SAVED_ASSET_COLUMNS =
-  "id,user_id,organization_id,name,type,content,status,created_at,updated_at";
+// Keep reads compatible with the schema that existed before the enterprise
+// migration. organization_id and updated_at are server-managed metadata and
+// are not required to render or isolate the personal library.
+const SAVED_ASSET_COLUMNS = "id,user_id,name,type,content,status,created_at";
 const DEFAULT_LIBRARY_PAGE_SIZE = 50;
 const MAX_LIBRARY_PAGE_SIZE = 100;
 
@@ -338,6 +365,32 @@ export async function getSavedAssets(): Promise<SavedLibraryAsset[]> {
   return page.items;
 }
 
+export async function getSavedAssetsByIds(
+  ids: readonly string[],
+): Promise<SavedLibraryAsset[]> {
+  if (!supabase) throw new Error("Supabase não configurado.");
+  const user = await requireUser();
+  const requestedIds = Array.from(new Set(ids)).filter((id) =>
+    /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id),
+  );
+  if (requestedIds.length === 0) return [];
+
+  const { data, error } = await supabase
+    .from("assets")
+    .select(SAVED_ASSET_COLUMNS)
+    .eq("user_id", user.id)
+    .in("id", requestedIds.slice(0, 50));
+  if (error) throw error;
+
+  const refreshed = await refreshPrivateUrls(
+    (data ?? []) as SavedLibraryAsset[],
+  );
+  const byId = new Map(refreshed.map((item) => [item.id, item]));
+  return requestedIds
+    .map((id) => byId.get(id))
+    .filter((item): item is SavedLibraryAsset => Boolean(item));
+}
+
 export async function deleteSavedAsset(id: string): Promise<void> {
   if (!supabase) throw new Error("Supabase não configurado.");
   const user = await requireUser();
@@ -355,6 +408,118 @@ const ALLOWED_IMAGE_TYPES = new Set([
   "image/webp",
   "image/gif",
 ]);
+
+const ALLOWED_MULTIMODAL_TYPES = new Set([
+  "audio/mpeg",
+  "audio/mp3",
+  "audio/wav",
+  "audio/x-wav",
+  "audio/ogg",
+  "audio/webm",
+  "video/mp4",
+  "video/webm",
+  "video/quicktime",
+]);
+
+export interface UploadedMultimodalInput {
+  path: string;
+  mimeType: string;
+  name: string;
+  size: number;
+}
+
+export interface UploadedFinalReel {
+  url: string;
+  mimeType: string;
+  path: string;
+}
+
+const ALLOWED_REEL_TYPES = new Set([
+  "video/mp4",
+  "video/webm",
+  "video/quicktime",
+]);
+const MAX_REEL_BYTES = 48_000_000;
+
+export async function uploadFinalReel(file: File): Promise<UploadedFinalReel> {
+  if (!supabase) throw new Error("Supabase não configurado.");
+  const user = await requireUser();
+  const mimeType = file.type.split(";", 1)[0].toLowerCase();
+  if (!ALLOWED_REEL_TYPES.has(mimeType)) {
+    throw new Error("Formato não permitido. Use MP4, WebM ou MOV.");
+  }
+  if (file.size <= 0 || file.size > MAX_REEL_BYTES) {
+    throw new Error("O Reel final deve ter no máximo 48 MB.");
+  }
+
+  const extension =
+    file.name
+      .split(".")
+      .pop()
+      ?.toLowerCase()
+      .replace(/[^a-z0-9]/g, "") || "mp4";
+  const uniqueName =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const path = `${user.id}/generated-reels/${uniqueName}.${extension}`;
+  const { error } = await supabase.storage
+    .from("campaign-assets")
+    .upload(path, file, {
+      contentType: mimeType,
+      cacheControl: "3600",
+      upsert: false,
+    });
+  if (error) throw error;
+
+  const { data, error: signError } = await supabase.storage
+    .from("campaign-assets")
+    .createSignedUrl(path, 60 * 60);
+  if (signError || !data?.signedUrl) {
+    throw signError ?? new Error("Não foi possível abrir o Reel enviado.");
+  }
+
+  return { url: data.signedUrl, mimeType, path };
+}
+
+export async function uploadMultimodalInput(
+  file: File,
+): Promise<UploadedMultimodalInput> {
+  if (!supabase) throw new Error("Supabase não configurado.");
+  const user = await requireUser();
+  const mimeType = file.type.split(";", 1)[0].toLowerCase();
+  if (!ALLOWED_MULTIMODAL_TYPES.has(mimeType)) {
+    throw new Error(
+      "Formato não permitido. Use MP3, WAV, OGG, WebM, MP4 ou MOV.",
+    );
+  }
+  if (file.size <= 0 || file.size > 18 * 1024 * 1024) {
+    throw new Error(
+      "O arquivo deve ter no máximo 18 MB para processamento por IA.",
+    );
+  }
+
+  const extension =
+    file.name
+      .split(".")
+      .pop()
+      ?.toLowerCase()
+      .replace(/[^a-z0-9]/g, "") || "bin";
+  const uniqueName =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const path = `${user.id}/multimodal-inputs/${uniqueName}.${extension}`;
+  const { error } = await supabase.storage
+    .from("campaign-assets")
+    .upload(path, file, {
+      contentType: mimeType,
+      cacheControl: "3600",
+      upsert: false,
+    });
+  if (error) throw error;
+  return { path, mimeType, name: file.name.slice(0, 160), size: file.size };
+}
 
 export async function uploadCampaignAsset(
   file: File,
