@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
@@ -85,4 +86,25 @@ test("structured export preserves timing, direction and presenter notes", () => 
   assert.match(text, /Timing: 2 min/);
   assert.match(text, /Direção visual: Gráfico do cenário/);
   assert.match(text, /Notas: Conectar/);
+});
+
+test("slides export as PowerPoint and technical sheets export as factual PDF", async () => {
+  assert.match(CONTENT_FORMATS.slides.description, /PowerPoint/);
+  assert.match(CONTENT_FORMATS.technical_sheet.description, /PDF/);
+
+  const exporter = await readFile(
+    new URL("../src/lib/documentExport.ts", import.meta.url),
+    "utf8",
+  );
+  const prompts = await readFile(
+    new URL("../src/lib/marketingPrompts.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(exporter, /import\("pptxgenjs"\)/);
+  assert.match(exporter, /exportFilename\("slides"[\s\S]*"pptx"\)/);
+  assert.match(exporter, /import\("jspdf"\)/);
+  assert.match(exporter, /exportFilename\("technical_sheet"[\s\S]*"pdf"\)/);
+  assert.match(prompts, /Não informado — validar com o fabricante/);
+  assert.match(prompts, /Nunca complete especificações ausentes/);
 });

@@ -61,8 +61,9 @@ export const CONTENT_FORMATS: Record<MaterialType, ContentFormatDefinition> = {
   technical_sheet: {
     label: "Ficha técnica",
     shortLabel: "Ficha técnica",
-    description: "Especificações, aplicações, benefícios e cuidados factuais.",
-    prompt: "Gere apenas uma ficha técnica profissional para esta campanha.",
+    description: "Ficha do produto em PDF, com dados técnicos confirmados.",
+    prompt:
+      "Gere apenas uma ficha técnica profissional do produto mencionado nesta campanha.",
     creditCost: 4,
     minPlan: "basic",
     category: "document",
@@ -99,8 +100,9 @@ export const CONTENT_FORMATS: Record<MaterialType, ContentFormatDefinition> = {
   slides: {
     label: "Apresentação em slides",
     shortLabel: "Slides",
-    description: "Narrativa de apresentação, conteúdo e notas por slide.",
-    prompt: "Gere apenas uma apresentação em slides para esta campanha.",
+    description: "Apresentação editável em PowerPoint, com notas por slide.",
+    prompt:
+      "Gere apenas uma apresentação editável em PowerPoint para esta campanha.",
     creditCost: 8,
     minPlan: "pro",
     category: "document",

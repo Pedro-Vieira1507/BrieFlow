@@ -179,11 +179,15 @@ const ADVANCED_FORMAT_PLAYBOOKS: Record<
   slides: `FORMATO — APRESENTAÇÃO EM SLIDES:
 - Crie de 6 a 15 slides com arco narrativo: contexto, tensão, ideia, desenvolvimento, evidência disponível e próximo passo.
 - Cada seção representa um slide. title é a mensagem do slide; body é o texto essencial; items são bullets; visualDirection orienta o layout; speakerNotes contém a fala do apresentador.
+- O arquivo final será um PowerPoint editável (.pptx). Escreva títulos curtos, conteúdo apresentável e notas completas, sem depender deste JSON para ser compreendido.
 - Um argumento por slide, pouca densidade e nenhuma estatística sem fonte no briefing.`,
   technical_sheet: `FORMATO — FICHA TÉCNICA:
-- Organize somente dados confirmados: identificação, descrição, especificações, aplicações, diferenciais funcionais, instruções, compatibilidade, conformidade e cuidados quando existirem.
-- Cada seção representa uma categoria. Use items no formato “Campo: valor”. Em disclaimer, declare claramente o que precisa ser validado antes da publicação.
-- Nunca complete especificações ausentes por conhecimento geral nem transforme linguagem promocional em requisito técnico.`,
+- A ficha será exportada em PDF e deve identificar explicitamente o produto mencionado na campanha, nunca apenas a marca ou o público.
+- Organize somente dados confirmados: identificação do produto, categoria, apresentação, composição, especificações, aplicações, modo de uso ou preparo, compatibilidade, conformidade, conservação e cuidados quando estiverem presentes no briefing ou na página analisada.
+- Cada seção representa uma categoria técnica. Use items estritamente no formato “Campo: valor”. Não inclua direção visual, CTA promocional, persona ou estratégia de campanha como se fossem especificações.
+- Para um campo técnico essencial que não foi fornecido, registre “Campo: Não informado — validar com o fabricante” em vez de inferir. Agrupe esses campos em “Informações pendentes de validação”.
+- Em disclaimer, diferencie dados confirmados de pendências e determine validação com fabricante, embalagem ou responsável técnico antes da publicação.
+- Nunca complete especificações ausentes por conhecimento geral, nem transforme benefícios publicitários, adjetivos ou expectativas em requisitos técnicos.`,
   blog: `FORMATO — ARTIGO DE BLOG:
 - Produza título específico, resumo, estrutura de 4–8 seções e conclusão com CTA proporcional.
 - Cada seção representa um H2; body contém parágrafos completos; items só entram quando uma lista melhora a compreensão.

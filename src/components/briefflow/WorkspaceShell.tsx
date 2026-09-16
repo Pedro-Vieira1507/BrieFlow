@@ -142,7 +142,13 @@ export function WorkspaceShell() {
           void handleSend(text, false);
         }}
       />
-      <Toaster richColors position="top-right" theme="dark" />
+      <Toaster
+        richColors
+        position="top-right"
+        theme="dark"
+        offset={{ top: 80, right: 16 }}
+        mobileOffset={{ top: 80, right: 12, left: 12 }}
+      />
     </main>
   );
 }

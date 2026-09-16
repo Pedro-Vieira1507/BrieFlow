@@ -11,6 +11,10 @@ import {
 } from "@/lib/supabase";
 import { getBuilderCampaignBrandName } from "@/lib/campaignGeneration";
 import { downloadBlob, sanitizeFilenamePart } from "@/lib/export-utils";
+import {
+  exportSlidesPowerPoint,
+  exportTechnicalSheetPdf,
+} from "@/lib/documentExport";
 import { formatStructuredContentText } from "@/lib/structuredContent";
 import { CORE_MATERIAL_TYPES } from "@/types/brief";
 
@@ -152,6 +156,35 @@ export function PageBuilder({
           );
         } catch {
           toast.error("Não foi possível baixar a mídia final.");
+        } finally {
+          setIsExporting(false);
+        }
+        return;
+      }
+
+      if (activeTab === "slides" || activeTab === "technical_sheet") {
+        setIsExporting(true);
+        try {
+          if (activeTab === "slides") {
+            await exportSlidesPowerPoint(
+              document,
+              asset.content.brandName,
+              asset.content.themeColor,
+              asset.content.secondaryColor,
+            );
+            toast.success("PowerPoint exportado com sucesso.");
+          } else {
+            await exportTechnicalSheetPdf(
+              document,
+              asset.content.brandName,
+              asset.content.themeColor,
+              asset.content.secondaryColor,
+            );
+            toast.success("Ficha técnica exportada em PDF.");
+          }
+        } catch (error) {
+          console.error("Falha na exportação do documento:", error);
+          toast.error("Não foi possível gerar o arquivo final.");
         } finally {
           setIsExporting(false);
         }
