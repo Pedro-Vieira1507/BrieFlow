@@ -1,6 +1,8 @@
 # BrieFlow
 
-Plataforma multiempresa para transformar briefings em campanhas consistentes, editáveis e rastreáveis. O BrieFlow gera banners, e-mails, posts sociais, WhatsApp, artigos, fichas técnicas, apresentações e roteiros de Reels, vídeos e podcasts, com disponibilidade e consumo definidos pelo plano.
+Consulte [docs/COMMERCIAL_READINESS.md](docs/COMMERCIAL_READINESS.md) antes de promover uma versão para produção ou abrir novas assinaturas.
+
+Plataforma multiempresa para transformar briefings em campanhas consistentes, editáveis e rastreáveis. O BrieFlow gera banners, e-mails, posts sociais, WhatsApp, artigos, fichas técnicas, apresentações, Reels, vídeos e podcasts finalizados, com disponibilidade e consumo definidos pelo plano.
 
 ## Arquitetura
 
@@ -27,6 +29,12 @@ Antes de enviar uma alteração:
 ```bash
 npm run validate
 npm run security:audit
+```
+
+Antes de promover produção, rode também o gate público descrito em [implantação](docs/DEPLOYMENT.md):
+
+```bash
+npm run check:launch -- https://app.example.com YOUR_PROJECT_REF
 ```
 
 ## Ordem obrigatória de implantação

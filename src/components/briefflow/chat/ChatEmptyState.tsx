@@ -16,9 +16,9 @@ const SUGGESTIONS = [
   },
   {
     icon: Clapperboard,
-    label: "Roteiro de Reel",
+    label: "Criar Reel",
     prompt:
-      "Quero criar um roteiro de Reel vertical para apresentar meu produto.",
+      "Quero criar um Reel vertical finalizado para apresentar meu produto.",
   },
   {
     icon: Presentation,

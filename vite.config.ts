@@ -7,9 +7,19 @@
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 
 export default defineConfig({
+  // BrieFlow's stable production target is Vercel. Pinning the preset keeps
+  // local and CI builds identical to the artifact deployed in production.
+  nitro: { preset: "vercel" },
   tanstackStart: {
     // Redirect TanStack Start's bundled server entry to src/server.ts (our SSR error wrapper).
     // nitro/vite builds from this
     server: { entry: "server" },
+  },
+  vite: {
+    server: {
+      // Quick Tunnel hostnames rotate. Trust only Cloudflare's development
+      // tunnel suffix instead of disabling Vite's host validation globally.
+      allowedHosts: [".trycloudflare.com"],
+    },
   },
 });

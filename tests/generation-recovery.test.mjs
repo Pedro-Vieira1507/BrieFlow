@@ -38,6 +38,17 @@ test("uses the real provider error and keeps legacy failures recoverable", () =>
   );
 });
 
+test("discovery keeps typed AI errors and omits the empty UI placeholder", () => {
+  const source = readFileSync(
+    new URL("../src/lib/ollama.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(source, /const compactHistory = history\.filter/);
+  assert.match(source, /message\.content\.trim\(\)\.length > 0/);
+  assert.match(source, /if \(error instanceof AiClientError\) throw error/);
+});
+
 test("failed legacy asset inherits the brand from the same campaign", () => {
   assert.equal(
     getCampaignBrandName([
@@ -56,6 +67,21 @@ test("saved campaigns recover their brand from the approved discovery plan", () 
       campaignAssets: [],
     }),
     "Aurora Café",
+  );
+});
+
+test("single-format generation distinguishes a new piece from a retry", () => {
+  const source = readFileSync(
+    new URL("../src/hooks/useBriefflowAgent.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(source, /isRegeneration = false/);
+  assert.match(source, /isRegeneration[\s\S]*Vou regenerar apenas/);
+  assert.match(source, /: `Ok! Vou gerar o/);
+  assert.match(
+    source,
+    /currentChatHistory\(\),\s*channel,\s*\["all"\],\s*"omniroute",\s*true/,
   );
 });
 

@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
   CONTENT_FORMATS,
   PLAN_CATALOG,
   canUseMaterial,
+  isMaterialAssisted,
+  isMaterialOperational,
   planMeetsMinimum,
 } from "../src/lib/plans.ts";
 import { formatStructuredContentText } from "../src/lib/structuredContent.ts";
@@ -20,9 +23,19 @@ test("plans unlock formats cumulatively without exposing premium formats for fre
   assert.equal(planMeetsMinimum("enterprise", "agency"), true);
 });
 
+test("long video remains paused while Reel uses the assisted free provider", () => {
+  assert.equal(canUseMaterial("enterprise", "video"), true);
+  assert.equal(canUseMaterial("enterprise", "reel"), true);
+  assert.equal(isMaterialOperational("video"), false);
+  assert.equal(isMaterialOperational("reel"), true);
+  assert.equal(isMaterialAssisted("reel"), true);
+  assert.equal(isMaterialAssisted("video"), false);
+  assert.equal(isMaterialOperational("podcast"), true);
+});
+
 test("every plan and format has positive production limits", () => {
   for (const plan of Object.values(PLAN_CATALOG)) {
-    assert.ok(plan.monthlyCredits > 0);
+    assert.ok(plan.dailyCredits > 0);
     assert.ok(plan.maxMembers > 0);
     assert.ok(plan.maxSavedAssets > 0);
   }
@@ -32,10 +45,34 @@ test("every plan and format has positive production limits", () => {
   }
 });
 
-test("advanced content schema normalizes a production-ready script", () => {
+test("frontend plan allowances match the commercial database catalog", () => {
+  assert.deepEqual(
+    Object.fromEntries(
+      Object.entries(PLAN_CATALOG).map(([id, plan]) => [id, plan.dailyCredits]),
+    ),
+    { free: 8, basic: 60, pro: 250, agency: 800, enterprise: 10_000 },
+  );
+  assert.equal(PLAN_CATALOG.free.monthlyCreditCap, 120);
+  assert.equal(PLAN_CATALOG.basic.monthlyCreditCap, null);
+});
+
+test("billing UI does not advertise team seats before member management ships", async () => {
+  const settings = await readFile(
+    new URL(
+      "../src/components/briefflow/ProfileSettingsModal.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.doesNotMatch(settings, /Até \d+ integrantes/);
+  assert.match(settings, /Biblioteca com 2\.000 itens/);
+});
+
+test("advanced content schema normalizes a production-ready media plan", () => {
   const parsed = StructuredCopySchema.parse({
     title: "Da ideia ao primeiro corte",
-    summary: "Roteiro objetivo para apresentar a proposta.",
+    summary: "Plano objetivo para apresentar a proposta.",
     duration: "45 segundos",
     sections: [
       {
@@ -73,4 +110,25 @@ test("structured export preserves timing, direction and presenter notes", () => 
   assert.match(text, /Timing: 2 min/);
   assert.match(text, /Direção visual: Gráfico do cenário/);
   assert.match(text, /Notas: Conectar/);
+});
+
+test("slides export as PowerPoint and technical sheets export as factual PDF", async () => {
+  assert.match(CONTENT_FORMATS.slides.description, /PowerPoint/);
+  assert.match(CONTENT_FORMATS.technical_sheet.description, /PDF/);
+
+  const exporter = await readFile(
+    new URL("../src/lib/documentExport.ts", import.meta.url),
+    "utf8",
+  );
+  const prompts = await readFile(
+    new URL("../src/lib/marketingPrompts.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(exporter, /import\("pptxgenjs"\)/);
+  assert.match(exporter, /exportFilename\("slides"[\s\S]*"pptx"\)/);
+  assert.match(exporter, /import\("jspdf"\)/);
+  assert.match(exporter, /exportFilename\("technical_sheet"[\s\S]*"pdf"\)/);
+  assert.match(prompts, /Não informado — validar com o fabricante/);
+  assert.match(prompts, /Nunca complete especificações ausentes/);
 });

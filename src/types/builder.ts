@@ -102,7 +102,7 @@ export interface SocialContent {
 export type AssetContent = BannerContent | EmailContent | SocialContent;
 export type CtaVariant = "primary" | "secondary" | "urgent" | "soft";
 
-/** Bloco reutilizável para roteiros, apresentações e documentos longos. */
+/** Bloco reutilizável para planos técnicos, apresentações e documentos longos. */
 export interface StructuredContentSection {
   id: string;
   title: string;
@@ -128,6 +128,20 @@ export interface StructuredContentDocument {
   cta?: string;
   keywords?: string[];
   disclaimer?: string;
+}
+
+export type MediaRenderStatus =
+  "idle" | "queued" | "processing" | "ready" | "failed";
+
+export interface MediaRenderState {
+  kind: "video" | "audio";
+  status: MediaRenderStatus;
+  provider: "gemini" | "runway" | "zsky";
+  taskId?: string;
+  url?: string;
+  mimeType?: string;
+  error?: string;
+  generatedAt?: string;
 }
 
 export interface BannerFontSizes {
@@ -206,6 +220,7 @@ export interface BuilderState {
   fontFamily?: string;
   bannerFontSizes?: BannerFontSizes;
   structuredContent?: StructuredContentDocument;
+  mediaRender?: MediaRenderState;
 }
 
 export interface SiteBrandData {

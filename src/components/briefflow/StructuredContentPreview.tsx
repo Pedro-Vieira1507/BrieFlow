@@ -5,7 +5,10 @@ import {
   Clock3,
   Download,
   FileJson,
+  FileText,
   ListChecks,
+  Loader2,
+  Presentation,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -15,6 +18,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { CONTENT_FORMATS } from "@/lib/plans";
 import { formatStructuredContentText } from "@/lib/structuredContent";
 import { downloadBlob, sanitizeFilenamePart } from "@/lib/export-utils";
+import {
+  exportSlidesPowerPoint,
+  exportTechnicalSheetPdf,
+} from "@/lib/documentExport";
 import type { BuilderState, StructuredContentDocument } from "@/types/builder";
 
 interface Props {
@@ -30,6 +37,7 @@ export function StructuredContentPreview({
 }: Props) {
   const document = state.structuredContent;
   const [copied, setCopied] = useState(false);
+  const [isExportingDocument, setIsExportingDocument] = useState(false);
   const definition = document ? CONTENT_FORMATS[document.format] : null;
   const text = useMemo(
     () => (document ? formatStructuredContentText(document) : ""),
@@ -69,6 +77,43 @@ export function StructuredContentPreview({
   const filename = sanitizeFilenamePart(
     `${document.format}_${state.brandName || document.title}`,
   );
+
+  const handlePrimaryExport = async () => {
+    if (isExportingDocument) return;
+    if (!["slides", "technical_sheet"].includes(document.format)) {
+      downloadBlob(
+        new Blob([text], { type: "text/plain;charset=utf-8" }),
+        `${filename}.txt`,
+      );
+      return;
+    }
+
+    setIsExportingDocument(true);
+    try {
+      if (document.format === "slides") {
+        await exportSlidesPowerPoint(
+          document,
+          state.brandName,
+          state.themeColor,
+          state.secondaryColor,
+        );
+        toast.success("PowerPoint exportado com sucesso");
+      } else {
+        await exportTechnicalSheetPdf(
+          document,
+          state.brandName,
+          state.themeColor,
+          state.secondaryColor,
+        );
+        toast.success("Ficha técnica exportada em PDF");
+      }
+    } catch (error) {
+      console.error("Falha na exportação do documento:", error);
+      toast.error("Não foi possível gerar o arquivo final.");
+    } finally {
+      setIsExportingDocument(false);
+    }
+  };
 
   return (
     <article className="mx-auto w-full max-w-4xl overflow-hidden rounded-[28px] border border-border-strong bg-surface-1 shadow-[var(--shadow-elevated)]">
@@ -114,15 +159,24 @@ export function StructuredContentPreview({
               type="button"
               size="sm"
               variant="outline"
-              onClick={() =>
-                downloadBlob(
-                  new Blob([text], { type: "text/plain;charset=utf-8" }),
-                  `${filename}.txt`,
-                )
-              }
+              onClick={() => void handlePrimaryExport()}
+              disabled={isExportingDocument}
               className="rounded-xl border-border-strong bg-surface-2"
             >
-              <Download className="mr-2 size-4" /> TXT
+              {isExportingDocument ? (
+                <Loader2 className="mr-2 size-4 animate-spin" />
+              ) : document.format === "slides" ? (
+                <Presentation className="mr-2 size-4" />
+              ) : document.format === "technical_sheet" ? (
+                <FileText className="mr-2 size-4" />
+              ) : (
+                <Download className="mr-2 size-4" />
+              )}
+              {document.format === "slides"
+                ? "PowerPoint"
+                : document.format === "technical_sheet"
+                  ? "PDF"
+                  : "TXT"}
             </Button>
             <Button
               type="button"

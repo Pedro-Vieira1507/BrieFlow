@@ -6,6 +6,7 @@ import { EmailPreview } from "@/components/briefflow/EmailPreview";
 import { BannerPreview } from "@/components/briefflow/BannerPreview";
 import { SocialPreview } from "@/components/briefflow/SocialPreview";
 import { StructuredContentPreview } from "@/components/briefflow/StructuredContentPreview";
+import { MediaPreview } from "@/components/briefflow/MediaPreview";
 import { cn } from "@/lib/utils";
 import {
   AlertTriangle,
@@ -36,6 +37,7 @@ interface Props {
   onTabChange: (tab: CampaignAsset["type"]) => void;
   loading?: boolean;
   onRetry?: (channel: CampaignAsset["type"]) => void | Promise<void>;
+  onImportReel?: (assetId: string, file: File) => Promise<void>;
 }
 
 const CHANNELS: Array<{
@@ -62,6 +64,7 @@ export function CampaignTabs({
   onTabChange,
   loading = false,
   onRetry,
+  onImportReel,
 }: Props) {
   const previousAssetIdsRef = useRef<string[]>([]);
   const campaignBrandName = getCampaignBrandName(assets);
@@ -171,6 +174,16 @@ export function CampaignTabs({
               <SocialPreview
                 state={asset.content}
                 onChange={(patch) => onAssetChange(asset.id, patch)}
+              />
+            ) : ["reel", "video", "podcast"].includes(asset.type) ? (
+              <MediaPreview
+                state={asset.content}
+                onImportReel={
+                  asset.type === "reel"
+                    ? (file) =>
+                        onImportReel?.(asset.id, file) ?? Promise.resolve()
+                    : undefined
+                }
               />
             ) : (
               <StructuredContentPreview

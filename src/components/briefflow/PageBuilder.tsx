@@ -4,9 +4,17 @@ import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useBriefflowStore } from "@/store/briefflow";
-import { isSupabaseConfigured, saveAssetToLibrary } from "@/lib/supabase";
+import {
+  isSupabaseConfigured,
+  saveAssetToLibrary,
+  uploadFinalReel,
+} from "@/lib/supabase";
 import { getBuilderCampaignBrandName } from "@/lib/campaignGeneration";
 import { downloadBlob, sanitizeFilenamePart } from "@/lib/export-utils";
+import {
+  exportSlidesPowerPoint,
+  exportTechnicalSheetPdf,
+} from "@/lib/documentExport";
 import { formatStructuredContentText } from "@/lib/structuredContent";
 import { CORE_MATERIAL_TYPES } from "@/types/brief";
 
@@ -16,7 +24,11 @@ import { DiscoveryPlanView } from "./builder/DiscoveryPlanView";
 import { BuilderEmptyState } from "./builder/BuilderEmptyState";
 import { CampaignTabs } from "./builder/CampaignTabs";
 
-import type { BuilderState, CampaignAsset } from "@/types/builder";
+import type {
+  BuilderState,
+  CampaignAsset,
+  MediaRenderState,
+} from "@/types/builder";
 
 interface Props {
   onGenerateCampaign: () => void | Promise<void>;
@@ -40,6 +52,8 @@ export function PageBuilder({
     generatingLabel,
     patchBuilder,
     setAuthOpen,
+    activeLibraryAssetId,
+    setActiveLibraryAssetId,
     setBuilder,
   } = useBriefflowStore();
 
@@ -77,11 +91,18 @@ export function PageBuilder({
     const toastId = toast.loading("Salvando campanha na biblioteca...");
     try {
       const brandName = getBuilderCampaignBrandName(builder);
-      await saveAssetToLibrary(
+      const savedAsset = await saveAssetToLibrary(
         brandName ? `Campanha ${brandName}` : "Campanha AI",
         builder,
+        activeLibraryAssetId,
       );
-      toast.success("Salvo na biblioteca com sucesso!", { id: toastId });
+      setActiveLibraryAssetId(savedAsset.id);
+      toast.success(
+        activeLibraryAssetId
+          ? "Campanha atualizada na biblioteca!"
+          : "Salvo na biblioteca com sucesso!",
+        { id: toastId },
+      );
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "Erro ao salvar a campanha",
@@ -93,17 +114,83 @@ export function PageBuilder({
     }
   };
 
-  const handleExportClick = () => {
+  const handleExportClick = async () => {
     if (!(CORE_MATERIAL_TYPES as readonly string[]).includes(activeTab)) {
       const asset =
         builder.type === "campaign"
           ? builder.campaignAssets?.find((entry) => entry.type === activeTab)
           : undefined;
       const document = asset?.content.structuredContent;
-      if (!document) {
+      if (!asset || !document) {
         toast.error("Conteúdo não encontrado para exportação.");
         return;
       }
+
+      if (["reel", "video", "podcast"].includes(activeTab)) {
+        const media = asset.content.mediaRender;
+        if (media?.status !== "ready" || !media.url) {
+          toast.error("A mídia final ainda não está pronta para exportação.");
+          return;
+        }
+
+        setIsExporting(true);
+        try {
+          const response = await fetch(media.url);
+          if (!response.ok) throw new Error("media_download_failed");
+          const blob = await response.blob();
+          const extension =
+            activeTab === "podcast"
+              ? media.mimeType?.includes("wav")
+                ? "wav"
+                : "mp3"
+              : media.mimeType?.includes("webm")
+                ? "webm"
+                : "mp4";
+          const brand = asset.content.brandName || document.title;
+          downloadBlob(
+            blob,
+            `${activeTab}_${sanitizeFilenamePart(brand)}.${extension}`,
+          );
+          toast.success(
+            activeTab === "podcast" ? "Podcast exportado." : "Vídeo exportado.",
+          );
+        } catch {
+          toast.error("Não foi possível baixar a mídia final.");
+        } finally {
+          setIsExporting(false);
+        }
+        return;
+      }
+
+      if (activeTab === "slides" || activeTab === "technical_sheet") {
+        setIsExporting(true);
+        try {
+          if (activeTab === "slides") {
+            await exportSlidesPowerPoint(
+              document,
+              asset.content.brandName,
+              asset.content.themeColor,
+              asset.content.secondaryColor,
+            );
+            toast.success("PowerPoint exportado com sucesso.");
+          } else {
+            await exportTechnicalSheetPdf(
+              document,
+              asset.content.brandName,
+              asset.content.themeColor,
+              asset.content.secondaryColor,
+            );
+            toast.success("Ficha técnica exportada em PDF.");
+          }
+        } catch (error) {
+          console.error("Falha na exportação do documento:", error);
+          toast.error("Não foi possível gerar o arquivo final.");
+        } finally {
+          setIsExporting(false);
+        }
+        return;
+      }
+
       const brand = asset.content.brandName || document.title;
       downloadBlob(
         new Blob([formatStructuredContentText(document)], {
@@ -123,6 +210,61 @@ export function PageBuilder({
       a.id === assetId ? { ...a, content: { ...a.content, ...patch } } : a,
     );
     setBuilder({ ...builder, campaignAssets: next });
+  };
+
+  const handleImportReel = async (assetId: string, file: File) => {
+    if (!user) {
+      setAuthOpen(true);
+      throw new Error("Entre na sua conta para salvar o Reel.");
+    }
+
+    const uploaded = await uploadFinalReel(file);
+    const mediaRender: MediaRenderState = {
+      kind: "video",
+      status: "ready",
+      provider: "zsky",
+      taskId: `zsky:manual:${Date.now()}`,
+      url: uploaded.url,
+      mimeType: uploaded.mimeType,
+      generatedAt: new Date().toISOString(),
+    };
+    const currentBuilder = useBriefflowStore.getState().builder;
+    if (currentBuilder.type !== "campaign" || !currentBuilder.campaignAssets) {
+      throw new Error("A campanha atual não está disponível.");
+    }
+
+    const nextBuilder: BuilderState = {
+      ...currentBuilder,
+      campaignAssets: currentBuilder.campaignAssets.map((asset) =>
+        asset.id === assetId
+          ? {
+              ...asset,
+              content: {
+                ...asset.content,
+                generationError: undefined,
+                mediaRender,
+              },
+            }
+          : asset,
+      ),
+    };
+    setBuilder(nextBuilder);
+
+    try {
+      const brandName = getBuilderCampaignBrandName(nextBuilder);
+      const savedAsset = await saveAssetToLibrary(
+        brandName ? `Campanha ${brandName}` : "Campanha com Reel",
+        nextBuilder,
+        activeLibraryAssetId,
+      );
+      setActiveLibraryAssetId(savedAsset.id);
+    } catch (error) {
+      throw new Error(
+        `O vídeo foi importado no Canvas, mas a Biblioteca não confirmou o salvamento. ${
+          error instanceof Error ? error.message : "Use Salvar na Biblioteca."
+        }`,
+      );
+    }
   };
 
   return (
@@ -166,6 +308,7 @@ export function PageBuilder({
                 onTabChange={setActiveTab}
                 loading={loading}
                 onRetry={onRetry}
+                onImportReel={handleImportReel}
               />
             </div>
           )}

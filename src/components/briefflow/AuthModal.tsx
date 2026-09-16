@@ -3,6 +3,7 @@ import { Eye, EyeOff, Loader2, MailCheck, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -23,12 +24,36 @@ type AuthMode = "login" | "signup" | "forgot" | "recovery" | "confirmation";
 
 const normalizeEmail = (value: string) => value.trim().toLowerCase();
 
+function publicHttpsUrl(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+const termsUrl = publicHttpsUrl(import.meta.env.VITE_TERMS_URL);
+const privacyUrl = publicHttpsUrl(import.meta.env.VITE_PRIVACY_URL);
+const supportUrl = publicHttpsUrl(import.meta.env.VITE_SUPPORT_URL);
+const configuredLegalVersion = String(
+  import.meta.env.VITE_LEGAL_VERSION ?? "",
+).trim();
+const legalVersion = /^[A-Za-z0-9._-]{1,64}$/.test(configuredLegalVersion)
+  ? configuredLegalVersion
+  : "";
+const selfServiceSignupConfigured = Boolean(
+  termsUrl && privacyUrl && legalVersion,
+);
+
 export function AuthModal({ open, onOpenChange }: Props) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [mode, setMode] = useState<AuthMode>("login");
   const [showPassword, setShowPassword] = useState(false);
+  const [acceptedPolicies, setAcceptedPolicies] = useState(false);
 
   useEffect(() => {
     if (!supabase) return;
@@ -48,20 +73,40 @@ export function AuthModal({ open, onOpenChange }: Props) {
       setPassword("");
       setMode("login");
       setShowPassword(false);
+      setAcceptedPolicies(false);
     }
   }, [open, mode]);
 
-  const handleAuth = async (event: React.FormEvent) => {
+  const handleAuth = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!supabase) {
       toast.error("Autenticação não configurada.");
       return;
     }
 
-    const safeEmail = normalizeEmail(email);
-    if (mode !== "recovery" && !safeEmail) return;
-    if (["signup", "recovery"].includes(mode) && password.length < 12) {
+    const formData = new FormData(event.currentTarget);
+    const safeEmail = normalizeEmail(String(formData.get("email") ?? email));
+    const submittedPassword = String(formData.get("password") ?? password);
+    if (mode !== "recovery" && !safeEmail) {
+      toast.error("Informe um e-mail válido.");
+      return;
+    }
+    if (
+      ["signup", "recovery"].includes(mode) &&
+      submittedPassword.length < 12
+    ) {
       toast.error("Use uma senha com pelo menos 12 caracteres.");
+      return;
+    }
+    if (
+      mode === "signup" &&
+      (!selfServiceSignupConfigured || !acceptedPolicies)
+    ) {
+      toast.error(
+        selfServiceSignupConfigured
+          ? "Aceite os Termos de Uso e a Política de Privacidade."
+          : "O cadastro está temporariamente indisponível.",
+      );
       return;
     }
 
@@ -81,7 +126,9 @@ export function AuthModal({ open, onOpenChange }: Props) {
       }
 
       if (mode === "recovery") {
-        const { error } = await supabase.auth.updateUser({ password });
+        const { error } = await supabase.auth.updateUser({
+          password: submittedPassword,
+        });
         if (error) throw error;
         toast.success("Senha atualizada com segurança.");
         setMode("login");
@@ -93,7 +140,7 @@ export function AuthModal({ open, onOpenChange }: Props) {
       if (mode === "login") {
         const { error } = await supabase.auth.signInWithPassword({
           email: safeEmail,
-          password,
+          password: submittedPassword,
         });
         if (error) throw error;
         toast.success("Bem-vindo de volta!");
@@ -103,9 +150,14 @@ export function AuthModal({ open, onOpenChange }: Props) {
 
       const { data, error } = await supabase.auth.signUp({
         email: safeEmail,
-        password,
+        password: submittedPassword,
         options: {
           emailRedirectTo: `${window.location.origin}/app`,
+          data: {
+            legal_consent_version: legalVersion,
+            legal_terms_url: termsUrl,
+            legal_privacy_url: privacyUrl,
+          },
         },
       });
       if (error) throw error;
@@ -221,6 +273,7 @@ export function AuthModal({ open, onOpenChange }: Props) {
                 </Label>
                 <Input
                   id="auth-email"
+                  name="email"
                   type="email"
                   autoComplete="email"
                   required
@@ -250,6 +303,7 @@ export function AuthModal({ open, onOpenChange }: Props) {
                 <div className="relative">
                   <Input
                     id="auth-password"
+                    name="password"
                     type={showPassword ? "text" : "password"}
                     autoComplete={
                       mode === "login" ? "current-password" : "new-password"
@@ -297,9 +351,54 @@ export function AuthModal({ open, onOpenChange }: Props) {
               </button>
             ) : null}
 
+            {mode === "signup" ? (
+              selfServiceSignupConfigured ? (
+                <label className="flex items-start gap-3 rounded-xl border border-border-subtle bg-surface-2 p-3 text-xs leading-5 text-fg-secondary">
+                  <Checkbox
+                    checked={acceptedPolicies}
+                    onCheckedChange={(checked) =>
+                      setAcceptedPolicies(checked === true)
+                    }
+                    aria-label="Aceitar Termos de Uso e Política de Privacidade"
+                    className="mt-0.5"
+                  />
+                  <span>
+                    Li e aceito os{" "}
+                    <a
+                      href={termsUrl!}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-semibold text-brand hover:underline"
+                    >
+                      Termos de Uso
+                    </a>{" "}
+                    e a{" "}
+                    <a
+                      href={privacyUrl!}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-semibold text-brand hover:underline"
+                    >
+                      Política de Privacidade
+                    </a>
+                    .
+                  </span>
+                </label>
+              ) : (
+                <p className="rounded-xl border border-amber-400/25 bg-amber-400/10 p-3 text-xs leading-5 text-amber-100">
+                  Novos cadastros estão temporariamente indisponíveis enquanto
+                  os documentos legais são publicados.
+                </p>
+              )
+            ) : null}
+
             <Button
               type="submit"
-              disabled={loading}
+              disabled={
+                loading ||
+                (mode === "signup" &&
+                  (!selfServiceSignupConfigured || !acceptedPolicies))
+              }
               className="mt-2 h-11 w-full rounded-xl bg-brand font-semibold text-brand-fg shadow-[var(--shadow-brand)]"
             >
               {loading ? (
@@ -315,6 +414,17 @@ export function AuthModal({ open, onOpenChange }: Props) {
                       ? "Atualizar senha"
                       : "Entrar"}
             </Button>
+
+            {supportUrl ? (
+              <a
+                href={supportUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="block text-center text-xs font-semibold text-fg-muted hover:text-brand hover:underline"
+              >
+                Central de suporte
+              </a>
+            ) : null}
           </form>
         )}
       </DialogContent>
