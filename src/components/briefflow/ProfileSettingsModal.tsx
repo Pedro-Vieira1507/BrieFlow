@@ -94,11 +94,11 @@ const PLAN_COPY: Record<
   },
   pro: {
     description: "Para times com produção audiovisual e comercial.",
-    highlights: ["Reels, vídeos e apresentações", "Até 5 integrantes"],
+    highlights: ["Reels e apresentações", "Biblioteca com 2.000 itens"],
   },
   agency: {
     description: "Para agências e operações com várias marcas.",
-    highlights: ["Podcast e todos os formatos", "Até 25 integrantes"],
+    highlights: ["Podcast e todos os formatos", "Biblioteca com 10.000 itens"],
   },
 };
 
@@ -293,6 +293,14 @@ export function ProfileSettingsModal({ open, onOpenChange }: Props) {
                     style={{ width: `${Math.min(100, creditsPercent || 0)}%` }}
                   />
                 </div>
+
+                {plan?.monthlyCreditCap ? (
+                  <p className="mt-3 text-xs leading-5 text-fg-muted">
+                    Uso mensal do plano gratuito: {plan.monthlyCreditsUsed ?? 0}
+                    {" / "}
+                    {plan.monthlyCreditCap} créditos
+                  </p>
+                ) : null}
 
                 {plan?.allowedFormats?.length ? (
                   <p className="mt-4 text-xs leading-5 text-fg-muted">

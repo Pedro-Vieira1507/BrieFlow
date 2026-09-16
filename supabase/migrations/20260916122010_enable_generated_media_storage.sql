@@ -20,3 +20,4 @@ set
     'video/quicktime'
   ]::text[]
 where id = 'campaign-assets';
+

@@ -84,6 +84,7 @@ test("account billing UI describes the allowance as daily", async () => {
 
   assert.match(settings, /Créditos diários/);
   assert.match(settings, /créditos por dia/);
+  assert.match(settings, /Uso mensal do plano gratuito/);
   assert.doesNotMatch(settings, /Créditos mensais/);
 });
 

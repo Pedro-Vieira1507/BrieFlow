@@ -45,6 +45,30 @@ test("every plan and format has positive production limits", () => {
   }
 });
 
+test("frontend plan allowances match the commercial database catalog", () => {
+  assert.deepEqual(
+    Object.fromEntries(
+      Object.entries(PLAN_CATALOG).map(([id, plan]) => [id, plan.dailyCredits]),
+    ),
+    { free: 8, basic: 60, pro: 250, agency: 800, enterprise: 10_000 },
+  );
+  assert.equal(PLAN_CATALOG.free.monthlyCreditCap, 120);
+  assert.equal(PLAN_CATALOG.basic.monthlyCreditCap, null);
+});
+
+test("billing UI does not advertise team seats before member management ships", async () => {
+  const settings = await readFile(
+    new URL(
+      "../src/components/briefflow/ProfileSettingsModal.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.doesNotMatch(settings, /Até \d+ integrantes/);
+  assert.match(settings, /Biblioteca com 2\.000 itens/);
+});
+
 test("advanced content schema normalizes a production-ready media plan", () => {
   const parsed = StructuredCopySchema.parse({
     title: "Da ideia ao primeiro corte",

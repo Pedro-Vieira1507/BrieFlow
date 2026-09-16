@@ -89,6 +89,8 @@ for (const functionName of [
   "scrape-proxy",
   "image-search",
   "billing",
+  "media-render",
+  "multimodal",
 ]) {
   await check(`CORS ${functionName}`, async () => {
     const response = await request(`${functionBase}/${functionName}`, {

@@ -1,7 +1,4 @@
 -- Multimodal audio workflows and tenant-isolated semantic library search.
-
-begin;
-
 create table if not exists public.asset_embeddings (
   asset_id uuid primary key references public.assets(id) on delete cascade,
   user_id uuid not null references auth.users(id) on delete cascade,
@@ -14,22 +11,17 @@ create table if not exists public.asset_embeddings (
 
 create index if not exists asset_embeddings_user_updated_idx
   on public.asset_embeddings (user_id, updated_at desc);
-
 create index if not exists asset_embeddings_organization_idx
   on public.asset_embeddings (organization_id);
-
 create index if not exists asset_embeddings_cosine_idx
-  on public.asset_embeddings
-  using hnsw (embedding extensions.vector_cosine_ops);
+  on public.asset_embeddings using hnsw (embedding extensions.vector_cosine_ops);
 
 alter table public.asset_embeddings enable row level security;
 alter table public.asset_embeddings force row level security;
 
 drop policy if exists asset_embeddings_read_own on public.asset_embeddings;
 create policy asset_embeddings_read_own
-  on public.asset_embeddings
-  for select
-  to authenticated
+  on public.asset_embeddings for select to authenticated
   using (user_id = (select auth.uid()));
 
 revoke all on table public.asset_embeddings from public, anon, authenticated;
@@ -40,17 +32,13 @@ create or replace function public.search_asset_embeddings(
   p_query_embedding extensions.vector(768),
   p_match_count integer default 12
 )
-returns table (
-  asset_id uuid,
-  similarity double precision
-)
+returns table (asset_id uuid, similarity double precision)
 language sql
 stable
 security invoker
 set search_path = ''
 as $$
-  select
-    ae.asset_id,
+  select ae.asset_id,
     1 - (ae.embedding operator(extensions.<=>) p_query_embedding) as similarity
   from public.asset_embeddings as ae
   where ae.user_id = (select auth.uid())
@@ -69,7 +57,5 @@ set generation_costs = generation_costs || jsonb_build_object(
   'transcription', 2,
   'translation', 3,
   'semantic_search', 1
-),
-updated_at = now();
+), updated_at = now();
 
-commit;

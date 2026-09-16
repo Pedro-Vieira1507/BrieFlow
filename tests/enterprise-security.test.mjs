@@ -23,6 +23,8 @@ test("browser bundle delegates AI calls and contains no provider secret variable
   assert.match(client, /invokeEdgeFunction<ProxyResponse>\(\s*"ai-proxy"/);
   assert.doesNotMatch(client, /VITE_(?:GROQ|GEMINI|OMNIROUTE|OLLAMA)_/);
   assert.doesNotMatch(envExample, /GROQ_API_KEY|GEMINI_API_KEY|SERVICE_ROLE/);
+  assert.match(envExample, /VITE_SUPABASE_PUBLISHABLE_KEY/);
+  assert.match(supabaseClient, /VITE_SUPABASE_PUBLISHABLE_KEY/);
   assert.match(supabaseClient, /"X-Client-Info": "brieflow-web\/3"/);
   assert.doesNotMatch(supabaseClient, /"X-Client-Version":/);
   assert.match(edgeHttp, /x-client-info, x-client-version/);
@@ -263,7 +265,7 @@ test("multimodal workflows keep media private and semantic search tenant-scoped"
   const [migration, edge, client] = await Promise.all([
     readFile(
       new URL(
-        "../supabase/migrations/20260915122850_multimodal_audio_and_semantic_library.sql",
+        "../supabase/migrations/20260915124133_multimodal_audio_and_semantic_library.sql",
         import.meta.url,
       ),
       "utf8",
@@ -437,7 +439,7 @@ test("existing paid subscriptions change plans through the billing portal", asyn
 });
 
 test("commercial billing fails closed until live Stripe and webhooks are configured", async () => {
-  const [billing, settings] = await Promise.all([
+  const [billing, settings, stripe] = await Promise.all([
     readFile(
       new URL("../supabase/functions/billing/index.ts", import.meta.url),
       "utf8",
@@ -449,12 +451,19 @@ test("commercial billing fails closed until live Stripe and webhooks are configu
       ),
       "utf8",
     ),
+    readFile(
+      new URL("../supabase/functions/_shared/stripe.ts", import.meta.url),
+      "utf8",
+    ),
   ]);
 
   assert.match(billing, /action\?: "checkout" \| "portal" \| "status"/);
   assert.match(billing, /\["development", "test", "staging"\]\.includes/);
   assert.match(billing, /\(nonProductionMode && \/\^\(\?:sk\|rk\)_test_\//);
   assert.match(billing, /validWebhookSecret/);
+  assert.match(billing, /productionMode && \/\^\(\?:sk\|rk\)_live_/);
+  assert.match(billing, /integration_identifier/);
+  assert.match(billing, /integrationIdentifier\(requestId\)/);
   assert.match(billing, /checkoutFoundation &&/);
   assert.match(billing, /verifiedBillingAvailability/);
   assert.match(billing, /price\.type === "recurring"/);
@@ -467,6 +476,8 @@ test("commercial billing fails closed until live Stripe and webhooks are configu
     settings,
     /Novas assinaturas estão temporariamente indisponíveis/,
   );
+  assert.match(stripe, /"Stripe-Version": "2026-07-29\.dahlia"/);
+  assert.doesNotMatch(stripe, /event: "stripe_api_error",[\s\S]*path,/);
 });
 
 test("authentication submit reads autofilled values from the form", async () => {
@@ -479,6 +490,30 @@ test("authentication submit reads autofilled values from the form", async () => 
   assert.match(modal, /name="email"/);
   assert.match(modal, /name="password"/);
   assert.match(modal, /password: submittedPassword/);
+  assert.match(modal, /VITE_TERMS_URL/);
+  assert.match(modal, /VITE_PRIVACY_URL/);
+  assert.match(modal, /selfServiceSignupConfigured/);
+  assert.match(modal, /legal_consent_version: legalVersion/);
+  assert.match(modal, /legal_terms_url: termsUrl/);
+  assert.match(modal, /legal_privacy_url: privacyUrl/);
+  assert.match(modal, /Novos cadastros estão temporariamente indisponíveis/);
+});
+
+test("legal consent is snapshotted into an immutable internal ledger", async () => {
+  const migration = await readFile(
+    new URL(
+      "../supabase/migrations/20260916172506_immutable_legal_consent_ledger.sql",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(migration, /create table if not exists private\.legal_consents/);
+  assert.match(migration, /after insert on auth\.users/);
+  assert.match(migration, /new\.raw_user_meta_data/);
+  assert.match(migration, /on conflict \(user_id, legal_version\) do nothing/);
+  assert.match(migration, /revoke all on table private\.legal_consents/);
+  assert.doesNotMatch(migration, /grant .*authenticated/i);
 });
 
 test("development tunnels keep bounded host validation and edge env files private", async () => {
@@ -539,9 +574,10 @@ test("production builds and previews use the Vercel artifact", async () => {
 });
 
 test("the launch gate checks headers, CORS and Stripe webhook readiness", async () => {
-  const [manifest, launchCheck] = await Promise.all([
+  const [manifest, launchCheck, workflow] = await Promise.all([
     readFile(new URL("../package.json", import.meta.url), "utf8"),
     readFile(new URL("../scripts/check-launch.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8"),
   ]);
 
   assert.match(manifest, /"check:launch": "node scripts\/check-launch\.mjs"/);
@@ -549,4 +585,32 @@ test("the launch gate checks headers, CORS and Stripe webhook readiness", async 
   assert.match(launchCheck, /CORS rejeita origem externa/);
   assert.match(launchCheck, /STRIPE_WEBHOOK_SECRET ausente/);
   assert.match(launchCheck, /response\.status === 401/);
+  assert.match(launchCheck, /"media-render"/);
+  assert.match(launchCheck, /"multimodal"/);
+  assert.match(workflow, /media-render,multimodal/);
+});
+
+test("repository migration history includes live commercial guardrails", async () => {
+  const [commercial, multimodal] = await Promise.all([
+    readFile(
+      new URL(
+        "../supabase/migrations/20260910112802_commercial_pricing_and_credit_guardrails.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+    readFile(
+      new URL(
+        "../supabase/migrations/20260915124133_multimodal_audio_and_semantic_library.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+  ]);
+
+  assert.match(commercial, /monthly_credit_cap/);
+  assert.match(commercial, /when 'free' then 8/);
+  assert.match(commercial, /monthly_credit_limit_exceeded/);
+  assert.match(multimodal, /asset_embeddings/);
+  assert.match(multimodal, /security invoker/);
 });

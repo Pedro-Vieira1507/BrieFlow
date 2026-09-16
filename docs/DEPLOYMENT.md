@@ -42,6 +42,7 @@ supabase functions deploy scrape-proxy
 supabase functions deploy image-search
 supabase functions deploy billing
 supabase functions deploy media-render
+supabase functions deploy multimodal
 supabase functions deploy stripe-webhook --no-verify-jwt
 ```
 
@@ -50,7 +51,8 @@ O `config.toml` exige JWT nas cinco funções chamadas pelo app. Somente o webho
 ## 4. Configurar Stripe
 
 - crie preços recorrentes para Básico, Pro e Agência;
-- em produção, use uma chave `sk_live_` ou `rk_live_`; chaves de teste são recusadas quando `ENVIRONMENT=production`;
+- defina explicitamente `ENVIRONMENT=production`; valores ausentes ou desconhecidos mantêm a cobrança fechada;
+- em produção, prefira uma chave restrita `rk_live_` com o mínimo de permissões; `sk_live_` também é aceito, e chaves de teste são recusadas;
 - grave os IDs em `STRIPE_PRICE_BASIC`, `STRIPE_PRICE_PRO` e `STRIPE_PRICE_AGENCY`;
 - aponte o webhook para `/functions/v1/stripe-webhook`;
 - assine `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.paid` e `invoice.payment_failed`;
@@ -59,6 +61,8 @@ O `config.toml` exige JWT nas cinco funções chamadas pelo app. Somente o webho
 O endpoint autenticado `billing` consulta os Prices no Stripe e só libera um plano quando o Price está ativo, é recorrente, tem valor positivo e pertence ao mesmo modo (teste ou produção). A interface usa esse retorno como fonte do preço exibido. Se chave, webhook, `APP_URL` ou Price estiverem ausentes/inválidos, o checkout fica desabilitado sem criar Customer e sem iniciar cobrança.
 
 Faça um ciclo completo em modo teste: checkout, webhook, alteração via portal, falha de pagamento e cancelamento.
+
+O cliente Stripe usa a versão `2026-07-29.dahlia`, identifica cada Checkout com `integration_identifier` e não fixa `payment_method_types`, permitindo métodos dinâmicos do Dashboard. Não habilite `automatic_tax` antes de existir um cadastro fiscal ativo compatível; valide a tributação brasileira e de clientes internacionais com contabilidade/jurídico.
 
 ## 5. Configurar Auth
 
@@ -72,7 +76,7 @@ No Supabase Auth:
 
 ## 6. Publicar o frontend
 
-Configure apenas `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY`. Execute `npm run validate` e então publique o build.
+Configure `VITE_SUPABASE_URL` e `VITE_SUPABASE_PUBLISHABLE_KEY` no navegador. `VITE_SUPABASE_ANON_KEY` existe somente como fallback temporário durante a migração da chave legada. Defina também URLs HTTPS reais em `VITE_TERMS_URL`, `VITE_PRIVACY_URL` e `VITE_SUPPORT_URL`, além de uma `VITE_LEGAL_VERSION` versionada; sem esses documentos o cadastro self-service permanece fechado. Execute `npm run validate` e então publique o build.
 
 Promova o artefato Vercel de `npm run build`; nunca trate `vite dev` exposto por túnel como produção. Rode `npm run preview` depois do build para validar localmente o mesmo handler e os mesmos arquivos estáticos. Após a publicação, confirme que a interface mostra “créditos diários” e que a resposta HTML contém CSP, `X-Content-Type-Options`, proteção contra framing e HSTS. Essa verificação detecta imediatamente um processo antigo ou uma branch incorreta sendo servida.
 
@@ -94,7 +98,7 @@ Rode primeiro o gate público automatizado:
 npm run check:launch -- https://app.example.com YOUR_PROJECT_REF
 ```
 
-Ele exige HTTPS e os headers do frontend, valida CORS positivo e negativo nas quatro funções privadas e confirma que o webhook está configurado (uma assinatura ausente deve receber 401, nunca 503).
+Ele exige HTTPS e os headers do frontend, valida CORS positivo e negativo nas seis funções privadas e confirma que o webhook está configurado (uma assinatura ausente deve receber 401, nunca 503).
 
 - dois usuários não conseguem listar, ler, alterar ou excluir assets um do outro;
 - URLs do bucket expiram e os caminhos começam pelo UUID correto;

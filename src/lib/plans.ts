@@ -130,6 +130,7 @@ export function isMaterialAssisted(material: MaterialType): boolean {
 export interface PlanDefinition {
   label: string;
   dailyCredits: number;
+  monthlyCreditCap: number | null;
   maxMembers: number;
   maxSavedAssets: number;
   allowedFormats: readonly MaterialType[];
@@ -152,28 +153,32 @@ const PRO_FORMATS: readonly MaterialType[] = [
 export const PLAN_CATALOG: Record<PlanId, PlanDefinition> = {
   free: {
     label: "Gratuito",
-    dailyCredits: 20,
+    dailyCredits: 8,
+    monthlyCreditCap: 120,
     maxMembers: 1,
     maxSavedAssets: 20,
     allowedFormats: FREE_FORMATS,
   },
   basic: {
     label: "Básico",
-    dailyCredits: 150,
+    dailyCredits: 60,
+    monthlyCreditCap: null,
     maxMembers: 1,
     maxSavedAssets: 250,
     allowedFormats: BASIC_FORMATS,
   },
   pro: {
     label: "Pro",
-    dailyCredits: 600,
+    dailyCredits: 250,
+    monthlyCreditCap: null,
     maxMembers: 5,
     maxSavedAssets: 2_000,
     allowedFormats: PRO_FORMATS,
   },
   agency: {
     label: "Agência",
-    dailyCredits: 2_500,
+    dailyCredits: 800,
+    monthlyCreditCap: null,
     maxMembers: 25,
     maxSavedAssets: 10_000,
     allowedFormats: MATERIAL_TYPES,
@@ -181,6 +186,7 @@ export const PLAN_CATALOG: Record<PlanId, PlanDefinition> = {
   enterprise: {
     label: "Enterprise",
     dailyCredits: 10_000,
+    monthlyCreditCap: null,
     maxMembers: 250,
     maxSavedAssets: 100_000,
     allowedFormats: MATERIAL_TYPES,

@@ -7,13 +7,15 @@ import {
 import type { BuilderState } from "@/types/builder";
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as
-  string | undefined;
+const supabasePublishableKey = (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
+  import.meta.env.VITE_SUPABASE_ANON_KEY) as string | undefined;
 
-export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
+export const isSupabaseConfigured = Boolean(
+  supabaseUrl && supabasePublishableKey,
+);
 
 export const supabase: SupabaseClient | null = isSupabaseConfigured
-  ? createClient(supabaseUrl!, supabaseAnonKey!, {
+  ? createClient(supabaseUrl!, supabasePublishableKey!, {
       auth: {
         persistSession: true,
         autoRefreshToken: true,
@@ -59,7 +61,7 @@ export class EdgeFunctionError extends Error {
 async function requireUser(): Promise<User> {
   if (!supabase) {
     throw new Error(
-      "Supabase não configurado. Defina VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY.",
+      "Supabase não configurado. Defina VITE_SUPABASE_URL e VITE_SUPABASE_PUBLISHABLE_KEY.",
     );
   }
   const {
@@ -92,7 +94,7 @@ export async function invokeEdgeFunction<T>(
   body: unknown,
   signal?: AbortSignal,
 ): Promise<T> {
-  if (!supabaseUrl || !supabaseAnonKey) {
+  if (!supabaseUrl || !supabasePublishableKey) {
     throw new EdgeFunctionError(
       "Backend do BrieFlow não configurado.",
       503,
@@ -114,7 +116,7 @@ export async function invokeEdgeFunction<T>(
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
-      apikey: supabaseAnonKey,
+      apikey: supabasePublishableKey,
       // Supabase Edge Functions and the previous BrieFlow deployment already
       // allow this conventional header. Keeping it stable prevents CORS
       // failures while frontend and functions are rolled out independently.

@@ -56,4 +56,11 @@ Documentos e planos técnicos de mídia usam `StructuredContentDocument`: títul
 - mídia é armazenada em vez de embutida em JSON e tem limite de 10 MB;
 - payload de campanha tem limite de 2 MB.
 
+## Migrações e chaves
+
+- o histórico versionado do repositório deve espelhar `supabase_migrations.schema_migrations`; mudanças manuais no Dashboard precisam ser reconciliadas antes do próximo deploy;
+- o navegador usa a chave publicável `sb_publishable_...`; a chave `anon` legada é somente uma compatibilidade temporária;
+- todas as Edge Functions privadas continuam validando o JWT do usuário e também resolvem o usuário no servidor antes de usar a service role.
+- no cadastro, o trigger de banco grava versão e URLs dos documentos aceitos em `private.legal_consents`; a tabela não é exposta ao navegador e o registro não depende da mutabilidade futura de `user_metadata`.
+
 Para volumes superiores, a evolução natural é fila assíncrona para vídeo renderizado, observabilidade centralizada e réplicas de leitura. Essas mudanças não exigem alterar o contrato atual de assets.

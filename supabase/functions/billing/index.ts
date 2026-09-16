@@ -68,11 +68,12 @@ function configuredBillingAvailability(): BillingAvailability {
   const validStripeKey = /^(?:sk|rk)_(?:test|live)_[A-Za-z0-9]+$/.test(
     stripeKey,
   );
+  const productionMode = environment === "production";
   const nonProductionMode = ["development", "test", "staging"].includes(
     environment ?? "",
   );
   const correctStripeMode =
-    /^(?:sk|rk)_live_/.test(stripeKey) ||
+    (productionMode && /^(?:sk|rk)_live_/.test(stripeKey)) ||
     (nonProductionMode && /^(?:sk|rk)_test_/.test(stripeKey));
   const validWebhookSecret = /^whsec_[A-Za-z0-9]+$/.test(webhookSecret);
 
@@ -196,6 +197,16 @@ async function createPortalSession(
   );
   if (!session.url) throw new Error("stripe_missing_url");
   return session;
+}
+
+async function integrationIdentifier(requestId: string): Promise<string> {
+  const digest = new Uint8Array(
+    await crypto.subtle.digest("SHA-256", new TextEncoder().encode(requestId)),
+  );
+  const suffix = Array.from(digest.slice(0, 8), (byte) =>
+    String.fromCharCode(97 + (byte % 26)),
+  ).join("");
+  return `brieflow_${suffix}`;
 }
 
 Deno.serve(async (req: Request) => {
@@ -355,6 +366,7 @@ Deno.serve(async (req: Request) => {
 
     const form = new URLSearchParams();
     form.set("mode", "subscription");
+    form.set("integration_identifier", await integrationIdentifier(requestId));
     form.set("customer", customerId);
     form.set("line_items[0][price]", priceId);
     form.set("line_items[0][quantity]", "1");

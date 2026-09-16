@@ -111,7 +111,7 @@ test("generated media storage accepts browser-playable audio and video", async (
   const [migration, client, preview, builder] = await Promise.all([
     readFile(
       new URL(
-        "../supabase/migrations/20260914120252_enable_generated_media_storage.sql",
+        "../supabase/migrations/20260916122010_enable_generated_media_storage.sql",
         import.meta.url,
       ),
       "utf8",

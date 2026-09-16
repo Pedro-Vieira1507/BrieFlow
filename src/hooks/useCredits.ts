@@ -10,6 +10,8 @@ export interface UserPlan {
   plan: PlanId;
   creditsDaily: number;
   creditsRemaining: number;
+  monthlyCreditCap: number | null;
+  monthlyCreditsUsed: number | null;
   subscriptionStatus:
     "active" | "past_due" | "canceled" | "trialing" | "incomplete";
   allowedFormats: MaterialType[];
@@ -61,6 +63,14 @@ export const useCreditsStore = create<CreditsState>((set) => ({
           plan: planId,
           creditsDaily: Number(row.credits_monthly ?? fallback.dailyCredits),
           creditsRemaining: Number(row.credits_remaining ?? 0),
+          monthlyCreditCap:
+            row.monthly_credit_cap == null
+              ? fallback.monthlyCreditCap
+              : Number(row.monthly_credit_cap),
+          monthlyCreditsUsed:
+            row.monthly_credits_used == null
+              ? null
+              : Number(row.monthly_credits_used),
           subscriptionStatus: row.subscription_status ?? "active",
           allowedFormats:
             serverFormats.length > 0
