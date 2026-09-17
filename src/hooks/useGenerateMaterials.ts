@@ -59,6 +59,15 @@ export interface UseGenerateMaterialsResult {
   lastError: Error | null;
 }
 
+function isUploadedProductAsset(value?: string | null): boolean {
+  if (!value) return false;
+  return (
+    /campaign-assets(?:\/|%2f).*?(?:\/|%2f)products(?:\/|%2f)/i.test(value) ||
+    value.startsWith("data:") ||
+    value.startsWith("blob:")
+  );
+}
+
 function toRenderContext(
   brief: MarketingBrief,
   images?: string[],
@@ -72,10 +81,16 @@ function toRenderContext(
       ].filter((url): url is string => Boolean(url)),
     ),
   );
+  const deliberateHero = isUploadedProductAsset(brief.productImageUrl)
+    ? brief.productImageUrl
+    : null;
+
   return {
     brandName: brief.brandName,
-    productImageUrl: unique[0] ?? null,
-    productImages: unique,
+    productImageUrl: deliberateHero ?? unique[0] ?? null,
+    // A deliberate upload is authoritative: scraped/reference images may still
+    // inform the briefing, but they must never become extra rendered heroes.
+    productImages: deliberateHero ? [deliberateHero] : unique,
     productSku: brief.productUrl ?? null,
   };
 }
@@ -106,6 +121,76 @@ function hasUsableProductImage(brief: MarketingBrief, images?: string[]): boolea
         (value) => typeof value === "string" && value.trim(),
       ),
   );
+}
+
+function normalizeSceneContext(brief: MarketingBrief): string {
+  return normalizeBriefing(
+    [
+      brief.audience,
+      brief.context,
+      brief.objective,
+      brief.product,
+      brief.productTitle,
+      brief.productDescription,
+      brief.site?.title,
+      brief.site?.description,
+    ]
+      .filter(
+        (value): value is string =>
+          typeof value === "string" && Boolean(value.trim()),
+      )
+      .join(" "),
+  );
+}
+
+function backgroundSceneCue(brief: MarketingBrief): string {
+  const context = normalizeSceneContext(brief);
+  if (/laborator|centrif|microscop|pipet|reagent|analise clin|cientific/.test(context)) {
+    return "modern professional laboratory interior, clean empty benchtop, precise architectural lines, subtle depth of field, controlled cool-neutral studio daylight";
+  }
+  if (/cafe|coffee|grao|torref|bebida|cafeter/.test(context)) {
+    return "warm specialty-coffee environment, refined natural wood or stone surface, soft editorial daylight, subtle atmospheric warmth and tactile materials";
+  }
+  if (/software|saas|gestao|dashboard|plataforma|tecnolog|b2b/.test(context)) {
+    return "refined contemporary business environment with abstract operational depth, subtle architectural geometry, premium neutral lighting";
+  }
+  if (/moveis|mobilia|poltrona|sofa|decor|interior/.test(context)) {
+    return "refined contemporary interior, premium architectural materials, soft directional editorial light, restrained luxury atmosphere";
+  }
+  if (/industrial|engenharia|fabrica|maquina|manufatura/.test(context)) {
+    return "clean modern industrial environment, precise structural details, controlled professional lighting, uncluttered working surface";
+  }
+  if (/cosmet|beleza|skincare|perfume|dermo/.test(context)) {
+    return "premium beauty editorial environment, clean stone or matte surface, soft diffused studio light, restrained tactile textures";
+  }
+  return "premium commercial environment appropriate to the brand, clean architectural depth, controlled studio lighting, refined material texture";
+}
+
+function productSafeBackgroundPrompt(
+  brief: MarketingBrief,
+  copy: Record<string, unknown>,
+): string {
+  const layout = String(copy.layoutStyle ?? "split");
+  const productZone =
+    layout === "reverse"
+      ? "keep the left 44 to 48 percent visually calm and open for an externally composited real product cutout; keep the right side readable for external typography"
+      : "keep the right 44 to 48 percent visually calm and open for an externally composited real product cutout; keep the left side readable for external typography";
+  const themeColor =
+    typeof copy.themeColor === "string" ? copy.themeColor : "#1f4f46";
+  const secondaryColor =
+    typeof copy.secondaryColor === "string" ? copy.secondaryColor : "#0f172a";
+
+  return [
+    "BACKGROUND PLATE ONLY for a premium commercial banner",
+    backgroundSceneCue(brief),
+    productZone,
+    `subtle brand palette accents inspired by ${themeColor} and ${secondaryColor}`,
+    "environment and supporting surfaces only",
+    "absolutely no advertised product, no replica, no similar machine, no device, no equipment hero, no package, no merchandise, no standalone foreground object",
+    "do not place any object inside the reserved product zone",
+    "realistic integrated perspective and lighting so an external product cutout can be composited naturally",
+    "no text, no letters, no numbers, no logo, no watermark, no UI, no collage, no contact sheet, no thumbnail grid",
+  ].join(", ");
 }
 
 function describeImageRenderFailure(error: unknown): string {
@@ -228,8 +313,14 @@ export function useGenerateMaterials(): UseGenerateMaterialsResult {
 
         if (material === "banner" && safeData.imagePrompt?.trim()) {
           try {
+            const visualPrompt = renderContext.productImageUrl
+              ? productSafeBackgroundPrompt(
+                  brief,
+                  safeData as unknown as Record<string, unknown>,
+                )
+              : safeData.imagePrompt;
             const rendered = await renderCampaignImage({
-              prompt: safeData.imagePrompt,
+              prompt: visualPrompt,
               aspectRatio: "16:9",
               imageSize: "1K",
               signal: controller.signal,
