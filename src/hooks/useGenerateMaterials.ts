@@ -59,6 +59,10 @@ export interface UseGenerateMaterialsResult {
   lastError: Error | null;
 }
 
+type PremiumBannerBuilderState = BuilderState & {
+  productDisplayMode?: "hero" | "gallery";
+};
+
 function isUploadedProductAsset(value?: string | null): boolean {
   if (!value) return false;
   return (
@@ -310,6 +314,20 @@ export function useGenerateMaterials(): UseGenerateMaterialsResult {
         const safeData = sanitizeGeneratedCopy(material, data, brief);
         const renderContext = toRenderContext(brief, images);
         let content = toBuilderContent(material, safeData, renderContext);
+
+        if (
+          material === "banner" &&
+          isUploadedProductAsset(renderContext.productImageUrl)
+        ) {
+          content = {
+            ...content,
+            productImageUrl: renderContext.productImageUrl,
+            productImages: renderContext.productImageUrl
+              ? [renderContext.productImageUrl]
+              : [],
+            productDisplayMode: "hero",
+          } as PremiumBannerBuilderState;
+        }
 
         if (material === "banner" && safeData.imagePrompt?.trim()) {
           try {
