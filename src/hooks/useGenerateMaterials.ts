@@ -13,7 +13,7 @@ import {
   type MaterialPromptOptions,
 } from "@/lib/marketingPrompts";
 import { sanitizeGeneratedCopy } from "@/lib/marketingQuality";
-import { renderCampaignImage } from "@/lib/imageRender";
+import { ImageRenderError, renderCampaignImage } from "@/lib/imageRender";
 import {
   MATERIAL_SCHEMAS,
   toBuilderContent,
@@ -106,6 +106,25 @@ function hasUsableProductImage(brief: MarketingBrief, images?: string[]): boolea
         (value) => typeof value === "string" && value.trim(),
       ),
   );
+}
+
+function describeImageRenderFailure(error: unknown): string {
+  if (!(error instanceof ImageRenderError)) {
+    return "Não foi possível criar o key visual deste banner com qualidade suficiente. Gere novamente em alguns instantes.";
+  }
+
+  switch (error.code) {
+    case "image_provider_quota_unavailable":
+      return "A geração visual do Gemini está sem cota disponível neste projeto. Ative o billing/quota de geração de imagens da API Gemini ou configure uma chave de projeto com acesso pago.";
+    case "image_provider_auth_failed":
+      return "A chave da API Gemini usada pelo BrieFlow não foi aceita. Revise a GEMINI_API_KEY configurada no Supabase.";
+    case "image_provider_not_configured":
+      return "O provedor de imagens do BrieFlow não está configurado. Adicione a GEMINI_API_KEY aos Secrets das Edge Functions.";
+    case "rate_limit_exceeded":
+      return "Muitas imagens foram geradas em sequência. Aguarde um minuto e tente novamente.";
+    default:
+      return "Não foi possível criar o key visual deste banner com qualidade suficiente. O provedor de imagens está temporariamente indisponível.";
+  }
 }
 
 export function describeAiError(error: unknown): string {
@@ -226,10 +245,9 @@ export function useGenerateMaterials(): UseGenerateMaterialsResult {
                 imageError,
               );
             } else {
-              throw new Error(
-                "Não foi possível criar o key visual deste banner com qualidade suficiente. Gere novamente em alguns instantes.",
-                { cause: imageError },
-              );
+              throw new Error(describeImageRenderFailure(imageError), {
+                cause: imageError,
+              });
             }
           }
         }
