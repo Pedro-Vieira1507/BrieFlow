@@ -115,15 +115,15 @@ function describeImageRenderFailure(error: unknown): string {
 
   switch (error.code) {
     case "image_provider_quota_unavailable":
-      return "A geração visual do Gemini está sem cota disponível neste projeto. Ative o billing/quota de geração de imagens da API Gemini ou configure uma chave de projeto com acesso pago.";
+      return "A cota gratuita do Cloudflare Workers AI para geração de imagens foi atingida. Aguarde a renovação diária da cota ou revise o consumo no painel da Cloudflare.";
     case "image_provider_auth_failed":
-      return "A chave da API Gemini usada pelo BrieFlow não foi aceita. Revise a GEMINI_API_KEY configurada no Supabase.";
+      return "A Cloudflare recusou as credenciais do Workers AI. Revise CLOUDFLARE_ACCOUNT_ID e CLOUDFLARE_API_TOKEN nos Secrets do Supabase e confirme as permissões Workers AI - Read e Edit.";
     case "image_provider_not_configured":
-      return "O provedor de imagens do BrieFlow não está configurado. Adicione a GEMINI_API_KEY aos Secrets das Edge Functions.";
+      return "O provedor visual do BrieFlow não está configurado. Adicione CLOUDFLARE_ACCOUNT_ID e CLOUDFLARE_API_TOKEN aos Secrets das Edge Functions.";
     case "rate_limit_exceeded":
       return "Muitas imagens foram geradas em sequência. Aguarde um minuto e tente novamente.";
     default:
-      return "Não foi possível criar o key visual deste banner com qualidade suficiente. O provedor de imagens está temporariamente indisponível.";
+      return "Não foi possível criar o key visual deste banner com qualidade suficiente. O Cloudflare Workers AI não conseguiu concluir a geração.";
   }
 }
 
