@@ -153,6 +153,110 @@ test("removes unsupported personalization disguised as curation", () => {
   assert.equal(sanitized.subheadline, "");
 });
 
+test("banner quality guardrail reserves the scene for a real product image", () => {
+  const sanitized = sanitizeGeneratedCopy(
+    "banner",
+    {
+      headline: "Precisão na rotina",
+      subheadline: "",
+      body: "",
+      ctaText: "Conhecer equipamento",
+      ctaVariant: "primary",
+      keyBenefits: [],
+      objectionsHandled: [],
+      layoutStyle: "centered",
+      backgroundShape: "blob",
+      badgePrimary: "15% OFF",
+      badgeSecondary: "esta semana",
+      imagePrompt: "clean laboratory scene",
+    },
+    {
+      ...baseBrief,
+      brandName: "Forlab Express",
+      product: "Centrífuga de laboratório",
+      productTitle: "Centrífuga de laboratório",
+      productImageUrl: "https://example.com/centrifuga.png",
+    },
+  );
+
+  assert.equal(sanitized.layoutStyle, "split");
+  assert.equal(sanitized.backgroundShape, "minimalist");
+  assert.match(sanitized.imagePrompt, /real product cutout/i);
+  assert.match(sanitized.imagePrompt, /Centrífuga de laboratório/i);
+  assert.match(sanitized.imagePrompt, /no abstract-only gradient background/i);
+  assert.match(sanitized.imagePrompt, /no visible watermark/i);
+});
+
+test("banner quality guardrail clears promotional badges without a confirmed offer", () => {
+  const sanitized = sanitizeGeneratedCopy(
+    "banner",
+    {
+      headline: "Menos retrabalho",
+      subheadline: "Mais clareza operacional",
+      body: "",
+      ctaText: "Conhecer plataforma",
+      ctaVariant: "primary",
+      keyBenefits: [],
+      objectionsHandled: [],
+      layoutStyle: "split",
+      backgroundShape: "wave",
+      badgePrimary: "20% OFF",
+      badgeSecondary: "só hoje",
+      imagePrompt: "operations team visual",
+    },
+    {
+      ...baseBrief,
+      brandName: "Fluxo",
+      product: "Software B2B de gestão operacional",
+      offer: "",
+    },
+  );
+
+  assert.equal(sanitized.badgePrimary, "");
+  assert.equal(sanitized.badgeSecondary, "");
+  assert.equal(sanitized.backgroundShape, "minimalist");
+});
+
+test("banner quality guardrail prevents the brand name from becoming the whole headline", () => {
+  const sanitized = sanitizeGeneratedCopy(
+    "banner",
+    {
+      headline: "Forlab Express",
+      subheadline: "",
+      body: "",
+      ctaText: "Conhecer equipamento",
+      ctaVariant: "primary",
+      keyBenefits: [],
+      objectionsHandled: [],
+      layoutStyle: "split",
+      backgroundShape: "minimalist",
+      imagePrompt: "laboratory equipment campaign",
+    },
+    {
+      ...baseBrief,
+      brandName: "Forlab Express",
+      product: "Centrífuga de laboratório",
+      productTitle: "Centrífuga de laboratório",
+      offer: "",
+    },
+  );
+
+  assert.equal(sanitized.headline, "Centrífuga de laboratório");
+});
+
+test("banner renderer no longer relies on Pollinations or the generic black headline card", () => {
+  const source = readFileSync(
+    new URL("../src/components/briefflow/BannerPreview.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.doesNotMatch(source, /buildPollinationsUrl/);
+  assert.match(source, /backgroundImageUrl/);
+  assert.match(source, /renderCampaignImage/);
+  assert.match(source, /value=\{cta\}/);
+  assert.doesNotMatch(source, /ArrowUpRight/);
+});
+
 test("social fallback omits CORS mode for local data images", () => {
   const source = readFileSync(
     new URL("../src/components/briefflow/SocialPreview.tsx", import.meta.url),
