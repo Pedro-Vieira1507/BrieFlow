@@ -1,6 +1,9 @@
 [functions.ai-proxy]
 verify_jwt = false
 
+[functions.image-render]
+verify_jwt = false
+
 [functions.scrape-proxy]
 verify_jwt = true
 
