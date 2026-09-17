@@ -1,5 +1,5 @@
 // src/components/briefflow/builder/CampaignTabs.tsx
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { BuilderState, CampaignAsset } from "@/types/builder";
 import { EmailPreview } from "@/components/briefflow/EmailPreview";
@@ -9,20 +9,25 @@ import { StructuredContentPreview } from "@/components/briefflow/StructuredConte
 import { cn } from "@/lib/utils";
 import {
   AlertTriangle,
+  CheckCircle2,
   Clapperboard,
   FileText,
   Image,
   Instagram,
+  Loader2,
   Mail,
   MessageCircle,
   Mic2,
   Presentation,
   RefreshCw,
   ScrollText,
+  Upload,
 } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { CONTENT_FORMATS } from "@/lib/plans";
 import { CORE_MATERIAL_TYPES, MATERIAL_TYPES } from "@/types/brief";
+import { uploadCampaignAsset } from "@/lib/supabase";
 import {
   getCampaignBrandName,
   getGenerationErrorMessage,
@@ -54,6 +59,99 @@ const CHANNELS: Array<{
   { key: "blog", label: "Blog", icon: FileText },
   { key: "whatsapp", label: "WhatsApp", icon: MessageCircle },
 ];
+
+function BannerRecoveryProductUpload({
+  asset,
+  onAssetChange,
+  disabled,
+}: {
+  asset: CampaignAsset;
+  onAssetChange: Props["onAssetChange"];
+  disabled: boolean;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const currentImages = (asset.content.productImages ?? []).filter(Boolean);
+
+  const handleChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files ?? []);
+    event.target.value = "";
+    if (!files.length) return;
+
+    setUploading(true);
+    const toastId = toast.loading(
+      files.length === 1
+        ? "Enviando foto do produto..."
+        : `Enviando ${files.length} fotos do produto...`,
+    );
+
+    try {
+      const uploaded: string[] = [];
+      for (const file of files) {
+        uploaded.push(await uploadCampaignAsset(file, "products"));
+      }
+
+      const productImages = Array.from(
+        new Set([...currentImages, ...uploaded]),
+      ).slice(0, 3);
+
+      onAssetChange(asset.id, {
+        productImages,
+        productImageUrl:
+          asset.content.productImageUrl ?? productImages[0] ?? null,
+      });
+
+      toast.success(
+        "Foto do produto anexada. Agora gere novamente o banner.",
+        { id: toastId },
+      );
+    } catch (error) {
+      console.error("Falha ao anexar produto durante recuperação:", error);
+      toast.error("Não foi possível enviar a foto do produto.", {
+        id: toastId,
+      });
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        multiple
+        className="hidden"
+        onChange={(event) => void handleChange(event)}
+      />
+      <Button
+        type="button"
+        variant="outline"
+        className="rounded-xl"
+        disabled={disabled || uploading}
+        onClick={() => inputRef.current?.click()}
+      >
+        {uploading ? (
+          <Loader2 className="mr-2 size-4 animate-spin" />
+        ) : (
+          <Upload className="mr-2 size-4" />
+        )}
+        {currentImages.length
+          ? "Adicionar outra foto"
+          : "Importar foto do produto"}
+      </Button>
+      {currentImages.length > 0 ? (
+        <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-300">
+          <CheckCircle2 className="size-4" />
+          {currentImages.length === 1
+            ? "1 foto pronta para usar"
+            : `${currentImages.length} fotos prontas para usar`}
+        </span>
+      ) : null}
+    </div>
+  );
+}
 
 export function CampaignTabs({
   assets,
@@ -142,9 +240,19 @@ export function CampaignTabs({
                 <p className="mt-3 max-w-lg text-sm leading-6 text-fg-secondary">
                   {generationError}
                 </p>
+                {asset.type === "banner" ? (
+                  <BannerRecoveryProductUpload
+                    asset={asset}
+                    onAssetChange={onAssetChange}
+                    disabled={loading}
+                  />
+                ) : null}
                 <Button
                   type="button"
-                  className="mt-7 rounded-xl"
+                  className={cn(
+                    "rounded-xl",
+                    asset.type === "banner" ? "mt-4" : "mt-7",
+                  )}
                   disabled={loading}
                   onClick={() => void onRetry?.(asset.type)}
                 >
