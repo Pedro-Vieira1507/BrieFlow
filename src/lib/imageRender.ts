@@ -56,8 +56,22 @@ function readNumber(value: unknown): number | undefined {
 
 function readStringArray(value: unknown): string[] {
   return Array.isArray(value)
-    ? value.filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
+    ? value.filter(
+        (item): item is string =>
+          typeof item === "string" && Boolean(item.trim()),
+      )
     : [];
+}
+
+function premiumImagePrompt(rawPrompt: string): string {
+  const normalized = rawPrompt.replace(/\s+/g, " ").trim();
+  const guardrail =
+    "single coherent premium commercial scene, one clear focal idea, no collage, no contact sheet, no thumbnail grid, no floating image panels, no pasted photo rectangles, visually integrated lighting and perspective, clean negative space for external typography";
+
+  if (/no collage/i.test(normalized)) return normalized.slice(0, 7_800);
+
+  const available = Math.max(400, 7_800 - guardrail.length - 2);
+  return `${normalized.slice(0, available)}, ${guardrail}`;
 }
 
 export async function renderCampaignImage(
@@ -68,7 +82,9 @@ export async function renderCampaignImage(
   }
 
   const token = await getAuthToken();
-  if (!token) throw new Error("Sua sessão expirou. Entre novamente para continuar.");
+  if (!token) {
+    throw new Error("Sua sessão expirou. Entre novamente para continuar.");
+  }
 
   const response = await fetch(`${supabaseUrl}/functions/v1/image-render`, {
     method: "POST",
@@ -79,7 +95,7 @@ export async function renderCampaignImage(
       "X-Client-Version": "brieflow-web/4",
     },
     body: JSON.stringify({
-      prompt: options.prompt,
+      prompt: premiumImagePrompt(options.prompt),
       aspect_ratio: options.aspectRatio ?? "16:9",
       image_size: options.imageSize ?? "1K",
     }),
