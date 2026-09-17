@@ -1,5 +1,5 @@
 [functions.ai-proxy]
-verify_jwt = true
+verify_jwt = false
 
 [functions.scrape-proxy]
 verify_jwt = true
