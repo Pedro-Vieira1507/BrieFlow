@@ -153,6 +153,62 @@ test("removes unsupported personalization disguised as curation", () => {
   assert.equal(sanitized.subheadline, "");
 });
 
+test("banner quality guardrail reserves the composition for a real product image", () => {
+  const sanitized = sanitizeGeneratedCopy(
+    "banner",
+    {
+      headline: "Precisão em cada análise",
+      subheadline: "Equipamento em destaque",
+      body: "",
+      ctaText: "Ver equipamento",
+      ctaVariant: "primary",
+      keyBenefits: [],
+      objectionsHandled: [],
+      layoutStyle: "centered",
+      backgroundShape: "blob",
+      imagePrompt: "modern laboratory background",
+      badgePrimary: "15% OFF",
+      badgeSecondary: "esta semana",
+    },
+    {
+      ...baseBrief,
+      product: "Equipamento de laboratório",
+      productImageUrl: "https://cdn.example.com/equipamento.png",
+    },
+  );
+
+  assert.equal(sanitized.layoutStyle, "split");
+  assert.match(sanitized.imagePrompt, /negative space for copy/i);
+  assert.match(sanitized.imagePrompt, /real product cutout/i);
+  assert.match(sanitized.imagePrompt, /no glassmorphism/i);
+  assert.match(sanitized.imagePrompt, /no random decorative blobs/i);
+  assert.match(sanitized.imagePrompt, /polished advertising photography/i);
+});
+
+test("banner quality guardrail never keeps promotional badges without a confirmed offer", () => {
+  const sanitized = sanitizeGeneratedCopy(
+    "banner",
+    {
+      headline: "Clareza para decidir",
+      subheadline: "",
+      body: "",
+      ctaText: "Conhecer solução",
+      ctaVariant: "primary",
+      keyBenefits: [],
+      objectionsHandled: [],
+      layoutStyle: "split",
+      backgroundShape: "curve",
+      imagePrompt: "clean technical product scene",
+      badgePrimary: "20% OFF",
+      badgeSecondary: "só hoje",
+    },
+    { ...baseBrief, offer: "" },
+  );
+
+  assert.equal(sanitized.badgePrimary, "");
+  assert.equal(sanitized.badgeSecondary, "");
+});
+
 test("social fallback omits CORS mode for local data images", () => {
   const source = readFileSync(
     new URL("../src/components/briefflow/SocialPreview.tsx", import.meta.url),
