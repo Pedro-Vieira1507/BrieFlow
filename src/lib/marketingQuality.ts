@@ -124,6 +124,18 @@ const STOP_WORDS = new Set([
   "uma",
 ]);
 
+const COMMERCIAL_BANNER_IMAGE_SUFFIX =
+  "premium commercial advertising key visual, disciplined editorial grid, one clear focal point, realistic scale, controlled studio lighting, crisp material detail, clean brand-led art direction, generous negative space for external copy, strong subject-background separation, polished campaign photography, thumbnail legibility, no abstract-only gradient background, no generic geometric-only composition, no clutter, no glassmorphism, no random decorative blobs, no excessive glow, no surreal floating objects, no text, no letters, no numbers, no logo, no visible watermark, no UI";
+
+const LEGACY_DECORATIVE_SHAPES = new Set([
+  "blob",
+  "geometric",
+  "arch",
+  "wave",
+  "pill",
+  "offset",
+]);
+
 function collectConfirmedEvidence(brief: MarketingBrief): string {
   return [
     brief.brandName,
@@ -250,6 +262,112 @@ function filterUnsupportedLists(
   }
 }
 
+function clipArtDirection(value: string, max = 360): string {
+  return value.replace(/\s+/g, " ").trim().slice(0, max);
+}
+
+function bannerSubject(brief: MarketingBrief): string {
+  return clipArtDirection(
+    [
+      brief.productTitle,
+      brief.product,
+      brief.productDescription,
+      brief.objective,
+      brief.context,
+    ]
+      .filter(
+        (value): value is string =>
+          typeof value === "string" && Boolean(value.trim()),
+      )
+      .join("; "),
+    420,
+  );
+}
+
+function enforceBannerImageDirection(
+  value: unknown,
+  brief: MarketingBrief,
+): string {
+  const raw = typeof value === "string" ? value.trim() : "";
+  const subject = bannerSubject(brief);
+  const subjectDirection = subject
+    ? `campaign subject and category context: ${subject}`
+    : `campaign subject must visibly express the concrete business context instead of decorative abstraction`;
+  const productDirection = brief.productImageUrl
+    ? "generate background and supporting scene only, preserve a clean 48 to 55 percent visual zone for the real product cutout, do not invent, duplicate, redraw or replace the real product"
+    : brief.product || brief.productTitle
+      ? "show a concrete, recognizable category scene or product context tied directly to the campaign subject; use photorealistic commercial photography when the subject is physical"
+      : "show one concrete campaign scene, environment, object or visual metaphor tied directly to the message; never solve the brief with color gradients alone";
+
+  const alreadyCommercial = raw.includes(
+    "premium commercial advertising key visual",
+  );
+  if (alreadyCommercial) return raw;
+
+  return [raw, subjectDirection, productDirection, COMMERCIAL_BANNER_IMAGE_SUFFIX]
+    .filter(Boolean)
+    .join(", ");
+}
+
+function normalizeComparableText(value: unknown): string {
+  return typeof value === "string"
+    ? value
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, " ")
+        .trim()
+    : "";
+}
+
+function repairBrandOnlyHeadline(
+  copy: Record<string, unknown>,
+  brief: MarketingBrief,
+): void {
+  const headline = normalizeComparableText(copy.headline);
+  const brand = normalizeComparableText(brief.brandName);
+  if (!headline || !brand || headline !== brand) return;
+
+  const product = brief.productTitle?.trim() || brief.product?.trim();
+  if (product) {
+    copy.headline = repairFragmentedHeadline(product).slice(0, 58);
+    return;
+  }
+
+  const objective = brief.objective?.trim();
+  if (objective) {
+    const candidate = objective
+      .replace(/^(?:criar|gerar|divulgar|apresentar|promover)\s+/i, "")
+      .split(/[.!?]/)[0]
+      .trim();
+    if (candidate) copy.headline = candidate.slice(0, 58);
+  }
+}
+
+function enforceBannerComposition(
+  copy: Record<string, unknown>,
+  brief: MarketingBrief,
+): void {
+  copy.imagePrompt = enforceBannerImageDirection(copy.imagePrompt, brief);
+  repairBrandOnlyHeadline(copy, brief);
+
+  if (brief.productImageUrl && copy.layoutStyle === "centered") {
+    copy.layoutStyle = "split";
+  }
+
+  if (LEGACY_DECORATIVE_SHAPES.has(String(copy.backgroundShape ?? ""))) {
+    copy.backgroundShape = "minimalist";
+  }
+
+  if (!copy.backgroundShape) copy.backgroundShape = "minimalist";
+
+  const hasConfirmedOffer = Boolean(brief.offer?.trim());
+  if (!hasConfirmedOffer) {
+    copy.badgePrimary = "";
+    copy.badgeSecondary = "";
+  }
+}
+
 export function sanitizeGeneratedCopy<T extends MaterialType>(
   material: T,
   copy: GeneratedCopyByMaterial[T],
@@ -317,6 +435,7 @@ export function sanitizeGeneratedCopy<T extends MaterialType>(
       ["subheadline", "footerInfo", "badgePrimary", "badgeSecondary"],
       brief,
     );
+    enforceBannerComposition(sanitized, brief);
   } else if (material === "email") {
     clearUnsupportedOptionalFields(
       sanitized,
