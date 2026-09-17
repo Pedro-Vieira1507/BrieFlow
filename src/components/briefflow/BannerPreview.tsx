@@ -31,8 +31,8 @@ import { analyzeImageWithVisionFn } from "@/lib/vision-api";
 import { renderCampaignImage } from "@/lib/imageRender";
 import type { BannerFontSizes, BuilderState } from "@/types/builder";
 
-import { DraggableImage } from "./DraggableImage";
 import { Editable } from "./Editable";
+import { PremiumProductImage } from "./PremiumProductImage";
 
 interface Props {
   state: BuilderState;
@@ -42,6 +42,13 @@ interface Props {
 }
 
 type BannerFontSizeKey = keyof BannerFontSizes;
+type ProductDisplayMode = "hero" | "gallery";
+type PremiumBannerState = BuilderState & {
+  productDisplayMode?: ProductDisplayMode;
+};
+type PremiumBannerPatch = Partial<BuilderState> & {
+  productDisplayMode?: ProductDisplayMode;
+};
 
 type ProductPlacement = {
   x: number;
@@ -62,6 +69,69 @@ function contrastText(hex: string): string {
   const b = Number.parseInt(value.slice(4, 6), 16);
   const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
   return luminance > 0.62 ? "#111827" : "#ffffff";
+}
+
+function normalizeIntent(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+function inferProductDisplayMode(
+  state: PremiumBannerState,
+  productCount: number,
+): ProductDisplayMode {
+  if (state.productDisplayMode) return state.productDisplayMode;
+  if (productCount < 2) return "hero";
+
+  const context = normalizeIntent(
+    [
+      state.title,
+      state.subtitle,
+      state.body,
+      state.footerInfo,
+      ...(state.keyBenefits ?? []),
+    ]
+      .filter((value): value is string => typeof value === "string")
+      .join(" "),
+  );
+
+  return /\b(?:linha|colecao|portfolio|vitrine|comparacao|compare|kit|selecao|varios produtos|multiplos produtos|tres produtos|3 produtos|modelos)\b/.test(
+    context,
+  )
+    ? "gallery"
+    : "hero";
+}
+
+function rankProductImages(
+  candidates: string[],
+  preferred?: string | null,
+): string[] {
+  const unique = Array.from(
+    new Set(
+      candidates.filter(
+        (value): value is string =>
+          typeof value === "string" && value.trim().length > 0,
+      ),
+    ),
+  );
+
+  return unique
+    .map((url, index) => {
+      let score = 500 - index;
+      const normalized = url.toLowerCase();
+      if (preferred && url === preferred) score += 1000;
+      if (/campaign-assets.*products|\/products\//i.test(url)) score += 650;
+      if (/original|large|zoom|1200|1400|1500|1600|2000|2048/i.test(url)) {
+        score += 90;
+      }
+      if (/thumb|thumbnail|small|mini|icon|sprite/i.test(normalized)) score -= 300;
+      if (url.startsWith("data:") || url.startsWith("blob:")) score += 700;
+      return { url, score };
+    })
+    .sort((left, right) => right.score - left.score)
+    .map(({ url }) => url);
 }
 
 function FontSizeControl({
@@ -107,7 +177,7 @@ function FontSizeControl({
   );
 }
 
-function VisualAccent({
+function PremiumAccent({
   shape,
   themeColor,
   secondaryColor,
@@ -123,7 +193,7 @@ function VisualAccent({
   if (shape === "frame") {
     return (
       <div
-        className="pointer-events-none absolute inset-7 z-[3] rounded-[26px] border"
+        className="pointer-events-none absolute inset-7 z-[4] rounded-[26px] border"
         style={{ borderColor: `${themeColor}55` }}
       />
     );
@@ -133,30 +203,20 @@ function VisualAccent({
     return (
       <div
         className={cn(
-          "pointer-events-none absolute inset-y-0 z-[2] w-[38%] opacity-20",
+          "pointer-events-none absolute inset-y-0 z-[3] w-[34%] opacity-[0.16]",
           reverse ? "left-0" : "right-0",
         )}
         style={{
           background: `linear-gradient(145deg, ${themeColor}, ${secondaryColor})`,
           clipPath: reverse
-            ? "polygon(0 0, 72% 0, 100% 100%, 0 100%)"
-            : "polygon(28% 0, 100% 0, 100% 100%, 0 100%)",
+            ? "polygon(0 0, 70% 0, 100% 100%, 0 100%)"
+            : "polygon(30% 0, 100% 0, 100% 100%, 0 100%)",
         }}
       />
     );
   }
 
-  return (
-    <div
-      className={cn(
-        "pointer-events-none absolute z-[2] h-[520px] w-[520px] rounded-full blur-[2px]",
-        reverse ? "-left-40 -bottom-72" : "-right-40 -bottom-72",
-      )}
-      style={{
-        background: `radial-gradient(circle at 40% 35%, ${themeColor}66 0%, ${secondaryColor}18 54%, transparent 72%)`,
-      }}
-    />
-  );
+  return null;
 }
 
 export function BannerPreview({
@@ -165,6 +225,7 @@ export function BannerPreview({
   exportWrapperClass,
   exportWrapperStyle,
 }: Props) {
+  const premiumState = state as PremiumBannerState;
   const isExportClone = Boolean(exportWrapperClass);
   const previewFrameRef = useRef<HTMLDivElement>(null);
   const productInputRef = useRef<HTMLInputElement>(null);
@@ -172,6 +233,10 @@ export function BannerPreview({
   const [previewWidth, setPreviewWidth] = useState(1200);
   const [isRenderingVisual, setIsRenderingVisual] = useState(false);
   const [analyzingColors, setAnalyzingColors] = useState(false);
+
+  const patchState = (patch: PremiumBannerPatch) => {
+    onChange(patch as Partial<BuilderState>);
+  };
 
   useLayoutEffect(() => {
     if (isExportClone) return;
@@ -204,10 +269,12 @@ export function BannerPreview({
   const brandName = cleanText(state.brandName);
   const badgePrimary = cleanText(state.badgePrimary);
   const badgeSecondary = cleanText(state.badgeSecondary);
-  const benefits = (state.keyBenefits ?? []).filter(
-    (benefit): benefit is string =>
-      typeof benefit === "string" && !isEmptyLike(benefit),
-  );
+  const benefits = (state.keyBenefits ?? [])
+    .filter(
+      (benefit): benefit is string =>
+        typeof benefit === "string" && !isEmptyLike(benefit),
+    )
+    .slice(0, 2);
   const imagePrompt = cleanText(state.imagePrompt);
 
   const requestedLayout = state.layoutStyle ?? "split";
@@ -219,34 +286,25 @@ export function BannerPreview({
   const isReverse = layoutStyle === "reverse";
   const isCentered = layoutStyle === "centered" || layoutStyle === "minimalist";
   const backgroundShape = state.backgroundShape ?? "minimalist";
-
-  const legacyBackground =
-    !state.backgroundImageUrl &&
-    !(state.productImages?.length) &&
-    !state.productSku &&
-    state.productImageUrl
-      ? state.productImageUrl
-      : null;
-  const backgroundImageUrl = state.backgroundImageUrl || legacyBackground || null;
+  const backgroundImageUrl = state.backgroundImageUrl || null;
 
   const productImages = useMemo(() => {
     const candidates = [
       ...(state.productImages ?? []),
-      ...(!legacyBackground && state.productImageUrl
-        ? [state.productImageUrl]
-        : []),
+      ...(state.productImageUrl ? [state.productImageUrl] : []),
     ];
-    return Array.from(
-      new Set(
-        candidates.filter(
-          (value): value is string =>
-            typeof value === "string" && value.trim().length > 0,
-        ),
-      ),
-    ).slice(0, 3);
-  }, [legacyBackground, state.productImageUrl, state.productImages]);
+    return rankProductImages(candidates, state.productImageUrl);
+  }, [state.productImageUrl, state.productImages]);
 
-  const hasProduct = productImages.length > 0;
+  const productDisplayMode = inferProductDisplayMode(
+    premiumState,
+    productImages.length,
+  );
+  const visibleProductImages =
+    productDisplayMode === "gallery"
+      ? productImages.slice(0, 3)
+      : productImages.slice(0, 1);
+  const hasProduct = visibleProductImages.length > 0;
   const effectiveCentered = isCentered && !hasProduct;
   const effectiveReverse = hasProduct && isCentered ? false : isReverse;
 
@@ -269,8 +327,8 @@ export function BannerPreview({
     body: 19,
     benefits: 13,
     footer: 13,
-    badgePrimary: 38,
-    badgeSecondary: 16,
+    badgePrimary: 22,
+    badgeSecondary: 14,
   };
   const fontSizes: Required<BannerFontSizes> = {
     ...defaultFontSizes,
@@ -288,14 +346,10 @@ export function BannerPreview({
     "--banner-title-mobile-size": `${Math.round(fontSizes.title * mobileFactor)}px`,
     "--banner-subtitle-mobile-size": `${Math.round(fontSizes.subtitle * 0.82)}px`,
     "--banner-body-mobile-size": `${Math.round(fontSizes.body * 0.84)}px`,
-    "--banner-benefits-mobile-size": `${Math.round(fontSizes.benefits * 0.9)}px`,
-    "--banner-footer-mobile-size": `${Math.round(fontSizes.footer * 0.92)}px`,
-    "--banner-badge-primary-mobile-size": `${Math.round(fontSizes.badgePrimary * 0.78)}px`,
-    "--banner-badge-secondary-mobile-size": `${Math.round(fontSizes.badgeSecondary * 0.88)}px`,
   } as CSSProperties;
 
   const updateFontSize = (key: BannerFontSizeKey, value: number) => {
-    onChange({
+    patchState({
       bannerFontSizes: {
         ...state.bannerFontSizes,
         [key]: value,
@@ -305,29 +359,32 @@ export function BannerPreview({
 
   const productPlacement = (index: number): ProductPlacement => {
     if (isMobileLayout) {
-      const placements = [
-        { x: 20, y: 59, scale: 1, width: 60 },
-        { x: 5, y: 67, scale: 0.9, width: 42 },
-        { x: 53, y: 68, scale: 0.9, width: 42 },
+      if (productDisplayMode === "hero") {
+        return { x: 18, y: 58, scale: 1, width: 64 };
+      }
+      const gallery = [
+        { x: 19, y: 58, scale: 1, width: 45 },
+        { x: 4, y: 70, scale: 0.84, width: 34 },
+        { x: 58, y: 70, scale: 0.84, width: 34 },
       ];
-      return placements[index] ?? placements[0];
+      return gallery[index] ?? gallery[0];
     }
 
-    if (productImages.length === 1) {
+    if (productDisplayMode === "hero") {
       return effectiveReverse
-        ? { x: 7, y: 14, scale: 1, width: 39 }
-        : { x: 57, y: 14, scale: 1, width: 39 };
+        ? { x: 5, y: 10, scale: 1, width: 43 }
+        : { x: 55, y: 10, scale: 1, width: 43 };
     }
 
     const normal = [
-      { x: 53, y: 19, scale: 1, width: 30 },
-      { x: 73, y: 25, scale: 0.92, width: 27 },
-      { x: 61, y: 4, scale: 0.78, width: 23 },
+      { x: 58, y: 12, scale: 1, width: 31 },
+      { x: 76, y: 28, scale: 0.84, width: 24 },
+      { x: 49, y: 31, scale: 0.78, width: 23 },
     ];
     const reverse = [
-      { x: 7, y: 19, scale: 1, width: 30 },
-      { x: 24, y: 25, scale: 0.92, width: 27 },
-      { x: 16, y: 4, scale: 0.78, width: 23 },
+      { x: 8, y: 12, scale: 1, width: 31 },
+      { x: 1, y: 29, scale: 0.84, width: 24 },
+      { x: 28, y: 31, scale: 0.78, width: 23 },
     ];
     return (effectiveReverse ? reverse : normal)[index] ?? normal[0];
   };
@@ -343,8 +400,18 @@ export function BannerPreview({
       for (const file of files) {
         urls.push(await uploadCampaignAsset(file, "products"));
       }
-      onChange({ productImages: [...(state.productImages ?? []), ...urls] });
-      toast.success("Produto adicionado ao banner.", { id: toastId });
+      const existing = productImages.filter((url) => !urls.includes(url));
+      patchState({
+        productImageUrl: urls[0],
+        productImages: [...urls, ...existing],
+        productDisplayMode: "hero",
+      });
+      toast.success(
+        files.length > 1
+          ? "Imagens adicionadas. A primeira foi definida como produto principal."
+          : "Produto principal atualizado.",
+        { id: toastId },
+      );
     } catch (error) {
       console.error(error);
       toast.error("Não foi possível enviar a imagem do produto.", { id: toastId });
@@ -360,17 +427,21 @@ export function BannerPreview({
     const toastId = toast.loading("Enviando o fundo do banner...");
     try {
       const url = await uploadCampaignAsset(file, "backgrounds");
-      onChange({ backgroundImageUrl: url });
-      setAnalyzingColors(true);
-      const vision = await analyzeImageWithVisionFn({ data: { imageUrl: url } });
-      if (vision.primaryBrandColor) {
-        onChange({
-          backgroundImageUrl: url,
-          themeColor: vision.primaryBrandColor,
-          secondaryColor: vision.secondaryBrandColor || secondaryColor,
-        });
-      }
+      patchState({ backgroundImageUrl: url });
       toast.success("Fundo aplicado.", { id: toastId });
+
+      setAnalyzingColors(true);
+      try {
+        const vision = await analyzeImageWithVisionFn({ data: { imageUrl: url } });
+        if (vision.primaryBrandColor) {
+          patchState({
+            themeColor: vision.primaryBrandColor,
+            secondaryColor: vision.secondaryBrandColor || secondaryColor,
+          });
+        }
+      } catch (visionError) {
+        console.warn("Fundo aplicado sem leitura automática de paleta.", visionError);
+      }
     } catch (error) {
       console.error(error);
       toast.error("Não foi possível enviar o fundo.", { id: toastId });
@@ -388,12 +459,15 @@ export function BannerPreview({
     setIsRenderingVisual(true);
     const toastId = toast.loading("Criando um novo key visual...");
     try {
+      const productAwarePrompt = hasProduct
+        ? `${imagePrompt}, create one coherent background scene only, reserve the product zone, no collage, no thumbnail grid, do not redraw or duplicate the real product`
+        : `${imagePrompt}, create one coherent advertising scene, no collage, no thumbnail grid`;
       const rendered = await renderCampaignImage({
-        prompt: imagePrompt,
+        prompt: productAwarePrompt,
         aspectRatio: "16:9",
         imageSize: "1K",
       });
-      onChange({
+      patchState({
         backgroundImageUrl: rendered.url,
         imageSeed: Math.floor(Math.random() * 1_000_000),
       });
@@ -406,13 +480,12 @@ export function BannerPreview({
     }
   };
 
-  const fallbackBackground = `linear-gradient(118deg, ${secondaryColor} 0%, ${themeColor} 58%, ${secondaryColor} 118%)`;
+  const fallbackBackground = `linear-gradient(118deg, ${secondaryColor} 0%, ${themeColor} 64%, ${secondaryColor} 118%)`;
   const textOverlay = effectiveCentered
-    ? "linear-gradient(90deg, rgba(3,7,18,.68) 0%, rgba(3,7,18,.46) 48%, rgba(3,7,18,.58) 100%)"
+    ? "linear-gradient(90deg, rgba(3,7,18,.64) 0%, rgba(3,7,18,.42) 50%, rgba(3,7,18,.64) 100%)"
     : effectiveReverse
-      ? "linear-gradient(270deg, rgba(3,7,18,.9) 0%, rgba(3,7,18,.78) 38%, rgba(3,7,18,.18) 68%, rgba(3,7,18,0) 100%)"
-      : "linear-gradient(90deg, rgba(3,7,18,.9) 0%, rgba(3,7,18,.78) 38%, rgba(3,7,18,.18) 68%, rgba(3,7,18,0) 100%)";
-
+      ? "linear-gradient(270deg, rgba(3,7,18,.92) 0%, rgba(3,7,18,.76) 39%, rgba(3,7,18,.18) 67%, rgba(3,7,18,0) 100%)"
+      : "linear-gradient(90deg, rgba(3,7,18,.92) 0%, rgba(3,7,18,.76) 39%, rgba(3,7,18,.18) 67%, rgba(3,7,18,0) 100%)";
   const ctaBackground = themeColor;
   const ctaTextColor = contrastText(ctaBackground);
 
@@ -442,9 +515,11 @@ export function BannerPreview({
             <div
               id="banner-export-node"
               data-export-node="banner"
+              data-product-mode={productDisplayMode}
               className={cn(
                 "relative isolate overflow-hidden bg-slate-950",
-                !isExportClone && "rounded-[22px] shadow-[0_24px_50px_-18px_rgba(0,0,0,0.55)]",
+                !isExportClone &&
+                  "rounded-[22px] shadow-[0_24px_50px_-18px_rgba(0,0,0,0.55)]",
                 fontClass,
                 exportWrapperClass,
                 isMobileLayout && "force-mobile",
@@ -477,11 +552,11 @@ export function BannerPreview({
               {!backgroundImageUrl && (
                 <>
                   <div
-                    className="pointer-events-none absolute -right-[8%] top-[-35%] z-[1] h-[125%] w-[62%] rounded-full opacity-35 blur-3xl"
+                    className="pointer-events-none absolute -right-[10%] top-[-38%] z-[1] h-[128%] w-[60%] rounded-full opacity-30 blur-3xl"
                     style={{ backgroundColor: themeColor }}
                   />
                   <div
-                    className="pointer-events-none absolute bottom-[-55%] left-[16%] z-[1] h-[95%] w-[55%] rounded-full opacity-20 blur-3xl"
+                    className="pointer-events-none absolute bottom-[-60%] left-[15%] z-[1] h-[95%] w-[54%] rounded-full opacity-[0.14] blur-3xl"
                     style={{ backgroundColor: "#ffffff" }}
                   />
                 </>
@@ -491,8 +566,9 @@ export function BannerPreview({
                 className="pointer-events-none absolute inset-0 z-[2]"
                 style={{ background: textOverlay }}
               />
+              <div className="pointer-events-none absolute inset-0 z-[3] bg-[radial-gradient(circle_at_50%_110%,rgba(255,255,255,0.10),transparent_42%)]" />
 
-              <VisualAccent
+              <PremiumAccent
                 shape={backgroundShape}
                 themeColor={themeColor}
                 secondaryColor={secondaryColor}
@@ -500,29 +576,41 @@ export function BannerPreview({
               />
 
               {hasProduct && (
-                <div
-                  className={cn(
-                    "pointer-events-none absolute z-[18] rounded-full blur-3xl",
-                    isMobileLayout
-                      ? "bottom-[8%] left-[12%] h-[33%] w-[76%]"
-                      : effectiveReverse
-                        ? "left-[2%] top-[15%] h-[68%] w-[45%]"
-                        : "right-[2%] top-[15%] h-[68%] w-[45%]",
-                  )}
-                  style={{
-                    background: `radial-gradient(circle, ${themeColor}55 0%, transparent 70%)`,
-                  }}
-                />
+                <>
+                  <div
+                    className={cn(
+                      "pointer-events-none absolute z-[18] blur-3xl",
+                      isMobileLayout
+                        ? "bottom-[5%] left-[10%] h-[35%] w-[80%]"
+                        : effectiveReverse
+                          ? "left-[1%] top-[10%] h-[76%] w-[48%]"
+                          : "right-[1%] top-[10%] h-[76%] w-[48%]",
+                    )}
+                    style={{
+                      background: `radial-gradient(ellipse at center, ${themeColor}4A 0%, transparent 70%)`,
+                    }}
+                  />
+                  <div
+                    className={cn(
+                      "pointer-events-none absolute z-[19] h-[8%] rounded-[50%] blur-xl",
+                      isMobileLayout
+                        ? "bottom-[8%] left-[21%] w-[58%]"
+                        : effectiveReverse
+                          ? "bottom-[12%] left-[8%] w-[34%]"
+                          : "bottom-[12%] right-[8%] w-[34%]",
+                    )}
+                    style={{ background: "rgba(2,6,23,.34)" }}
+                  />
+                </>
               )}
 
               <div className="banner-product-layer absolute inset-0 z-30 pointer-events-none [&>*]:pointer-events-auto">
-                {productImages.map((src, index) => {
+                {visibleProductImages.map((src, index) => {
                   const placement = productPlacement(index);
                   return (
-                    <DraggableImage
+                    <PremiumProductImage
                       key={`${src}-${index}`}
                       src={src}
-                      type="banner"
                       isExport={isExportClone}
                       defaultPosition={{
                         x: placement.x,
@@ -543,18 +631,18 @@ export function BannerPreview({
                     : isMobileLayout
                       ? "left-0 right-0 top-0 min-h-[55%] items-center justify-center px-10 py-12 text-center"
                       : effectiveReverse
-                        ? "right-0 top-0 h-full w-[48%] items-end justify-center px-16 py-12 text-right"
-                        : "left-0 top-0 h-full w-[48%] items-start justify-center px-16 py-12 text-left",
+                        ? "right-0 top-0 h-full w-[47%] items-end justify-center px-16 py-12 text-right"
+                        : "left-0 top-0 h-full w-[47%] items-start justify-center px-16 py-12 text-left",
                 )}
               >
                 <div
                   className={cn(
                     "flex w-full flex-col",
                     effectiveCentered
-                      ? "max-w-[800px] items-center"
+                      ? "max-w-[820px] items-center"
                       : effectiveReverse
-                        ? "max-w-[520px] items-end"
-                        : "max-w-[520px] items-start",
+                        ? "max-w-[510px] items-end"
+                        : "max-w-[510px] items-start",
                     isMobileLayout && "max-w-[470px] items-center",
                   )}
                 >
@@ -562,8 +650,8 @@ export function BannerPreview({
                     <div
                       className="mb-5 inline-flex max-w-full items-center gap-2 rounded-full border px-3.5 py-1.5 text-[13px] font-bold uppercase tracking-[0.16em]"
                       style={{
-                        borderColor: `${textColor}30`,
-                        backgroundColor: `${secondaryColor}55`,
+                        borderColor: `${textColor}2E`,
+                        backgroundColor: `${secondaryColor}66`,
                         color: textColor,
                       }}
                     >
@@ -578,12 +666,12 @@ export function BannerPreview({
                   <Editable
                     as="h2"
                     value={title}
-                    onChange={(value) => onChange({ title: value })}
+                    onChange={(value) => patchState({ title: value })}
                     className="banner-title-text max-w-full text-balance font-extrabold leading-[0.98] tracking-[-0.045em]"
                     style={{
                       color: textColor,
                       fontSize: fontSizes.title,
-                      textShadow: "0 3px 24px rgba(0,0,0,.3)",
+                      textShadow: "0 3px 24px rgba(0,0,0,.28)",
                     }}
                   />
 
@@ -592,7 +680,7 @@ export function BannerPreview({
                       as="p"
                       multiline
                       value={subtitle}
-                      onChange={(value) => onChange({ subtitle: value })}
+                      onChange={(value) => patchState({ subtitle: value })}
                       className="banner-subtitle-text mt-5 max-w-[94%] font-semibold leading-[1.25]"
                       style={{
                         color: textColor,
@@ -607,7 +695,7 @@ export function BannerPreview({
                       as="p"
                       multiline
                       value={bodyText}
-                      onChange={(value) => onChange({ body: value })}
+                      onChange={(value) => patchState({ body: value })}
                       className="banner-body-text mt-3 max-w-[92%] leading-[1.45]"
                       style={{
                         color: textColor,
@@ -656,7 +744,7 @@ export function BannerPreview({
                       <Editable
                         as="span"
                         value={cta}
-                        onChange={(value) => onChange({ cta: value })}
+                        onChange={(value) => patchState({ cta: value })}
                         style={{ color: ctaTextColor }}
                       />
                     </div>
@@ -666,7 +754,7 @@ export function BannerPreview({
                     <Editable
                       as="p"
                       value={footerInfo}
-                      onChange={(value) => onChange({ footerInfo: value })}
+                      onChange={(value) => patchState({ footerInfo: value })}
                       className="banner-footer-text mt-5 max-w-[95%] leading-snug"
                       style={{
                         color: textColor,
@@ -681,53 +769,47 @@ export function BannerPreview({
               {(badgePrimary || badgeSecondary) && (
                 <div
                   className={cn(
-                    "absolute z-50 flex flex-col gap-2",
+                    "absolute z-50 flex max-w-[260px] flex-col gap-2",
                     isMobileLayout
-                      ? "bottom-8 right-7 items-end"
+                      ? "bottom-7 right-7 items-end"
                       : effectiveReverse
-                        ? "bottom-10 left-10 items-start"
-                        : "bottom-10 right-10 items-end",
+                        ? "bottom-9 left-9 items-start"
+                        : "bottom-9 right-9 items-end",
                   )}
                 >
                   {badgePrimary && (
                     <div
-                      className="flex min-h-[104px] min-w-[104px] max-w-[150px] items-center justify-center rounded-full border-4 px-4 text-center shadow-[0_18px_38px_-14px_rgba(0,0,0,.6)]"
+                      className="rounded-full border px-4 py-2.5 text-center font-black shadow-[0_12px_28px_-14px_rgba(0,0,0,.55)]"
                       style={{
                         backgroundColor: themeColor,
-                        borderColor: `${textColor}E6`,
+                        borderColor: `${textColor}42`,
                         color: contrastText(themeColor),
+                        fontSize: fontSizes.badgePrimary,
                       }}
                     >
                       <Editable
                         as="span"
                         value={badgePrimary}
-                        onChange={(value) => onChange({ badgePrimary: value })}
-                        className="banner-badge-primary-text font-black leading-[0.95] tracking-[-0.04em]"
-                        style={{
-                          color: contrastText(themeColor),
-                          fontSize: fontSizes.badgePrimary,
-                        }}
+                        onChange={(value) => patchState({ badgePrimary: value })}
+                        style={{ color: contrastText(themeColor) }}
                       />
                     </div>
                   )}
                   {badgeSecondary && (
                     <div
-                      className="rounded-lg border px-3.5 py-2 text-center font-bold"
+                      className="rounded-full border px-3.5 py-2 text-center font-bold"
                       style={{
-                        backgroundColor: `${secondaryColor}DD`,
-                        borderColor: `${textColor}33`,
+                        backgroundColor: `${secondaryColor}D9`,
+                        borderColor: `${textColor}2E`,
                         color: textColor,
+                        fontSize: fontSizes.badgeSecondary,
                       }}
                     >
                       <Editable
                         as="span"
                         value={badgeSecondary}
-                        onChange={(value) => onChange({ badgeSecondary: value })}
-                        className="banner-badge-secondary-text"
-                        style={{
-                          color: textColor,
-                          fontSize: fontSizes.badgeSecondary,
-                        }}
+                        onChange={(value) => patchState({ badgeSecondary: value })}
+                        style={{ color: textColor }}
                       />
                     </div>
                   )}
@@ -742,6 +824,9 @@ export function BannerPreview({
         <div className="editor-toolbar mt-3 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-border-subtle bg-surface-1/85 p-3 shadow-[var(--shadow-soft)] backdrop-blur-xl">
           <div className="flex min-w-0 items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-fg-muted">
             <span className="rounded bg-brand/10 px-2 py-1 text-brand">BANNER</span>
+            {hasProduct && (
+              <span>{productDisplayMode === "hero" ? "Produto hero" : "Vitrine"}</span>
+            )}
             {isRenderingVisual && <span className="animate-pulse">Gerando visual…</span>}
             {analyzingColors && <span className="animate-pulse">Lendo paleta…</span>}
           </div>
@@ -782,7 +867,7 @@ export function BannerPreview({
                 variant="ghost"
                 className="h-8 w-8"
                 title="Remover fundo"
-                onClick={() => onChange({ backgroundImageUrl: null })}
+                onClick={() => patchState({ backgroundImageUrl: null })}
               >
                 <Trash2 className="size-3.5" />
               </Button>
@@ -797,9 +882,38 @@ export function BannerPreview({
               <PopoverContent
                 side="top"
                 align="end"
-                className="mb-2 max-h-[calc(100vh-96px)] w-[min(390px,calc(100vw-24px))] overflow-y-auto rounded-2xl border-border-strong bg-surface-1 p-4 shadow-[var(--shadow-elevated)]"
+                className="mb-2 max-h-[calc(100vh-96px)] w-[min(410px,calc(100vw-24px))] overflow-y-auto rounded-2xl border-border-strong bg-surface-1 p-4 shadow-[var(--shadow-elevated)]"
               >
                 <div className="space-y-5">
+                  {productImages.length > 1 && (
+                    <div className="space-y-2">
+                      <h4 className="flex items-center text-[10px] font-bold uppercase tracking-widest text-fg-muted">
+                        <Layers className="mr-1.5 size-3" /> Produtos
+                      </h4>
+                      <div className="grid grid-cols-2 gap-2">
+                        <Button
+                          size="sm"
+                          variant={productDisplayMode === "hero" ? "default" : "outline"}
+                          className="h-7 text-[11px]"
+                          onClick={() => patchState({ productDisplayMode: "hero" })}
+                        >
+                          Hero único
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant={productDisplayMode === "gallery" ? "default" : "outline"}
+                          className="h-7 text-[11px]"
+                          onClick={() => patchState({ productDisplayMode: "gallery" })}
+                        >
+                          Vitrine
+                        </Button>
+                      </div>
+                      <p className="text-[10px] leading-4 text-fg-muted">
+                        Use vitrine apenas quando a campanha realmente precisar mostrar vários produtos ou ângulos.
+                      </p>
+                    </div>
+                  )}
+
                   <div className="space-y-2">
                     <h4 className="flex items-center text-[10px] font-bold uppercase tracking-widest text-fg-muted">
                       <LayoutTemplate className="mr-1.5 size-3" /> Composição
@@ -815,7 +929,7 @@ export function BannerPreview({
                           size="sm"
                           variant={layoutStyle === value ? "default" : "outline"}
                           className="h-7 text-[11px]"
-                          onClick={() => onChange({ layoutStyle: value })}
+                          onClick={() => patchState({ layoutStyle: value })}
                         >
                           {label}
                         </Button>
@@ -827,19 +941,18 @@ export function BannerPreview({
                     <h4 className="flex items-center text-[10px] font-bold uppercase tracking-widest text-fg-muted">
                       <Layers className="mr-1.5 size-3" /> Tratamento
                     </h4>
-                    <div className="grid grid-cols-4 gap-2">
+                    <div className="grid grid-cols-3 gap-2">
                       {([
                         ["minimalist", "Clean"],
                         ["diagonal", "Diagonal"],
                         ["frame", "Moldura"],
-                        ["curve", "Curva"],
                       ] as const).map(([value, label]) => (
                         <Button
                           key={value}
                           size="sm"
                           variant={backgroundShape === value ? "default" : "outline"}
                           className="h-7 px-2 text-[10px]"
-                          onClick={() => onChange({ backgroundShape: value })}
+                          onClick={() => patchState({ backgroundShape: value })}
                         >
                           {label}
                         </Button>
@@ -863,7 +976,9 @@ export function BannerPreview({
                             type="color"
                             value={value}
                             className="h-9 w-full cursor-pointer rounded-lg border border-border-subtle bg-transparent p-1"
-                            onChange={(event) => onChange({ [key]: event.target.value })}
+                            onChange={(event) =>
+                              patchState({ [key]: event.target.value } as PremiumBannerPatch)
+                            }
                           />
                         </label>
                       ))}
@@ -885,7 +1000,7 @@ export function BannerPreview({
                           size="sm"
                           variant={(state.fontFamily ?? "sans") === value ? "default" : "outline"}
                           className="h-7 text-[11px]"
-                          onClick={() => onChange({ fontFamily: value })}
+                          onClick={() => patchState({ fontFamily: value })}
                         >
                           {label}
                         </Button>
