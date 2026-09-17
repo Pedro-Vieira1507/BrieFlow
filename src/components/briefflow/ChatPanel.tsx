@@ -78,14 +78,6 @@ export function ChatPanel({ onSend }: Props) {
     setUploadedImage(url);
 
     setBuilder((current) => {
-      const topLevelImages = Array.from(
-        new Set([
-          url,
-          ...(current.productImages ?? []),
-          ...(current.productImageUrl ? [current.productImageUrl] : []),
-        ]),
-      ).slice(0, 3);
-
       const discoveryPlan = markProductImageAvailable(
         current.discoveryPlan,
         url,
@@ -95,21 +87,14 @@ export function ChatPanel({ onSend }: Props) {
         current.type === "campaign" && current.campaignAssets
           ? current.campaignAssets.map((asset) => {
               if (asset.type !== "banner") return asset;
-              const productImages = Array.from(
-                new Set([
-                  url,
-                  ...(asset.content.productImages ?? []),
-                  ...(asset.content.productImageUrl
-                    ? [asset.content.productImageUrl]
-                    : []),
-                ]),
-              ).slice(0, 3);
               return {
                 ...asset,
                 content: {
                   ...asset.content,
                   productImageUrl: url,
-                  productImages,
+                  // A deliberate manual upload is authoritative for the banner.
+                  // Scraped/reference images stay out of the rendered hero layer.
+                  productImages: [url],
                 },
               };
             })
@@ -118,7 +103,7 @@ export function ChatPanel({ onSend }: Props) {
       return {
         ...current,
         productImageUrl: url,
-        productImages: topLevelImages,
+        productImages: [url],
         discoveryPlan,
         campaignAssets,
       };
