@@ -103,9 +103,9 @@ function estimateEdgeBackground(
 }
 
 /**
- * Removes only a light, nearly-uniform background that is connected to the
- * outer edge of the source image. This keeps white details inside the product
- * intact and avoids the common "white rectangle pasted on the banner" effect.
+ * Removes only a light, nearly-uniform background connected to the image edge.
+ * White details inside the product remain intact, so laboratory equipment and
+ * other light-colored products do not get erased with the source background.
  */
 async function cleanupProductImage(src: string): Promise<string> {
   if (cleanedImageCache.has(src)) return cleanedImageCache.get(src)!;
@@ -115,7 +115,10 @@ async function cleanupProductImage(src: string): Promise<string> {
     const image = await loadImage(proxiedSource(src));
     const naturalWidth = Math.max(1, image.naturalWidth || image.width);
     const naturalHeight = Math.max(1, image.naturalHeight || image.height);
-    const ratio = Math.min(1, MAX_PROCESSING_SIDE / Math.max(naturalWidth, naturalHeight));
+    const ratio = Math.min(
+      1,
+      MAX_PROCESSING_SIDE / Math.max(naturalWidth, naturalHeight),
+    );
     const width = Math.max(1, Math.round(naturalWidth * ratio));
     const height = Math.max(1, Math.round(naturalHeight * ratio));
 
@@ -144,7 +147,11 @@ async function cleanupProductImage(src: string): Promise<string> {
     const isBackgroundPixel = (index: number) => {
       const offset = index * 4;
       if (data[offset + 3] === 0) return true;
-      const lightness = luminance(data[offset], data[offset + 1], data[offset + 2]);
+      const lightness = luminance(
+        data[offset],
+        data[offset + 1],
+        data[offset + 2],
+      );
       return lightness >= 178 && pixelDistance(data, offset, background) <= 52;
     };
 
@@ -175,8 +182,6 @@ async function cleanupProductImage(src: string): Promise<string> {
       if (y + 1 < height) enqueue(index + width);
     }
 
-    // A tiny connected region usually means the source already has a useful
-    // background or the subject touches the edges. In those cases keep it.
     if (removed / total < 0.12) {
       cleanedImageCache.set(src, src);
       return src;
@@ -184,8 +189,7 @@ async function cleanupProductImage(src: string): Promise<string> {
 
     for (let index = 0; index < total; index += 1) {
       if (!visited[index]) continue;
-      const offset = index * 4;
-      data[offset + 3] = 0;
+      data[index * 4 + 3] = 0;
     }
 
     context.putImageData(imageData, 0, 0);
@@ -225,8 +229,8 @@ export function PremiumProductImage({
       };
     }
 
-    // The interactive preview warms the cache. Export clones then reuse the
-    // transparent result synchronously, avoiding a visual mismatch.
+    // The interactive preview warms the cache. Export clones reuse the cleaned
+    // result, keeping preview and exported files visually consistent.
     void cleanupProductImage(src).then((nextSrc) => {
       if (active) setDisplaySrc(nextSrc);
     });
@@ -237,20 +241,12 @@ export function PremiumProductImage({
   }, [src]);
 
   return (
-    <div
-      className="premium-product-image"
-      style={{
-        filter:
-          "drop-shadow(0 24px 26px rgba(2, 6, 23, 0.28)) drop-shadow(0 7px 10px rgba(2, 6, 23, 0.18))",
-      }}
-    >
-      <DraggableImage
-        src={displaySrc}
-        type="banner"
-        isExport={isExport}
-        defaultPosition={stablePosition}
-        baseWidth={baseWidth}
-      />
-    </div>
+    <DraggableImage
+      src={displaySrc}
+      type="banner"
+      isExport={isExport}
+      defaultPosition={stablePosition}
+      baseWidth={baseWidth}
+    />
   );
 }
