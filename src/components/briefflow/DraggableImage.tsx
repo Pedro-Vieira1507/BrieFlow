@@ -8,27 +8,53 @@ const positionCache = new Map<
   { x: number; y: number; scale: number }
 >();
 
+interface DraggableImagePosition {
+  x: number;
+  y: number;
+  scale?: number;
+}
+
 export function DraggableImage({
   src,
   type = "default",
   isExport = false,
+  defaultPosition,
+  baseWidth,
 }: {
   src?: string | null;
   type?: string;
   isExport?: boolean;
+  defaultPosition?: DraggableImagePosition;
+  baseWidth?: number;
 }) {
   const safeSrc = typeof src === "string" ? src : "";
+  const resolvedDefault = useMemo(
+    () => ({
+      x: defaultPosition?.x ?? 0,
+      y: defaultPosition?.y ?? 0,
+      scale: defaultPosition?.scale ?? 1,
+    }),
+    [defaultPosition?.scale, defaultPosition?.x, defaultPosition?.y],
+  );
+  const resolvedWidth = baseWidth ?? (type === "banner" ? 20 : 40);
   const cacheKey = useMemo(() => {
     const hash =
       safeSrc.length > 100
         ? `${safeSrc.length}-${safeSrc.substring(safeSrc.length - 50)}`
         : safeSrc;
-    return `${type}-v10-${hash}`;
-  }, [safeSrc, type]);
+    return `${type}-v11-${resolvedDefault.x}-${resolvedDefault.y}-${resolvedDefault.scale}-${resolvedWidth}-${hash}`;
+  }, [
+    resolvedDefault.scale,
+    resolvedDefault.x,
+    resolvedDefault.y,
+    resolvedWidth,
+    safeSrc,
+    type,
+  ]);
 
   const cached = useMemo(
-    () => positionCache.get(cacheKey) || { x: 0, y: 0, scale: 1 },
-    [cacheKey],
+    () => positionCache.get(cacheKey) || resolvedDefault,
+    [cacheKey, resolvedDefault],
   );
   const [pos, setPos] = useState({ x: cached.x, y: cached.y });
   const [scale, setScale] = useState(cached.scale);
@@ -84,11 +110,10 @@ export function DraggableImage({
 
   useEffect(() => {
     const currentCache = positionCache.get(cacheKey);
-    if (currentCache) {
-      setPos({ x: currentCache.x, y: currentCache.y });
-      setScale(currentCache.scale);
-    }
-  }, [cacheKey]);
+    const next = currentCache || resolvedDefault;
+    setPos({ x: next.x, y: next.y });
+    setScale(next.scale);
+  }, [cacheKey, resolvedDefault]);
 
   useEffect(() => {
     positionCache.set(cacheKey, { x: pos.x, y: pos.y, scale });
@@ -229,7 +254,7 @@ export function DraggableImage({
           zIndex: 40,
           left: `${pos.x}%`,
           top: `${pos.y}%`,
-          width: type === "banner" ? "20%" : "40%",
+          width: `${resolvedWidth}%`,
           aspectRatio: "1",
           transform: `scale(${scale})`,
         }}
@@ -262,7 +287,7 @@ export function DraggableImage({
         zIndex: 40,
         left: `${pos.x}%`,
         top: `${pos.y}%`,
-        width: type === "banner" ? "20%" : "40%",
+        width: `${resolvedWidth}%`,
         transform: `scale(${scale})`,
         transformOrigin: "center",
       }}
@@ -275,7 +300,7 @@ export function DraggableImage({
           crossOrigin={isSafeOrigin ? undefined : "anonymous"}
           loading="lazy"
           decoding="async"
-          className="pointer-events-none w-full h-auto select-none rounded-xl bg-transparent object-contain"
+          className="pointer-events-none w-full h-auto select-none bg-transparent object-contain"
           draggable={false}
           onError={handleImgError}
           style={{ imageRendering: "auto" }}
