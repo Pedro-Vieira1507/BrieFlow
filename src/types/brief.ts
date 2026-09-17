@@ -119,6 +119,51 @@ function clean(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function productPageReference(input: {
+  site?: SiteBrandData | null;
+  plan?: DiscoveryPlan;
+  product?: ProductReference;
+}): ProductReference | null {
+  const site = input.site;
+  const siteImage = clean(site?.ogImage);
+  const siteUrl = clean(site?.url);
+  if (!site || !siteImage || !siteUrl) return null;
+
+  let isNonHomepage = false;
+  try {
+    const parsed = new URL(siteUrl);
+    isNonHomepage = parsed.pathname !== "" && parsed.pathname !== "/";
+  } catch {
+    return null;
+  }
+
+  const explicitProductUrl =
+    clean(input.product?.productUrl) ?? clean(input.plan?.productUrl);
+  const hasProductSignal = Boolean(
+    clean(input.product?.productTitle) ||
+      clean(input.plan?.productTitle) ||
+      clean(input.plan?.productSku) ||
+      clean(input.plan?.product),
+  );
+
+  if (!isNonHomepage || (!hasProductSignal && !explicitProductUrl)) {
+    return null;
+  }
+
+  return {
+    productUrl: explicitProductUrl ?? siteUrl,
+    productImageUrl: siteImage,
+    productTitle:
+      clean(input.product?.productTitle) ??
+      clean(input.plan?.productTitle) ??
+      clean(site.title),
+    productDescription:
+      clean(input.product?.productDescription) ??
+      clean(input.plan?.productDescription) ??
+      clean(site.description),
+  };
+}
+
 /**
  * Converte o estado do app no brief tipado. Função pura: nada de store,
  * nada de fetch — facilita testar prompts isoladamente.
@@ -131,6 +176,19 @@ export function toMarketingBrief(input: {
   channels?: MarketingChannel[];
 }): MarketingBrief {
   const { brandContext, plan, product, availableImageUrls, channels } = input;
+  const siteProduct = productPageReference({
+    site: brandContext.site,
+    plan,
+    product,
+  });
+  const images = Array.from(
+    new Set(
+      [
+        ...(availableImageUrls ?? []),
+        siteProduct?.productImageUrl ?? undefined,
+      ].filter((value): value is string => Boolean(value)),
+    ),
+  );
 
   return {
     brandName:
@@ -149,12 +207,22 @@ export function toMarketingBrief(input: {
     framework: clean(brandContext.framework),
     channels,
     site: brandContext.site ?? null,
-    availableImageUrls: availableImageUrls ?? [],
-    productUrl: clean(product?.productUrl) ?? clean(plan?.productUrl),
+    availableImageUrls: images,
+    productUrl:
+      clean(product?.productUrl) ??
+      clean(plan?.productUrl) ??
+      clean(siteProduct?.productUrl),
     productImageUrl:
-      clean(product?.productImageUrl) ?? clean(plan?.productImageUrl),
-    productTitle: clean(product?.productTitle) ?? clean(plan?.productTitle),
+      clean(product?.productImageUrl) ??
+      clean(plan?.productImageUrl) ??
+      clean(siteProduct?.productImageUrl),
+    productTitle:
+      clean(product?.productTitle) ??
+      clean(plan?.productTitle) ??
+      clean(siteProduct?.productTitle),
     productDescription:
-      clean(product?.productDescription) ?? clean(plan?.productDescription),
+      clean(product?.productDescription) ??
+      clean(plan?.productDescription) ??
+      clean(siteProduct?.productDescription),
   };
 }
