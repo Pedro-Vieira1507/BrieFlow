@@ -69,7 +69,6 @@ const ACTIONS = new Set([
 ]);
 
 const SHORT_STRUCTURED_ACTIONS = new Set([
-  "banner",
   "email",
   "social",
   "whatsapp",
@@ -93,6 +92,10 @@ function safeEndpoint(raw: string): string {
   return url.toString();
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function normalizeJsonContent(content: string): string | null {
   const stripped = content
     .trim()
@@ -112,8 +115,7 @@ function normalizeJsonContent(content: string): string | null {
     try {
       return JSON.stringify(JSON.parse(candidate));
     } catch {
-      // Try the next conservative extraction. Never attempt heuristic repair of
-      // arbitrary malformed JSON because it can alter campaign facts.
+      // Never heuristically repair malformed JSON because campaign facts could change.
     }
   }
   return null;
@@ -144,6 +146,35 @@ function normalizeMessages(
   return messages;
 }
 
+async function performOpenAiRequest(options: {
+  endpoint: string;
+  apiKey: string;
+  model: string;
+  messages: Array<{ role: ChatRole; content: string }>;
+  temperature: number;
+  maxTokens: number;
+  jsonMode: boolean;
+  extraHeaders?: Record<string, string>;
+  signal: AbortSignal;
+}): Promise<Response> {
+  return fetch(safeEndpoint(options.endpoint), {
+    method: "POST",
+    signal: options.signal,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${options.apiKey}`,
+      ...options.extraHeaders,
+    },
+    body: JSON.stringify({
+      model: options.model,
+      messages: options.messages,
+      temperature: options.temperature,
+      max_tokens: options.maxTokens,
+      ...(options.jsonMode ? { response_format: { type: "json_object" } } : {}),
+    }),
+  });
+}
+
 async function openAiRequest(options: {
   provider: ProviderName;
   endpoint: string;
@@ -157,23 +188,38 @@ async function openAiRequest(options: {
 }): Promise<ProviderResult> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 75_000);
+
   try {
-    const response = await fetch(safeEndpoint(options.endpoint), {
-      method: "POST",
+    let response = await performOpenAiRequest({
+      ...options,
       signal: controller.signal,
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${options.apiKey}`,
-        ...options.extraHeaders,
-      },
-      body: JSON.stringify({
-        model: options.model,
-        messages: options.messages,
-        temperature: options.temperature,
-        max_tokens: options.maxTokens,
-        ...(options.jsonMode ? { response_format: { type: "json_object" } } : {}),
-      }),
     });
+
+    // Groq commonly returns 413 when prompt + requested completion exceeds a
+    // model-specific context window. A banner needs a small JSON response, so
+    // retry with a smaller completion budget without dropping campaign facts.
+    if (response.status === 413 && options.maxTokens > 1024) {
+      response = await performOpenAiRequest({
+        ...options,
+        maxTokens: 1024,
+        signal: controller.signal,
+      });
+    }
+
+    // A short rate-limit window should not immediately fail the whole campaign.
+    // Respect a small Retry-After value when provided and retry once.
+    if (response.status === 429) {
+      const retryAfter = Number(response.headers.get("retry-after") ?? "0");
+      const delayMs = Number.isFinite(retryAfter) && retryAfter > 0
+        ? Math.min(4_000, Math.max(750, retryAfter * 1_000))
+        : 1_500;
+      await sleep(delayMs);
+      response = await performOpenAiRequest({
+        ...options,
+        maxTokens: Math.min(options.maxTokens, 1536),
+        signal: controller.signal,
+      });
+    }
 
     if (!response.ok) {
       throw new Error(`${options.provider}_http_${response.status}`);
@@ -285,43 +331,40 @@ function buildAttempts(options: {
     attempts.push({
       name: "omniroute",
       model: omnirouteModel,
-      execute: () =>
-        openAiRequest({
-          ...shared,
-          provider: "omniroute",
-          endpoint: omnirouteUrl,
-          apiKey: omnirouteKey,
-          model: omnirouteModel,
-        }),
+      execute: () => openAiRequest({
+        ...shared,
+        provider: "omniroute",
+        endpoint: omnirouteUrl,
+        apiKey: omnirouteKey,
+        model: omnirouteModel,
+      }),
     });
   }
 
   const groqKey = env("GROQ_API_KEY");
   if (groqKey) {
     const discoveryModel = env("GROQ_DISCOVERY_MODEL");
-    const configuredModels =
-      options.stage === "discovery"
-        ? [discoveryModel]
-        : [
-            env("GROQ_PRIMARY_MODEL"),
-            env("GROQ_FIRST_FALLBACK_MODEL"),
-            env("GROQ_SECOND_FALLBACK_MODEL"),
-            discoveryModel,
-          ];
-
+    const configuredModels = options.stage === "discovery"
+      ? [discoveryModel]
+      : [
+          env("GROQ_PRIMARY_MODEL"),
+          env("GROQ_SECOND_FALLBACK_MODEL"),
+          discoveryModel,
+          env("GROQ_FIRST_FALLBACK_MODEL"),
+        ];
     const models = [...new Set(configuredModels.filter((value): value is string => Boolean(value)))];
+
     for (const model of models) {
       attempts.push({
         name: "groq",
         model,
-        execute: () =>
-          openAiRequest({
-            ...shared,
-            provider: "groq",
-            endpoint: "https://api.groq.com/openai/v1/chat/completions",
-            apiKey: groqKey,
-            model,
-          }),
+        execute: () => openAiRequest({
+          ...shared,
+          provider: "groq",
+          endpoint: "https://api.groq.com/openai/v1/chat/completions",
+          apiKey: groqKey,
+          model,
+        }),
       });
     }
   }
@@ -334,15 +377,14 @@ function buildAttempts(options: {
     attempts.push({
       name: "gemini",
       model: geminiModel,
-      execute: () =>
-        openAiRequest({
-          ...shared,
-          provider: "gemini",
-          endpoint: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-          apiKey: geminiKey,
-          model: geminiModel,
-          extraHeaders: { "x-goog-api-key": geminiKey },
-        }),
+      execute: () => openAiRequest({
+        ...shared,
+        provider: "gemini",
+        endpoint: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+        apiKey: geminiKey,
+        model: geminiModel,
+        extraHeaders: { "x-goog-api-key": geminiKey },
+      }),
     });
   }
 
@@ -354,8 +396,7 @@ function buildAttempts(options: {
     attempts.push({
       name: "ollama",
       model: ollamaModel,
-      execute: () =>
-        ollamaRequest({ ...shared, endpoint: ollamaUrl, model: ollamaModel }),
+      execute: () => ollamaRequest({ ...shared, endpoint: ollamaUrl, model: ollamaModel }),
     });
   }
 
@@ -379,7 +420,7 @@ Deno.serve(async (req: Request) => {
   let requestId = "";
   let authorized = false;
   let action = "chat";
-  let providerFailures: ProviderFailure[] = [];
+  const providerFailures: ProviderFailure[] = [];
 
   try {
     context = await authenticate(req);
@@ -451,7 +492,11 @@ Deno.serve(async (req: Request) => {
       Math.max(Number.isFinite(requestedTemperature) ? requestedTemperature : 0.3, 0),
       1.2,
     );
-    const actionTokenCeiling = SHORT_STRUCTURED_ACTIONS.has(action) ? 4096 : 8192;
+    const actionTokenCeiling = action === "banner"
+      ? 1536
+      : SHORT_STRUCTURED_ACTIONS.has(action)
+        ? 4096
+        : 8192;
     const maxTokens = Math.min(
       Math.max(Number.isFinite(requestedMaxTokens) ? Math.floor(requestedMaxTokens) : 4096, 256),
       actionTokenCeiling,
@@ -482,14 +527,12 @@ Deno.serve(async (req: Request) => {
       } catch (error) {
         const code = error instanceof Error ? error.message : "provider_failed";
         providerFailures.push({ provider: attempt.name, model: attempt.model, code });
-        console.warn(
-          JSON.stringify({
-            event: "ai_provider_failed",
-            provider: attempt.name,
-            model: attempt.model,
-            code,
-          }),
-        );
+        console.warn(JSON.stringify({
+          event: "ai_provider_failed",
+          provider: attempt.name,
+          model: attempt.model,
+          code,
+        }));
       }
     }
     if (!result) throw new Error("all_providers_failed");
