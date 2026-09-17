@@ -24,6 +24,16 @@ test("chat uploads become the primary campaign product image", () => {
   assert.match(panel, /new Set\(\[\s*url,/);
 });
 
+test("product image upload resolves image-related discovery gaps and continues automatically", () => {
+  const panel = source("../src/components/briefflow/ChatPanel.tsx");
+
+  assert.match(panel, /PRODUCT_IMAGE_REQUEST_PATTERN/);
+  assert.match(panel, /missingInfo = PRODUCT_IMAGE_REQUEST_PATTERN\.test/);
+  assert.match(panel, /IMAGE_CONTEXT_MARKER/);
+  assert.match(panel, /Considere esse requisito atendido/);
+  assert.match(panel, /onSend\(IMAGE_ATTACHED_CONTINUE_MESSAGE\)/);
+});
+
 test("campaign generation prioritizes the image attached in chat", () => {
   const agent = source("../src/hooks/useBriefflowAgent.ts");
   const uploaded = agent.indexOf("...(uploadedImage ? [uploadedImage] : [])");
