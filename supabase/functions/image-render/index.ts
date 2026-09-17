@@ -26,6 +26,7 @@ const ALLOWED_ASPECT_RATIOS = new Set([
   "9:16",
 ]);
 const ALLOWED_IMAGE_SIZES = new Set(["512", "1K", "2K"]);
+const IMAGE_RENDERS_PER_MINUTE = 8;
 
 function findGeneratedImage(value: unknown): GeneratedImage | null {
   if (!value || typeof value !== "object") return null;
@@ -99,6 +100,27 @@ Deno.serve(async (req: Request) => {
         error: "unauthorized",
         message: "Sessão inválida.",
       });
+    }
+
+    const { data: rateAllowed, error: rateError } = await context.service.rpc(
+      "check_rate_limit",
+      {
+        p_user_id: context.user.id,
+        p_scope: "image_render",
+        p_limit: IMAGE_RENDERS_PER_MINUTE,
+      },
+    );
+    if (rateError) {
+      console.error(
+        JSON.stringify({
+          event: "image_render_rate_limit_failed",
+          code: rateError.message,
+        }),
+      );
+      return json(req, 500, { error: "rate_limit_failed" });
+    }
+    if (!rateAllowed) {
+      return json(req, 429, { error: "rate_limit_exceeded" });
     }
 
     const body = await readJson<ImageRenderBody>(req, 24_000);
