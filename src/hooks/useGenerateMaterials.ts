@@ -220,10 +220,17 @@ export function useGenerateMaterials(): UseGenerateMaterialsResult {
               backgroundImageUrl: rendered.url,
             };
           } catch (imageError) {
-            console.warn(
-              "Falha ao gerar key visual do banner; usando composição de marca como fallback.",
-              imageError,
-            );
+            if (renderContext.productImages?.length) {
+              console.warn(
+                "Falha ao gerar key visual; preservando o produto real sobre a composição de marca.",
+                imageError,
+              );
+            } else {
+              throw new Error(
+                "Não foi possível criar o key visual deste banner com qualidade suficiente. Gere novamente em alguns instantes.",
+                { cause: imageError },
+              );
+            }
           }
         }
 
