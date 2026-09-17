@@ -19,6 +19,47 @@ export interface RenderCampaignImageResult {
   aspectRatio: string;
 }
 
+export class ImageRenderError extends Error {
+  readonly code: string;
+  readonly status: number;
+  readonly providerStatus?: number;
+  readonly providerCode?: string;
+  readonly providerMessage?: string;
+  readonly modelsTried: string[];
+
+  constructor(input: {
+    code: string;
+    status: number;
+    providerStatus?: number;
+    providerCode?: string;
+    providerMessage?: string;
+    modelsTried?: string[];
+  }) {
+    super(input.code);
+    this.name = "ImageRenderError";
+    this.code = input.code;
+    this.status = input.status;
+    this.providerStatus = input.providerStatus;
+    this.providerCode = input.providerCode;
+    this.providerMessage = input.providerMessage;
+    this.modelsTried = input.modelsTried ?? [];
+  }
+}
+
+function readString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function readNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function readStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
+    : [];
+}
+
 export async function renderCampaignImage(
   options: RenderCampaignImageOptions,
 ): Promise<RenderCampaignImageResult> {
@@ -35,7 +76,7 @@ export async function renderCampaignImage(
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
       apikey: supabaseAnonKey,
-      "X-Client-Version": "brieflow-web/3",
+      "X-Client-Version": "brieflow-web/4",
     },
     body: JSON.stringify({
       prompt: options.prompt,
@@ -54,7 +95,14 @@ export async function renderCampaignImage(
   }
 
   if (!response.ok) {
-    throw new Error(String(payload.error ?? "image_render_failed"));
+    throw new ImageRenderError({
+      code: readString(payload.error) ?? "image_render_failed",
+      status: response.status,
+      providerStatus: readNumber(payload.provider_status),
+      providerCode: readString(payload.provider_code),
+      providerMessage: readString(payload.provider_message),
+      modelsTried: readStringArray(payload.models_tried),
+    });
   }
 
   const url = typeof payload.url === "string" ? payload.url : "";
