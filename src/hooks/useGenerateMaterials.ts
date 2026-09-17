@@ -13,6 +13,7 @@ import {
   type MaterialPromptOptions,
 } from "@/lib/marketingPrompts";
 import { sanitizeGeneratedCopy } from "@/lib/marketingQuality";
+import { renderCampaignImage } from "@/lib/imageRender";
 import {
   MATERIAL_SCHEMAS,
   toBuilderContent,
@@ -28,10 +29,9 @@ export interface GenerateMaterialParams<T extends MaterialType = MaterialType> {
   rawBriefing?: string;
   prompt?: MaterialPromptOptions;
   images?: string[];
-  provider?: AiProviderName; // <-- NOVO
+  provider?: AiProviderName;
 }
 
-// ... (tipagens omitidas para economizar espaço - igual ao seu código atual)
 export interface GeneratedMaterial<T extends MaterialType = MaterialType> {
   material: T;
   copy: GeneratedCopyByMaterial[T];
@@ -78,6 +78,34 @@ function toRenderContext(
     productImages: unique,
     productSku: brief.productUrl ?? null,
   };
+}
+
+function normalizeBriefing(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+function requiresRealProductImage(rawBriefing?: string): boolean {
+  if (!rawBriefing?.trim()) return false;
+  const text = normalizeBriefing(rawBriefing);
+  const mentionsRealImage = /(?:foto|imagem)\s+(?:real|original|oficial)/.test(text);
+  const isMandatory =
+    /obrigatori|nao\s+gere\s+outro|nao\s+altere|use\s+(?:a|o)|utilize\s+(?:a|o)|produto\s+real/.test(
+      text,
+    );
+  return mentionsRealImage && isMandatory;
+}
+
+function hasUsableProductImage(brief: MarketingBrief, images?: string[]): boolean {
+  return Boolean(
+    brief.productImageUrl ||
+      images?.some((value) => typeof value === "string" && value.trim()) ||
+      brief.availableImageUrls?.some(
+        (value) => typeof value === "string" && value.trim(),
+      ),
+  );
 }
 
 export function describeAiError(error: unknown): string {
@@ -130,7 +158,7 @@ export function useGenerateMaterials(): UseGenerateMaterialsResult {
       rawBriefing,
       prompt,
       images,
-      provider = "omniroute", // <-- Opcional
+      provider = "omniroute",
     }: GenerateMaterialParams<T>): Promise<GeneratedMaterial<T>> => {
       const controller = controllerRef.current ?? new AbortController();
       controllerRef.current = controller;
@@ -140,6 +168,16 @@ export function useGenerateMaterials(): UseGenerateMaterialsResult {
       setLastError(null);
 
       try {
+        if (
+          material === "banner" &&
+          requiresRealProductImage(rawBriefing) &&
+          !hasUsableProductImage(brief, images)
+        ) {
+          throw new Error(
+            "Este banner exige uma foto real do produto. Envie a imagem do produto antes de gerar para que o BrieFlow não invente ou substitua o item.",
+          );
+        }
+
         const channelBriefing =
           prompt?.channelBriefing ??
           (rawBriefing
@@ -166,17 +204,35 @@ export function useGenerateMaterials(): UseGenerateMaterialsResult {
         });
 
         const safeData = sanitizeGeneratedCopy(material, data, brief);
+        const renderContext = toRenderContext(brief, images);
+        let content = toBuilderContent(material, safeData, renderContext);
+
+        if (material === "banner" && safeData.imagePrompt?.trim()) {
+          try {
+            const rendered = await renderCampaignImage({
+              prompt: safeData.imagePrompt,
+              aspectRatio: "16:9",
+              imageSize: "1K",
+              signal: controller.signal,
+            });
+            content = {
+              ...content,
+              backgroundImageUrl: rendered.url,
+            };
+          } catch (imageError) {
+            console.warn(
+              "Falha ao gerar key visual do banner; usando composição de marca como fallback.",
+              imageError,
+            );
+          }
+        }
 
         useCreditsStore.getState().refresh();
 
         return {
           material,
           copy: safeData,
-          content: toBuilderContent(
-            material,
-            safeData,
-            toRenderContext(brief, images),
-          ),
+          content,
           meta,
         };
       } catch (error) {
