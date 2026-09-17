@@ -9,7 +9,7 @@ import {
 } from "../_shared/http.ts";
 
 type ChatRole = "system" | "user" | "assistant";
-type ProviderName = "omniroute" | "groq" | "gemini" | "ollama";
+type ProviderName = "omniroute" | "groq" | "gemini" | "cloudflare" | "ollama";
 
 type ProxyMessage = { role?: string; content?: unknown };
 
@@ -154,6 +154,7 @@ async function performOpenAiRequest(options: {
   temperature: number;
   maxTokens: number;
   jsonMode: boolean;
+  supportsResponseFormat?: boolean;
   extraHeaders?: Record<string, string>;
   signal: AbortSignal;
 }): Promise<Response> {
@@ -170,7 +171,9 @@ async function performOpenAiRequest(options: {
       messages: options.messages,
       temperature: options.temperature,
       max_tokens: options.maxTokens,
-      ...(options.jsonMode ? { response_format: { type: "json_object" } } : {}),
+      ...(options.jsonMode && options.supportsResponseFormat !== false
+        ? { response_format: { type: "json_object" } }
+        : {}),
     }),
   });
 }
@@ -184,6 +187,7 @@ async function openAiRequest(options: {
   temperature: number;
   maxTokens: number;
   jsonMode: boolean;
+  supportsResponseFormat?: boolean;
   extraHeaders?: Record<string, string>;
 }): Promise<ProviderResult> {
   const controller = new AbortController();
@@ -195,9 +199,6 @@ async function openAiRequest(options: {
       signal: controller.signal,
     });
 
-    // Groq commonly returns 413 when prompt + requested completion exceeds a
-    // model-specific context window. A banner needs a small JSON response, so
-    // retry with a smaller completion budget without dropping campaign facts.
     if (response.status === 413 && options.maxTokens > 1024) {
       response = await performOpenAiRequest({
         ...options,
@@ -206,8 +207,6 @@ async function openAiRequest(options: {
       });
     }
 
-    // A short rate-limit window should not immediately fail the whole campaign.
-    // Respect a small Retry-After value when provided and retry once.
     if (response.status === 429) {
       const retryAfter = Number(response.headers.get("retry-after") ?? "0");
       const delayMs = Number.isFinite(retryAfter) && retryAfter > 0
@@ -369,6 +368,24 @@ function buildAttempts(options: {
     }
   }
 
+  const cloudflareAccountId = env("CLOUDFLARE_ACCOUNT_ID");
+  const cloudflareToken = env("CLOUDFLARE_API_TOKEN");
+  const cloudflareModel = env("CLOUDFLARE_TEXT_MODEL") ?? "@cf/zai-org/glm-4.7-flash";
+  if (cloudflareAccountId && cloudflareToken) {
+    attempts.push({
+      name: "cloudflare",
+      model: cloudflareModel,
+      execute: () => openAiRequest({
+        ...shared,
+        provider: "cloudflare",
+        endpoint: `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(cloudflareAccountId)}/ai/v1/chat/completions`,
+        apiKey: cloudflareToken,
+        model: cloudflareModel,
+        supportsResponseFormat: false,
+      }),
+    });
+  }
+
   const geminiKey = env("GEMINI_API_KEY");
   const geminiModel = env(
     options.stage === "discovery" ? "GEMINI_DISCOVERY_MODEL" : "GEMINI_CONTENT_MODEL",
@@ -505,7 +522,7 @@ Deno.serve(async (req: Request) => {
 
     const attempts = buildAttempts({
       stage,
-      preferred: ["omniroute", "groq", "gemini", "ollama"].includes(
+      preferred: ["omniroute", "groq", "gemini", "cloudflare", "ollama"].includes(
         String(body.preferred_provider),
       )
         ? body.preferred_provider
