@@ -31,6 +31,7 @@ export interface BannerContent {
   imagePrompt: string;
   imageSeed?: number;
   productImageUrl?: string | null;
+  backgroundImageUrl?: string | null;
   productSku?: string | null;
   themeColor?: string;
   secondaryColor?: string;
@@ -73,7 +74,6 @@ export interface EmailContent {
   urgencyText?: string;
   testimonials?: string[];
   footerInfo?: string;
-  // --> NOVAS OPÇÕES DE E-MAIL AQUI <--
   layoutStyle?:
     | "diagonal"
     | "split"
@@ -162,6 +162,7 @@ export interface BuilderState {
   emailHeroImagePrompt?: string;
   footerText?: string;
   productImageUrl?: string | null;
+  backgroundImageUrl?: string | null;
   productSku?: string | null;
   productImages?: string[];
   themeColor?: string;
