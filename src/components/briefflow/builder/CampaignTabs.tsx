@@ -36,7 +36,6 @@ import {
 interface Props {
   assets: CampaignAsset[];
   onAssetChange: (assetId: string, patch: Partial<BuilderState>) => void;
-  // NOVAS PROPS: Comunicação direta com o PageBuilder
   activeTab: CampaignAsset["type"];
   onTabChange: (tab: CampaignAsset["type"]) => void;
   loading?: boolean;
@@ -91,14 +90,15 @@ function BannerRecoveryProductUpload({
         uploaded.push(await uploadCampaignAsset(file, "products"));
       }
 
+      // Manual upload is deliberate user input, so it must outrank scraped or
+      // previously discovered images. Keep older images only as references.
       const productImages = Array.from(
-        new Set([...currentImages, ...uploaded]),
+        new Set([...uploaded, ...currentImages]),
       ).slice(0, 3);
 
       onAssetChange(asset.id, {
         productImages,
-        productImageUrl:
-          asset.content.productImageUrl ?? productImages[0] ?? null,
+        productImageUrl: uploaded[0] ?? productImages[0] ?? null,
       });
 
       toast.success(
@@ -172,7 +172,6 @@ export function CampaignTabs({
       MATERIAL_TYPES.indexOf(left.key) - MATERIAL_TYPES.indexOf(right.key),
   );
 
-  // Ao aparecer um novo asset gerado pela IA, foca automaticamente nele
   useEffect(() => {
     if (!assets.length) return;
 
