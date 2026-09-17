@@ -250,6 +250,43 @@ function filterUnsupportedLists(
   }
 }
 
+const COMMERCIAL_BANNER_IMAGE_SUFFIX =
+  "premium commercial ecommerce key visual, disciplined grid, one clear focal point, realistic scale, controlled studio lighting, crisp material detail, clean brand-led background, generous negative space for copy, strong subject-background separation, polished advertising photography, thumbnail legibility, no clutter, no glassmorphism, no random decorative blobs, no excessive glow, no surreal floating objects, no text, no letters, no logo, no watermark, no UI";
+
+function enforceBannerImageDirection(
+  value: unknown,
+  brief: MarketingBrief,
+): string {
+  const raw = typeof value === "string" ? value.trim() : "";
+  const productDirection = brief.productImageUrl
+    ? "background and supporting scene only, preserve a clean 45 to 55 percent area for the real product cutout, do not invent, duplicate or replace the real product"
+    : brief.product || brief.productTitle
+      ? "single product hero when visually appropriate, photorealistic commercial product photography, product fully readable and not awkwardly cropped"
+      : "single concrete campaign scene or symbol tied to the message, editorial advertising photography";
+
+  const parts = [raw, productDirection, COMMERCIAL_BANNER_IMAGE_SUFFIX].filter(
+    Boolean,
+  );
+  return Array.from(new Set(parts)).join(", ");
+}
+
+function enforceBannerComposition(
+  copy: Record<string, unknown>,
+  brief: MarketingBrief,
+): void {
+  copy.imagePrompt = enforceBannerImageDirection(copy.imagePrompt, brief);
+
+  if (brief.productImageUrl && copy.layoutStyle === "centered") {
+    copy.layoutStyle = "split";
+  }
+
+  const hasConfirmedOffer = Boolean(brief.offer?.trim());
+  if (!hasConfirmedOffer) {
+    copy.badgePrimary = "";
+    copy.badgeSecondary = "";
+  }
+}
+
 export function sanitizeGeneratedCopy<T extends MaterialType>(
   material: T,
   copy: GeneratedCopyByMaterial[T],
@@ -317,6 +354,7 @@ export function sanitizeGeneratedCopy<T extends MaterialType>(
       ["subheadline", "footerInfo", "badgePrimary", "badgeSecondary"],
       brief,
     );
+    enforceBannerComposition(sanitized, brief);
   } else if (material === "email") {
     clearUnsupportedOptionalFields(
       sanitized,
