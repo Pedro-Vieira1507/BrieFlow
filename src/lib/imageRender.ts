@@ -65,13 +65,24 @@ function readStringArray(value: unknown): string[] {
 
 function premiumImagePrompt(rawPrompt: string): string {
   const normalized = rawPrompt.replace(/\s+/g, " ").trim();
-  const guardrail =
+  const isBackgroundPlate =
+    /background plate only|background scene only|externally composited real product|reserved product zone/i.test(
+      normalized,
+    );
+  const baseGuardrail =
     "single coherent premium commercial scene, one clear focal idea, no collage, no contact sheet, no thumbnail grid, no floating image panels, no pasted photo rectangles, visually integrated lighting and perspective, clean negative space for external typography";
+  const backgroundGuardrail = isBackgroundPlate
+    ? "BACKGROUND PLATE ONLY, environment and supporting surfaces only, absolutely no advertised product, no replica, no similar foreground product, no machine hero, no device hero, no package hero, no merchandise hero, keep the reserved product zone free of standalone objects"
+    : "";
+  const guardrail = [backgroundGuardrail, baseGuardrail].filter(Boolean).join(", ");
 
-  if (/no collage/i.test(normalized)) return normalized.slice(0, 7_800);
+  const alreadyProtected =
+    /no collage/i.test(normalized) &&
+    (!isBackgroundPlate || /no advertised product/i.test(normalized));
+  if (alreadyProtected) return normalized.slice(0, 7_800);
 
   const available = Math.max(400, 7_800 - guardrail.length - 2);
-  return `${normalized.slice(0, available)}, ${guardrail}`;
+  return `${guardrail}, ${normalized.slice(0, available)}`;
 }
 
 export async function renderCampaignImage(
@@ -92,7 +103,7 @@ export async function renderCampaignImage(
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
       apikey: supabaseAnonKey,
-      "X-Client-Version": "brieflow-web/4",
+      "X-Client-Version": "brieflow-web/5",
     },
     body: JSON.stringify({
       prompt: premiumImagePrompt(options.prompt),
