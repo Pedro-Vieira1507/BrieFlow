@@ -1,26 +1,24 @@
 // src/components/briefflow/BannerPreview.tsx
-import { useEffect, useLayoutEffect, useMemo, useState, useRef } from "react";
-import { Editable } from "./Editable";
-import { DraggableImage } from "./DraggableImage";
-import type { BannerFontSizes, BuilderState } from "@/types/builder";
-import { buildPollinationsUrl, buildFallbackUrl } from "@/lib/pollinations";
-import { Button } from "@/components/ui/button";
 import {
-  Upload,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
+import {
   ImagePlus,
-  RefreshCw,
-  ArrowUpRight,
-  Trash2,
-  Sparkles,
-  Palette,
-  LayoutTemplate,
-  Type,
   Layers,
-  Move,
-  Minus,
-  Plus,
-  RotateCcw,
+  LayoutTemplate,
+  Palette,
+  RefreshCw,
+  Trash2,
+  Type,
+  Upload,
 } from "lucide-react";
+import { toast } from "sonner";
+
+import { Button } from "@/components/ui/button";
 import {
   Popover,
   PopoverContent,
@@ -28,28 +26,42 @@ import {
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { cleanText, isEmptyLike } from "@/lib/sanitize";
-import { analyzeImageWithVisionFn } from "@/lib/vision-api";
-import { toast } from "sonner";
 import { uploadCampaignAsset } from "@/lib/supabase";
+import { analyzeImageWithVisionFn } from "@/lib/vision-api";
+import { renderCampaignImage } from "@/lib/imageRender";
+import type { BannerFontSizes, BuilderState } from "@/types/builder";
+
+import { DraggableImage } from "./DraggableImage";
+import { Editable } from "./Editable";
 
 interface Props {
   state: BuilderState;
   onChange: (patch: Partial<BuilderState>) => void;
   exportWrapperClass?: string;
-  exportWrapperStyle?: React.CSSProperties;
+  exportWrapperStyle?: CSSProperties;
 }
-
-const blockCache = new Map<string, { x: number; y: number }>();
 
 type BannerFontSizeKey = keyof BannerFontSizes;
 
-interface FontSizeControlProps {
-  label: string;
-  value: number;
-  min: number;
-  max: number;
-  step?: number;
-  onChange: (value: number) => void;
+type ProductPlacement = {
+  x: number;
+  y: number;
+  scale: number;
+  width: number;
+};
+
+function normalizeHex(value: string | undefined, fallback: string): string {
+  const raw = value?.trim() ?? "";
+  return /^#[0-9a-fA-F]{6}$/.test(raw) ? raw : fallback;
+}
+
+function contrastText(hex: string): string {
+  const value = normalizeHex(hex, "#111827").slice(1);
+  const r = Number.parseInt(value.slice(0, 2), 16);
+  const g = Number.parseInt(value.slice(2, 4), 16);
+  const b = Number.parseInt(value.slice(4, 6), 16);
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance > 0.62 ? "#111827" : "#ffffff";
 }
 
 function FontSizeControl({
@@ -57,232 +69,119 @@ function FontSizeControl({
   value,
   min,
   max,
-  step = 1,
   onChange,
-}: FontSizeControlProps) {
-  const update = (nextValue: number) =>
-    onChange(Math.min(max, Math.max(min, nextValue)));
-
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  onChange: (value: number) => void;
+}) {
   return (
     <div className="flex items-center justify-between gap-3 rounded-lg border border-border-subtle bg-surface-2 px-2 py-1.5">
-      <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-fg-secondary">
-        {label}
-      </span>
-      <div className="flex shrink-0 items-center gap-1">
+      <span className="text-[11px] font-medium text-fg-secondary">{label}</span>
+      <div className="flex items-center gap-1.5">
         <Button
           type="button"
           variant="ghost"
-          size="icon"
-          className="size-7 rounded-md"
-          disabled={value <= min}
-          aria-label={`Diminuir ${label.toLowerCase()}`}
-          title={`Diminuir ${label.toLowerCase()}`}
-          onClick={() => update(value - step)}
+          size="sm"
+          className="h-7 w-7 p-0"
+          onClick={() => onChange(Math.max(min, value - 2))}
         >
-          <Minus className="size-3.5" />
+          −
         </Button>
-        <span className="w-12 text-center text-[11px] font-bold tabular-nums text-fg-primary">
+        <span className="w-11 text-center text-[11px] font-bold tabular-nums text-fg-primary">
           {value}px
         </span>
         <Button
           type="button"
           variant="ghost"
-          size="icon"
-          className="size-7 rounded-md"
-          disabled={value >= max}
-          aria-label={`Aumentar ${label.toLowerCase()}`}
-          title={`Aumentar ${label.toLowerCase()}`}
-          onClick={() => update(value + step)}
+          size="sm"
+          className="h-7 w-7 p-0"
+          onClick={() => onChange(Math.min(max, value + 2))}
         >
-          <Plus className="size-3.5" />
+          +
         </Button>
       </div>
     </div>
   );
 }
 
-function DraggableBlock({
-  id,
-  children,
-  className,
-  isExport,
-  resetPosition = false,
+function VisualAccent({
+  shape,
+  themeColor,
+  secondaryColor,
+  reverse,
 }: {
-  id: string;
-  children: React.ReactNode;
-  className?: string;
-  isExport?: boolean;
-  resetPosition?: boolean;
+  shape: BuilderState["backgroundShape"];
+  themeColor: string;
+  secondaryColor: string;
+  reverse: boolean;
 }) {
-  const cached = useMemo(
-    () =>
-      resetPosition ? { x: 0, y: 0 } : blockCache.get(id) || { x: 0, y: 0 },
-    [id, resetPosition],
-  );
-  const [pos, setPos] = useState(cached);
-  const [isDragging, setIsDragging] = useState(false);
-  const startMousePos = useRef({ x: 0, y: 0 });
-  const startPos = useRef({ x: 0, y: 0 });
-  const containerRef = useRef<HTMLDivElement>(null);
+  if (!shape || shape === "minimalist" || shape === "split") return null;
 
-  useEffect(() => {
-    if (resetPosition) setPos({ x: 0, y: 0 });
-  }, [resetPosition]);
+  if (shape === "frame") {
+    return (
+      <div
+        className="pointer-events-none absolute inset-7 z-[3] rounded-[26px] border"
+        style={{ borderColor: `${themeColor}55` }}
+      />
+    );
+  }
 
-  useEffect(() => {
-    if (isExport) return;
-
-    const handleMove = (e: MouseEvent | TouchEvent) => {
-      if (!isDragging) return;
-      const clientX =
-        e instanceof MouseEvent ? e.clientX : e.touches[0].clientX;
-      const clientY =
-        e instanceof MouseEvent ? e.clientY : e.touches[0].clientY;
-
-      const parent = containerRef.current?.closest(
-        "#banner-export-node, #email-export-node",
-      );
-      const parentRect = parent?.getBoundingClientRect();
-      const pWidth = parentRect?.width || window.innerWidth;
-      const pHeight = parentRect?.height || window.innerHeight;
-
-      const deltaX = ((clientX - startMousePos.current.x) / pWidth) * 100;
-      const deltaY = ((clientY - startMousePos.current.y) / pHeight) * 100;
-
-      setPos({
-        x: startPos.current.x + deltaX,
-        y: startPos.current.y + deltaY,
-      });
-    };
-
-    const handleUp = () => setIsDragging(false);
-
-    if (isDragging) {
-      window.addEventListener("mousemove", handleMove);
-      window.addEventListener("touchmove", handleMove, { passive: false });
-      window.addEventListener("mouseup", handleUp);
-      window.addEventListener("touchend", handleUp);
-    }
-
-    return () => {
-      window.removeEventListener("mousemove", handleMove);
-      window.removeEventListener("touchmove", handleMove);
-      window.removeEventListener("mouseup", handleUp);
-      window.removeEventListener("touchend", handleUp);
-    };
-  }, [isDragging, isExport]);
-
-  useEffect(() => {
-    if (!isExport && !resetPosition) blockCache.set(id, pos);
-  }, [pos, id, isExport, resetPosition]);
-
-  useLayoutEffect(() => {
-    if (isDragging) return;
-
-    const frame = window.requestAnimationFrame(() => {
-      const element = containerRef.current;
-      const parent = element?.closest<HTMLElement>(
-        "#banner-export-node, #email-export-node",
-      );
-      if (!element || !parent) return;
-
-      const elementRect = element.getBoundingClientRect();
-      const parentRect = parent.getBoundingClientRect();
-      let correctionX = 0;
-      let correctionY = 0;
-
-      if (elementRect.left < parentRect.left) {
-        correctionX = parentRect.left - elementRect.left;
-      } else if (elementRect.right > parentRect.right) {
-        correctionX = parentRect.right - elementRect.right;
-      }
-
-      if (elementRect.top < parentRect.top) {
-        correctionY = parentRect.top - elementRect.top;
-      } else if (elementRect.bottom > parentRect.bottom) {
-        correctionY = parentRect.bottom - elementRect.bottom;
-      }
-
-      if (Math.abs(correctionX) > 0.5 || Math.abs(correctionY) > 0.5) {
-        setPos((current) => ({
-          x: current.x + (correctionX / parentRect.width) * 100,
-          y: current.y + (correctionY / parentRect.height) * 100,
-        }));
-      }
-    });
-
-    return () => window.cancelAnimationFrame(frame);
-  }, [isDragging]);
-
-  const onPointerDown = (
-    e: React.PointerEvent | React.MouseEvent | React.TouchEvent,
-  ) => {
-    if (isExport) return;
-
-    const target = e.target as HTMLElement;
-    if (["p", "h1", "h2", "h3", "span"].includes(target.tagName.toLowerCase()))
-      return;
-
-    setIsDragging(true);
-    let clientX = 0,
-      clientY = 0;
-    if ("clientX" in e) {
-      clientX = e.clientX;
-      clientY = e.clientY;
-    } else if ("touches" in e) {
-      clientX = e.touches[0].clientX;
-      clientY = e.touches[0].clientY;
-    }
-
-    startMousePos.current = { x: clientX, y: clientY };
-    startPos.current = { ...pos };
-  };
+  if (shape === "diagonal" || shape === "geometric") {
+    return (
+      <div
+        className={cn(
+          "pointer-events-none absolute inset-y-0 z-[2] w-[38%] opacity-20",
+          reverse ? "left-0" : "right-0",
+        )}
+        style={{
+          background: `linear-gradient(145deg, ${themeColor}, ${secondaryColor})`,
+          clipPath: reverse
+            ? "polygon(0 0, 72% 0, 100% 100%, 0 100%)"
+            : "polygon(28% 0, 100% 0, 100% 100%, 0 100%)",
+        }}
+      />
+    );
+  }
 
   return (
     <div
-      ref={containerRef}
       className={cn(
-        "relative transition-all duration-300",
-        !isExport && "cursor-move group/drag",
-        isDragging && !isExport
-          ? "z-50 shadow-2xl scale-[1.02]"
-          : !isExport && "hover:scale-[1.01]",
-        className,
+        "pointer-events-none absolute z-[2] h-[520px] w-[520px] rounded-full blur-[2px]",
+        reverse ? "-left-40 -bottom-72" : "-right-40 -bottom-72",
       )}
-      style={{ position: "relative", left: `${pos.x}%`, top: `${pos.y}%` }}
-      onPointerDown={onPointerDown}
-    >
-      {!isExport && (
-        <div className="absolute -top-3 -right-3 opacity-0 group-hover/drag:opacity-100 transition-opacity bg-black/50 text-white p-2 rounded-full z-10 pointer-events-none shadow-lg">
-          <Move className="size-3" />
-        </div>
-      )}
-      {children}
-    </div>
+      style={{
+        background: `radial-gradient(circle at 40% 35%, ${themeColor}66 0%, ${secondaryColor}18 54%, transparent 72%)`,
+      }}
+    />
   );
 }
 
 export function BannerPreview({
-  state: propState,
+  state,
   onChange,
   exportWrapperClass,
   exportWrapperStyle,
 }: Props) {
-  const isExportClone = !!exportWrapperClass;
+  const isExportClone = Boolean(exportWrapperClass);
   const previewFrameRef = useRef<HTMLDivElement>(null);
+  const productInputRef = useRef<HTMLInputElement>(null);
+  const backgroundInputRef = useRef<HTMLInputElement>(null);
   const [previewWidth, setPreviewWidth] = useState(1200);
-  const state = propState;
+  const [isRenderingVisual, setIsRenderingVisual] = useState(false);
+  const [analyzingColors, setAnalyzingColors] = useState(false);
 
   useLayoutEffect(() => {
     if (isExportClone) return;
     const frame = previewFrameRef.current;
     if (!frame) return;
-
-    const updateWidth = () => setPreviewWidth(Math.max(1, frame.clientWidth));
-    const resizeObserver = new ResizeObserver(updateWidth);
-    resizeObserver.observe(frame);
-    updateWidth();
-    return () => resizeObserver.disconnect();
+    const update = () => setPreviewWidth(Math.max(1, frame.clientWidth));
+    const observer = new ResizeObserver(update);
+    observer.observe(frame);
+    update();
+    return () => observer.disconnect();
   }, [isExportClone]);
 
   const isMobileLayout =
@@ -294,25 +193,69 @@ export function BannerPreview({
     ? 1
     : Math.min(1, previewWidth / canvasWidth);
 
-  const [imageStatus, setImageStatus] = useState<
-    "loading" | "loaded" | "error"
-  >("loading");
-  const [useFallback, setUseFallback] = useState(false);
-  const [analyzingColors, setAnalyzingColors] = useState(false);
+  const themeColor = normalizeHex(state.themeColor, "#1f4f46");
+  const secondaryColor = normalizeHex(state.secondaryColor, "#0f172a");
+  const textColor = normalizeHex(state.textColor, "#ffffff");
+  const title = cleanText(state.title, "Uma ideia que merece atenção");
+  const subtitle = cleanText(state.subtitle);
+  const bodyText = cleanText(state.body);
+  const cta = cleanText(state.cta);
+  const footerInfo = cleanText(state.footerInfo);
+  const brandName = cleanText(state.brandName);
+  const badgePrimary = cleanText(state.badgePrimary);
+  const badgeSecondary = cleanText(state.badgeSecondary);
+  const benefits = (state.keyBenefits ?? []).filter(
+    (benefit): benefit is string =>
+      typeof benefit === "string" && !isEmptyLike(benefit),
+  );
+  const imagePrompt = cleanText(state.imagePrompt);
 
-  const fileRef = useRef<HTMLInputElement>(null);
-  const bgRef = useRef<HTMLInputElement>(null);
+  const requestedLayout = state.layoutStyle ?? "split";
+  const layoutStyle = ["split", "reverse", "centered", "minimalist", "diagonal"].includes(
+    requestedLayout,
+  )
+    ? requestedLayout
+    : "split";
+  const isReverse = layoutStyle === "reverse";
+  const isCentered = layoutStyle === "centered" || layoutStyle === "minimalist";
+  const backgroundShape = state.backgroundShape ?? "minimalist";
 
-  const themeColor = state.themeColor || "#6366f1";
-  const textColor = state.textColor || "#ffffff";
-  const boxColor = state.boxColor || "#06060a";
+  const legacyBackground =
+    !state.backgroundImageUrl &&
+    !(state.productImages?.length) &&
+    !state.productSku &&
+    state.productImageUrl
+      ? state.productImageUrl
+      : null;
+  const backgroundImageUrl = state.backgroundImageUrl || legacyBackground || null;
+
+  const productImages = useMemo(() => {
+    const candidates = [
+      ...(state.productImages ?? []),
+      ...(!legacyBackground && state.productImageUrl
+        ? [state.productImageUrl]
+        : []),
+    ];
+    return Array.from(
+      new Set(
+        candidates.filter(
+          (value): value is string =>
+            typeof value === "string" && value.trim().length > 0,
+        ),
+      ),
+    ).slice(0, 3);
+  }, [legacyBackground, state.productImageUrl, state.productImages]);
+
+  const hasProduct = productImages.length > 0;
+  const effectiveCentered = isCentered && !hasProduct;
+  const effectiveReverse = hasProduct && isCentered ? false : isReverse;
+
   const fontClass =
     state.fontFamily === "serif"
       ? "font-serif"
       : state.fontFamily === "mono"
         ? "font-mono"
         : "font-sans";
-
   const baseFontFamily =
     state.fontFamily === "serif"
       ? 'ui-serif, Georgia, Cambria, "Times New Roman", Times, serif'
@@ -320,214 +263,21 @@ export function BannerPreview({
         ? 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace'
         : 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
 
-  const title = cleanText(
-    state.title,
-    "Equipamentos que impulsionam a performance",
-  );
-  const subtitle = cleanText(state.subtitle);
-  const bodyText = cleanText(state.body);
-  const footerInfo = cleanText(state.footerInfo);
-  const benefits = state.keyBenefits || [];
-  const prompt = cleanText(state.imagePrompt || "");
-
-  const badgePrimary = cleanText(state.badgePrimary);
-  const badgeSecondary = cleanText(state.badgeSecondary);
-
-  const backgroundShape = state.backgroundShape || "curve";
-  const layoutStyle = state.layoutStyle || "split";
-  const hasSubtitle = !isEmptyLike(subtitle);
-
-  const draggableImages = Array.from(new Set(state.productImages || [])).filter(
-    (src): src is string => typeof src === "string" && src.trim().length > 0,
-  );
-
-  const heroUrl = useMemo(() => {
-    if (!prompt) return null;
-    return useFallback
-      ? buildFallbackUrl(prompt, {
-          width: 1200,
-          height: 600,
-          seed: state.imageSeed,
-        })
-      : buildPollinationsUrl(prompt, {
-          width: 1200,
-          height: 600,
-          seed: state.imageSeed,
-        });
-  }, [prompt, state.imageSeed, useFallback]);
-
-  const activeBgUrl = state.productImageUrl || heroUrl;
-
-  const [safeBgUrl, setSafeBgUrl] = useState<string | null>(() => {
-    return activeBgUrl?.startsWith("blob:") ? null : activeBgUrl || null;
-  });
-
-  useEffect(() => {
-    let isMounted = true;
-    if (activeBgUrl?.startsWith("blob:")) {
-      fetch(activeBgUrl)
-        .then((r) => r.blob())
-        .then((blob) => {
-          const reader = new FileReader();
-          reader.onloadend = () => {
-            if (isMounted) setSafeBgUrl(reader.result as string);
-          };
-          reader.readAsDataURL(blob);
-        })
-        .catch(() => {
-          if (isMounted) setSafeBgUrl(activeBgUrl);
-        });
-    } else {
-      if (isMounted) setSafeBgUrl(activeBgUrl || null);
-    }
-    return () => {
-      isMounted = false;
-    };
-  }, [activeBgUrl]);
-
-  const isLocalBg =
-    safeBgUrl?.startsWith("data:") || safeBgUrl?.startsWith("blob:");
-
-  useEffect(() => {
-    if (!heroUrl) return;
-    setImageStatus("loading");
-    const timer = setTimeout(() => {
-      setImageStatus((prev) => {
-        if (prev === "loading") {
-          if (!useFallback && !state.productImageUrl) {
-            setUseFallback(true);
-            return "loading";
-          }
-          return "error";
-        }
-        return prev;
-      });
-    }, 5000);
-    return () => clearTimeout(timer);
-  }, [heroUrl, useFallback, state.productImageUrl]);
-
-  const handleImageError = () => {
-    if (!useFallback && !state.productImageUrl) setUseFallback(true);
-    else setImageStatus("error");
-  };
-
-  const handleProductChange = async (
-    e: React.ChangeEvent<HTMLInputElement>,
-  ) => {
-    const files = Array.from(e.target.files || []);
-    if (!files.length) return;
-
-    const toastId = toast.loading(
-      `Fazendo upload de ${files.length} produto(s)...`,
-    );
-    const newImages: string[] = [];
-
-    try {
-      for (const file of files) {
-        const publicUrl = await uploadCampaignAsset(file, "products");
-        newImages.push(publicUrl);
-      }
-      onChange({
-        productImages: [...(state.productImages || []), ...newImages],
-      });
-      toast.success("Upload de produtos concluído!", { id: toastId });
-    } catch (err) {
-      console.error("Falha no upload múltiplo:", err);
-      toast.error("Erro no upload de um ou mais produtos.", { id: toastId });
-    }
-
-    e.target.value = "";
-  };
-
-  const handleBackgroundChange = async (
-    e: React.ChangeEvent<HTMLInputElement>,
-  ) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const toastId = toast.loading("Enviando fundo para a nuvem...");
-    try {
-      const publicUrl = await uploadCampaignAsset(file, "backgrounds");
-      onChange({ productImageUrl: publicUrl });
-
-      setAnalyzingColors(true);
-      toast.loading("Extraindo paleta de cores...", { id: toastId });
-
-      const visionResult = await analyzeImageWithVisionFn({
-        data: { imageUrl: publicUrl },
-      });
-
-      if (visionResult.primaryBrandColor) {
-        onChange({
-          productImageUrl: publicUrl,
-          themeColor: visionResult.primaryBrandColor,
-          secondaryColor: visionResult.secondaryBrandColor || "#1e1b4b",
-        });
-        toast.success("Paleta harmonizada com a foto!", { id: toastId });
-      } else {
-        toast.success("Fundo aplicado com sucesso!", { id: toastId });
-      }
-    } catch (err) {
-      console.error("Falha no upload/análise:", err);
-      toast.error("Erro ao fazer upload da imagem de fundo", { id: toastId });
-    } finally {
-      setAnalyzingColors(false);
-    }
-
-    e.target.value = "";
-  };
-
-  const handleRegenerate = () => {
-    setImageStatus("loading");
-    setUseFallback(false);
-    onChange({ imageSeed: Math.floor(Math.random() * 1_000_000) });
-  };
-
-  const isCurve = backgroundShape === "curve";
-  const isDiagonal = backgroundShape === "diagonal";
-  const isBlob = backgroundShape === "blob";
-  const isGeometric = backgroundShape === "geometric";
-  const isFrame = backgroundShape === "frame";
-  const isArch = backgroundShape === "arch";
-  const isWave = backgroundShape === "wave";
-  const isPill = backgroundShape === "pill";
-  const isOffset = backgroundShape === "offset";
-
-  const isReverse = layoutStyle === "reverse";
-  const isCentered = layoutStyle === "centered" || layoutStyle === "minimalist";
-  const isComplexShape =
-    isFrame || isBlob || isGeometric || isArch || isPill || isOffset;
-
   const defaultFontSizes: Required<BannerFontSizes> = {
-    title: isCentered ? 56 : 64,
-    subtitle: 28,
-    body: 20,
-    benefits: 14,
-    footer: isCentered ? 16 : 14,
-    badgePrimary: 48,
-    badgeSecondary: 18,
+    title: effectiveCentered ? 60 : 58,
+    subtitle: 27,
+    body: 19,
+    benefits: 13,
+    footer: 13,
+    badgePrimary: 38,
+    badgeSecondary: 16,
   };
   const fontSizes: Required<BannerFontSizes> = {
     ...defaultFontSizes,
     ...state.bannerFontSizes,
   };
-  const mobileDefaultFontSizes: Required<BannerFontSizes> = {
-    title: 40,
-    subtitle: 22,
-    body: 16,
-    benefits: 12,
-    footer: isCentered ? 12 : 14,
-    badgePrimary: 36,
-    badgeSecondary: 16,
-  };
-  const mobileFontSize = (key: BannerFontSizeKey) =>
-    Math.max(
-      8,
-      Math.round(
-        fontSizes[key] * (mobileDefaultFontSizes[key] / defaultFontSizes[key]),
-      ),
-    );
-  const bannerFontVariables = {
+  const mobileFactor = 0.72;
+  const variables = {
     "--banner-title-size": `${fontSizes.title}px`,
     "--banner-subtitle-size": `${fontSizes.subtitle}px`,
     "--banner-body-size": `${fontSizes.body}px`,
@@ -535,14 +285,15 @@ export function BannerPreview({
     "--banner-footer-size": `${fontSizes.footer}px`,
     "--banner-badge-primary-size": `${fontSizes.badgePrimary}px`,
     "--banner-badge-secondary-size": `${fontSizes.badgeSecondary}px`,
-    "--banner-title-mobile-size": `${mobileFontSize("title")}px`,
-    "--banner-subtitle-mobile-size": `${mobileFontSize("subtitle")}px`,
-    "--banner-body-mobile-size": `${mobileFontSize("body")}px`,
-    "--banner-benefits-mobile-size": `${mobileFontSize("benefits")}px`,
-    "--banner-footer-mobile-size": `${mobileFontSize("footer")}px`,
-    "--banner-badge-primary-mobile-size": `${mobileFontSize("badgePrimary")}px`,
-    "--banner-badge-secondary-mobile-size": `${mobileFontSize("badgeSecondary")}px`,
-  } as React.CSSProperties;
+    "--banner-title-mobile-size": `${Math.round(fontSizes.title * mobileFactor)}px`,
+    "--banner-subtitle-mobile-size": `${Math.round(fontSizes.subtitle * 0.82)}px`,
+    "--banner-body-mobile-size": `${Math.round(fontSizes.body * 0.84)}px`,
+    "--banner-benefits-mobile-size": `${Math.round(fontSizes.benefits * 0.9)}px`,
+    "--banner-footer-mobile-size": `${Math.round(fontSizes.footer * 0.92)}px`,
+    "--banner-badge-primary-mobile-size": `${Math.round(fontSizes.badgePrimary * 0.78)}px`,
+    "--banner-badge-secondary-mobile-size": `${Math.round(fontSizes.badgeSecondary * 0.88)}px`,
+  } as CSSProperties;
+
   const updateFontSize = (key: BannerFontSizeKey, value: number) => {
     onChange({
       bannerFontSizes: {
@@ -552,76 +303,121 @@ export function BannerPreview({
     });
   };
 
-  let shapeClass = "";
-  if (isCurve) {
-    shapeClass = isReverse
-      ? cn(
-          "[clip-path:ellipse(80%_150%_at_100%_50%)] [.force-mobile_&]:![clip-path:ellipse(150%_100%_at_50%_100%)]",
-          !isExportClone &&
-            "max-md:![clip-path:ellipse(150%_100%_at_50%_100%)]",
-        )
-      : cn(
-          "[clip-path:ellipse(80%_150%_at_0%_50%)] [.force-mobile_&]:![clip-path:ellipse(150%_100%_at_50%_100%)]",
-          !isExportClone &&
-            "max-md:![clip-path:ellipse(150%_100%_at_50%_100%)]",
-        );
-  } else if (isDiagonal) {
-    shapeClass = isReverse
-      ? cn(
-          "[clip-path:polygon(20%_0,100%_0,100%_100%,0%_100%)] [.force-mobile_&]:![clip-path:polygon(0_15%,100%_0,100%_100%,0_100%)]",
-          !isExportClone &&
-            "max-md:![clip-path:polygon(0_15%,100%_0,100%_100%,0_100%)]",
-        )
-      : cn(
-          "[clip-path:polygon(0_0,100%_0,80%_100%,0%_100%)] [.force-mobile_&]:![clip-path:polygon(0_15%,100%_0,100%_100%,0_100%)]",
-          !isExportClone &&
-            "max-md:![clip-path:polygon(0_15%,100%_0,100%_100%,0_100%)]",
-        );
-  } else if (isWave) {
-    shapeClass = isReverse
-      ? cn(
-          "[clip-path:polygon(100%_0,0_0,0_100%,40%_85%,100%_100%)] [.force-mobile_&]:![clip-path:polygon(100%_0,0_0,0_100%,40%_85%,100%_100%)]",
-          !isExportClone &&
-            "max-md:![clip-path:polygon(100%_0,0_0,0_100%,40%_85%,100%_100%)]",
-        )
-      : cn(
-          "[clip-path:polygon(0_0,100%_0,100%_100%,60%_85%,0_100%)] [.force-mobile_&]:![clip-path:polygon(0_0,100%_0,100%_100%,60%_85%,0_100%)]",
-          !isExportClone &&
-            "max-md:![clip-path:polygon(0_0,100%_0,100%_100%,60%_85%,0_100%)]",
-        );
-  } else if (layoutStyle === "split") {
-    shapeClass = isReverse
-      ? cn(
-          "[clip-path:polygon(0_0,55%_0,55%_100%,0_100%)] [.force-mobile_&]:![clip-path:polygon(0_0,100%_0,100%_100%,0_100%)]",
-          !isExportClone &&
-            "max-md:![clip-path:polygon(0_0,100%_0,100%_100%,0_100%)]",
-        )
-      : cn(
-          "[clip-path:polygon(45%_0,100%_0,100%_100%,45%_100%)] [.force-mobile_&]:![clip-path:polygon(0_0,100%_0,100%_100%,0_100%)]",
-          !isExportClone &&
-            "max-md:![clip-path:polygon(0_0,100%_0,100%_100%,0_100%)]",
-        );
-  }
+  const productPlacement = (index: number): ProductPlacement => {
+    if (isMobileLayout) {
+      const placements = [
+        { x: 20, y: 59, scale: 1, width: 60 },
+        { x: 5, y: 67, scale: 0.9, width: 42 },
+        { x: 53, y: 68, scale: 0.9, width: 42 },
+      ];
+      return placements[index] ?? placements[0];
+    }
 
-  const lineClass = isCurve
-    ? isReverse
-      ? cn(
-          "[clip-path:ellipse(83%_155%_at_100%_50%)] [.force-mobile_&]:![clip-path:ellipse(155%_103%_at_50%_100%)]",
-          !isExportClone &&
-            "max-md:![clip-path:ellipse(155%_103%_at_50%_100%)]",
-        )
-      : cn(
-          "[clip-path:ellipse(83%_155%_at_0%_50%)] [.force-mobile_&]:![clip-path:ellipse(155%_103%_at_50%_100%)]",
-          !isExportClone &&
-            "max-md:![clip-path:ellipse(155%_103%_at_50%_100%)]",
-        )
-    : "";
+    if (productImages.length === 1) {
+      return effectiveReverse
+        ? { x: 7, y: 14, scale: 1, width: 39 }
+        : { x: 57, y: 14, scale: 1, width: 39 };
+    }
+
+    const normal = [
+      { x: 53, y: 19, scale: 1, width: 30 },
+      { x: 73, y: 25, scale: 0.92, width: 27 },
+      { x: 61, y: 4, scale: 0.78, width: 23 },
+    ];
+    const reverse = [
+      { x: 7, y: 19, scale: 1, width: 30 },
+      { x: 24, y: 25, scale: 0.92, width: 27 },
+      { x: 16, y: 4, scale: 0.78, width: 23 },
+    ];
+    return (effectiveReverse ? reverse : normal)[index] ?? normal[0];
+  };
+
+  const handleProductChange = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const files = Array.from(event.target.files ?? []);
+    if (!files.length) return;
+    const toastId = toast.loading(`Enviando ${files.length} imagem(ns) de produto...`);
+    try {
+      const urls: string[] = [];
+      for (const file of files) {
+        urls.push(await uploadCampaignAsset(file, "products"));
+      }
+      onChange({ productImages: [...(state.productImages ?? []), ...urls] });
+      toast.success("Produto adicionado ao banner.", { id: toastId });
+    } catch (error) {
+      console.error(error);
+      toast.error("Não foi possível enviar a imagem do produto.", { id: toastId });
+    }
+    event.target.value = "";
+  };
+
+  const handleBackgroundChange = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const toastId = toast.loading("Enviando o fundo do banner...");
+    try {
+      const url = await uploadCampaignAsset(file, "backgrounds");
+      onChange({ backgroundImageUrl: url });
+      setAnalyzingColors(true);
+      const vision = await analyzeImageWithVisionFn({ data: { imageUrl: url } });
+      if (vision.primaryBrandColor) {
+        onChange({
+          backgroundImageUrl: url,
+          themeColor: vision.primaryBrandColor,
+          secondaryColor: vision.secondaryBrandColor || secondaryColor,
+        });
+      }
+      toast.success("Fundo aplicado.", { id: toastId });
+    } catch (error) {
+      console.error(error);
+      toast.error("Não foi possível enviar o fundo.", { id: toastId });
+    } finally {
+      setAnalyzingColors(false);
+      event.target.value = "";
+    }
+  };
+
+  const handleRegenerateVisual = async () => {
+    if (!imagePrompt) {
+      toast.error("Este banner ainda não possui direção visual para regenerar.");
+      return;
+    }
+    setIsRenderingVisual(true);
+    const toastId = toast.loading("Criando um novo key visual...");
+    try {
+      const rendered = await renderCampaignImage({
+        prompt: imagePrompt,
+        aspectRatio: "16:9",
+        imageSize: "1K",
+      });
+      onChange({
+        backgroundImageUrl: rendered.url,
+        imageSeed: Math.floor(Math.random() * 1_000_000),
+      });
+      toast.success("Novo visual aplicado ao banner.", { id: toastId });
+    } catch (error) {
+      console.error(error);
+      toast.error("Não foi possível gerar um novo visual agora.", { id: toastId });
+    } finally {
+      setIsRenderingVisual(false);
+    }
+  };
+
+  const fallbackBackground = `linear-gradient(118deg, ${secondaryColor} 0%, ${themeColor} 58%, ${secondaryColor} 118%)`;
+  const textOverlay = effectiveCentered
+    ? "linear-gradient(90deg, rgba(3,7,18,.68) 0%, rgba(3,7,18,.46) 48%, rgba(3,7,18,.58) 100%)"
+    : effectiveReverse
+      ? "linear-gradient(270deg, rgba(3,7,18,.9) 0%, rgba(3,7,18,.78) 38%, rgba(3,7,18,.18) 68%, rgba(3,7,18,0) 100%)"
+      : "linear-gradient(90deg, rgba(3,7,18,.9) 0%, rgba(3,7,18,.78) 38%, rgba(3,7,18,.18) 68%, rgba(3,7,18,0) 100%)";
+
+  const ctaBackground = themeColor;
+  const ctaTextColor = contrastText(ctaBackground);
 
   return (
-    <div
-      className="mx-auto flex w-full flex-col space-y-4"
-      data-testid="banner-preview"
-    >
+    <div className="mx-auto flex w-full flex-col space-y-4" data-testid="banner-preview">
       <div
         ref={previewFrameRef}
         className="relative flex w-full justify-center overflow-hidden"
@@ -638,1200 +434,507 @@ export function BannerPreview({
             className="absolute left-0 top-0 origin-top-left"
             style={{
               height: canvasHeight,
+              width: canvasWidth,
               transform: `scale(${previewScale})`,
               transformOrigin: "top left",
-              width: canvasWidth,
             }}
           >
             <div
               id="banner-export-node"
               data-export-node="banner"
               className={cn(
-                "relative overflow-hidden shadow-[0_24px_50px_-12px_rgba(0,0,0,0.6)] flex transition-colors duration-500 bg-black",
+                "relative isolate overflow-hidden bg-slate-950",
+                !isExportClone && "rounded-[22px] shadow-[0_24px_50px_-18px_rgba(0,0,0,0.55)]",
+                fontClass,
                 exportWrapperClass,
                 isMobileLayout && "force-mobile",
-                !isExportClone && "rounded-[24px]",
-                isCentered
-                  ? "flex-col"
-                  : cn(
-                      "[.force-mobile_&]:!flex-col-reverse",
-                      !isExportClone && "max-md:!flex-col-reverse",
-                    ),
-                fontClass,
               )}
               style={{
-                backgroundColor: boxColor,
-                borderColor: `${textColor}1A`,
-                borderWidth: "1px",
-                fontFamily: baseFontFamily,
-                ...exportWrapperStyle,
-                ...bannerFontVariables,
                 height: canvasHeight,
                 width: canvasWidth,
+                fontFamily: baseFontFamily,
+                background: fallbackBackground,
+                ...variables,
+                ...exportWrapperStyle,
               }}
             >
-              <div className="absolute inset-0 z-0 bg-black">
-                {safeBgUrl && (
-                  <img
-                    src={safeBgUrl}
-                    crossOrigin={isLocalBg ? undefined : "anonymous"}
-                    className={cn(
-                      "w-full h-full object-cover transition-opacity duration-1000",
-                      !state.productImageUrl && imageStatus === "loading"
-                        ? "opacity-0 scale-105"
-                        : "opacity-90 scale-100",
-                    )}
-                    onLoad={() =>
-                      !state.productImageUrl && setImageStatus("loaded")
-                    }
-                    onError={handleImageError}
+              {backgroundImageUrl && (
+                <img
+                  src={backgroundImageUrl}
+                  alt=""
+                  crossOrigin="anonymous"
+                  className="absolute inset-0 z-0 h-full w-full object-cover"
+                  style={{
+                    objectPosition: effectiveCentered
+                      ? "center"
+                      : effectiveReverse
+                        ? "left center"
+                        : "right center",
+                  }}
+                />
+              )}
+
+              {!backgroundImageUrl && (
+                <>
+                  <div
+                    className="pointer-events-none absolute -right-[8%] top-[-35%] z-[1] h-[125%] w-[62%] rounded-full opacity-35 blur-3xl"
+                    style={{ backgroundColor: themeColor }}
                   />
-                )}
-                <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent pointer-events-none" />
-              </div>
+                  <div
+                    className="pointer-events-none absolute bottom-[-55%] left-[16%] z-[1] h-[95%] w-[55%] rounded-full opacity-20 blur-3xl"
+                    style={{ backgroundColor: "#ffffff" }}
+                  />
+                </>
+              )}
 
               <div
-                className="banner-product-layer absolute inset-0 z-30 pointer-events-none [&>*]:pointer-events-auto"
-                style={{
-                  position: "absolute",
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  zIndex: 30,
-                }}
-              >
-                {draggableImages.length > 0 &&
-                  draggableImages.map((src, i) => (
+                className="pointer-events-none absolute inset-0 z-[2]"
+                style={{ background: textOverlay }}
+              />
+
+              <VisualAccent
+                shape={backgroundShape}
+                themeColor={themeColor}
+                secondaryColor={secondaryColor}
+                reverse={effectiveReverse}
+              />
+
+              {hasProduct && (
+                <div
+                  className={cn(
+                    "pointer-events-none absolute z-[18] rounded-full blur-3xl",
+                    isMobileLayout
+                      ? "bottom-[8%] left-[12%] h-[33%] w-[76%]"
+                      : effectiveReverse
+                        ? "left-[2%] top-[15%] h-[68%] w-[45%]"
+                        : "right-[2%] top-[15%] h-[68%] w-[45%]",
+                  )}
+                  style={{
+                    background: `radial-gradient(circle, ${themeColor}55 0%, transparent 70%)`,
+                  }}
+                />
+              )}
+
+              <div className="banner-product-layer absolute inset-0 z-30 pointer-events-none [&>*]:pointer-events-auto">
+                {productImages.map((src, index) => {
+                  const placement = productPlacement(index);
+                  return (
                     <DraggableImage
-                      key={`banner-img-${i}`}
+                      key={`${src}-${index}`}
                       src={src}
                       type="banner"
                       isExport={isExportClone}
+                      defaultPosition={{
+                        x: placement.x,
+                        y: placement.y,
+                        scale: placement.scale,
+                      }}
+                      baseWidth={placement.width}
                     />
-                  ))}
+                  );
+                })}
               </div>
 
               <div
                 className={cn(
-                  "banner-layout relative z-10 w-full h-full flex flex-1 overflow-hidden z-10 flex-row",
-                  "[.force-mobile_&]:!flex-col-reverse [.force-mobile_&]:!overflow-visible",
-                  !isExportClone &&
-                    "max-md:!flex-col-reverse max-md:!overflow-visible",
+                  "absolute z-40 flex flex-col",
+                  effectiveCentered
+                    ? "inset-0 items-center justify-center px-20 text-center"
+                    : isMobileLayout
+                      ? "left-0 right-0 top-0 min-h-[55%] items-center justify-center px-10 py-12 text-center"
+                      : effectiveReverse
+                        ? "right-0 top-0 h-full w-[48%] items-end justify-center px-16 py-12 text-right"
+                        : "left-0 top-0 h-full w-[48%] items-start justify-center px-16 py-12 text-left",
                 )}
               >
-                {isCentered ? (
-                  <div
-                    className={cn(
-                      "banner-centered-pane relative w-full h-full flex flex-col items-center justify-center p-12 text-center [.force-mobile_&]:!p-8 z-10 pointer-events-none",
-                      !isExportClone && "max-md:!p-8",
-                    )}
-                  >
+                <div
+                  className={cn(
+                    "flex w-full flex-col",
+                    effectiveCentered
+                      ? "max-w-[800px] items-center"
+                      : effectiveReverse
+                        ? "max-w-[520px] items-end"
+                        : "max-w-[520px] items-start",
+                    isMobileLayout && "max-w-[470px] items-center",
+                  )}
+                >
+                  {brandName && (
                     <div
-                      className={cn(
-                        "absolute inset-0 z-0 transition-all duration-500 pointer-events-none",
-                        isFrame
-                          ? "m-8 rounded-[40px] border-[1px] border-white/20 shadow-2xl overflow-hidden"
-                          : "",
-                        isBlob
-                          ? "m-6 rounded-[30%_70%_70%_30%/30%_30%_70%_70%] overflow-hidden shadow-xl"
-                          : "",
-                        isArch
-                          ? "m-6 rounded-t-[1000px] rounded-b-3xl border border-white/10 shadow-2xl overflow-hidden"
-                          : "",
-                        isPill
-                          ? "m-8 rounded-full border border-white/10 shadow-xl overflow-hidden"
-                          : "",
-                        isOffset
-                          ? "m-12 rounded-3xl shadow-[0_30px_80px_rgba(0,0,0,0.6)] overflow-hidden scale-95 border border-white/10"
-                          : "",
-                      )}
+                      className="mb-5 inline-flex max-w-full items-center gap-2 rounded-full border px-3.5 py-1.5 text-[13px] font-bold uppercase tracking-[0.16em]"
                       style={{
-                        backgroundColor: isComplexShape
-                          ? `${themeColor}CC`
-                          : "transparent",
+                        borderColor: `${textColor}30`,
+                        backgroundColor: `${secondaryColor}55`,
+                        color: textColor,
                       }}
                     >
-                      {!safeBgUrl &&
-                        draggableImages.length === 0 &&
-                        !isExportClone && (
-                          <div
-                            className="w-full h-full flex items-center justify-center pointer-events-auto cursor-pointer"
-                            onClick={() => bgRef.current?.click()}
-                          >
-                            <div className="flex flex-col items-center gap-3 p-8 rounded-3xl border border-white/20 bg-white/10 shadow-lg transition-colors hover:bg-white/20">
-                              <ImagePlus
-                                className="size-10"
-                                style={{ color: textColor, opacity: 0.8 }}
-                              />
-                              <p
-                                className="text-sm font-semibold tracking-wide"
-                                style={{ color: textColor }}
-                              >
-                                Adicionar Fundo Imersivo
-                              </p>
-                            </div>
-                          </div>
-                        )}
-                    </div>
-
-                    {!isComplexShape && (
-                      <div
-                        className="absolute inset-0 z-10 opacity-70 pointer-events-none transition-colors duration-500"
+                      <span
+                        className="h-1.5 w-1.5 rounded-full"
                         style={{ backgroundColor: themeColor }}
                       />
-                    )}
-
-                    <div className="relative z-40 w-full h-full flex flex-col items-center justify-center pointer-events-none">
-                      <DraggableBlock
-                        id="banner-title-center"
-                        isExport={isExportClone}
-                        resetPosition={isMobileLayout}
-                        className="banner-mobile-reset pointer-events-auto w-full max-w-[700px] flex flex-col items-center"
-                      >
-                        <div
-                          className={cn(
-                            "p-10 rounded-[32px] shadow-2xl relative mb-6 w-full [.force-mobile_&]:!p-8 [.force-mobile_&]:!max-w-[95%] transition-all",
-                            !isExportClone && "max-md:!p-8 max-md:!max-w-[95%]",
-                            isComplexShape
-                              ? "bg-transparent border-0 shadow-none p-0"
-                              : "border border-white/10 shadow-2xl",
-                            isOffset &&
-                              "!bg-white/90 !p-10 !shadow-2xl !border-l-8 !border-b-8 !rounded-2xl",
-                          )}
-                          style={{
-                            backgroundColor: isComplexShape
-                              ? "transparent"
-                              : `${boxColor}E6`,
-                            color: textColor,
-                          }}
-                        >
-                          <Editable
-                            as="h2"
-                            value={title}
-                            onChange={(v) => onChange({ title: v })}
-                            className={cn(
-                              "banner-title-text font-extrabold text-[56px] [.force-mobile_&]:!text-[46px] leading-[1.1] tracking-tighter break-words text-balance",
-                              !isExportClone && "max-md:!text-[36px]",
-                            )}
-                            style={{
-                              color: textColor,
-                              fontSize: fontSizes.title,
-                            }}
-                          />
-
-                          {hasSubtitle && (
-                            <Editable
-                              as="p"
-                              multiline
-                              value={subtitle}
-                              onChange={(v) => onChange({ subtitle: v })}
-                              className={cn(
-                                "banner-subtitle-text font-medium opacity-90 text-[28px] [.force-mobile_&]:!text-[22px] leading-relaxed max-w-[90%] mx-auto mt-4 break-words pointer-events-auto",
-                                !isComplexShape && "drop-shadow-sm",
-                                !isExportClone && "max-md:!text-[18px]",
-                              )}
-                              style={{
-                                color: textColor,
-                                fontSize: fontSizes.subtitle,
-                              }}
-                            />
-                          )}
-
-                          {bodyText && (
-                            <Editable
-                              as="p"
-                              multiline
-                              value={bodyText}
-                              onChange={(v) => onChange({ body: v })}
-                              className={cn(
-                                "banner-body-text font-normal opacity-80 text-[20px] [.force-mobile_&]:!text-[16px] leading-relaxed max-w-[90%] mx-auto mt-3 break-words pointer-events-auto block",
-                                !isComplexShape && "drop-shadow-sm",
-                                !isExportClone && "max-md:!text-[14px]",
-                              )}
-                              style={{
-                                color: textColor,
-                                fontSize: fontSizes.body,
-                              }}
-                            />
-                          )}
-
-                          {benefits.length > 0 && (
-                            <div className="flex flex-wrap justify-center gap-2 mt-6">
-                              {benefits.map((ben, i) => (
-                                <span
-                                  key={i}
-                                  className={cn(
-                                    "banner-benefit-text border border-white/10 text-[14px] [.force-mobile_&]:!text-[12px] uppercase tracking-widest font-bold px-4 py-2 rounded-xl shadow-inner",
-                                    !isExportClone && "max-md:!text-[11px]",
-                                  )}
-                                  style={{
-                                    color: textColor,
-                                    backgroundColor: `${boxColor}40`,
-                                    fontSize: fontSizes.benefits,
-                                  }}
-                                >
-                                  {ben}
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      </DraggableBlock>
-
-                      {footerInfo && (
-                        <div className="mt-auto pt-6 pointer-events-auto">
-                          <Editable
-                            as="p"
-                            value={footerInfo}
-                            onChange={(v) => onChange({ footerInfo: v })}
-                            className={cn(
-                              "banner-footer-text font-medium opacity-60 text-[16px] [.force-mobile_&]:!text-[12px] uppercase tracking-widest break-words",
-                              !isExportClone && "max-md:!text-[12px]",
-                            )}
-                            style={{
-                              color: textColor,
-                              fontSize: fontSizes.footer,
-                            }}
-                          />
-                        </div>
-                      )}
-
-                      {(badgePrimary || badgeSecondary) && (
-                        <DraggableBlock
-                          id="banner-badge-center"
-                          isExport={isExportClone}
-                          resetPosition={isMobileLayout}
-                          className={cn(
-                            "absolute z-50 bottom-8 right-8 flex flex-col items-end gap-3 pointer-events-auto [.force-mobile_&]:!bottom-4 [.force-mobile_&]:!right-4",
-                            !isExportClone &&
-                              "max-md:!bottom-4 max-md:!right-4",
-                          )}
-                        >
-                          {badgePrimary && (
-                            <div
-                              className={cn(
-                                "rounded-full size-[180px] [.force-mobile_&]:!size-[140px] flex items-center justify-center text-center p-3 shadow-[0_20px_40px_-10px_rgba(0,0,0,0.5)] border border-white/20",
-                                !isExportClone && "max-md:!size-[120px]",
-                              )}
-                              style={{
-                                backgroundColor: `${boxColor}F2`,
-                                color: textColor,
-                              }}
-                            >
-                              <Editable
-                                as="span"
-                                value={badgePrimary}
-                                onChange={(v) => onChange({ badgePrimary: v })}
-                                className={cn(
-                                  "banner-badge-primary-text font-black text-[48px] [.force-mobile_&]:!text-[36px] leading-[1.0] tracking-tighter",
-                                  !isExportClone && "max-md:!text-[36px]",
-                                )}
-                                style={{
-                                  color: textColor,
-                                  fontSize: fontSizes.badgePrimary,
-                                }}
-                              />
-                            </div>
-                          )}
-                          {badgeSecondary && (
-                            <div
-                              className="rounded-full px-5 py-2.5 text-center shadow-lg border border-white/20 relative z-10"
-                              style={{
-                                backgroundColor: themeColor,
-                                color: textColor,
-                              }}
-                            >
-                              <Editable
-                                as="span"
-                                value={badgeSecondary}
-                                onChange={(v) =>
-                                  onChange({ badgeSecondary: v })
-                                }
-                                className={cn(
-                                  "banner-badge-secondary-text font-bold text-[18px] [.force-mobile_&]:!text-[16px] tracking-wide leading-tight",
-                                  !isExportClone && "max-md:!text-[14px]",
-                                )}
-                                style={{
-                                  color: textColor,
-                                  fontSize: fontSizes.badgeSecondary,
-                                }}
-                              />
-                            </div>
-                          )}
-                        </DraggableBlock>
-                      )}
+                      <span className="truncate">{brandName}</span>
                     </div>
-                  </div>
-                ) : (
-                  <>
-                    {/* Bloco da Imagem - Mobile vira a parte de baixo (h-auto livre!) */}
+                  )}
+
+                  <Editable
+                    as="h2"
+                    value={title}
+                    onChange={(value) => onChange({ title: value })}
+                    className="banner-title-text max-w-full text-balance font-extrabold leading-[0.98] tracking-[-0.045em]"
+                    style={{
+                      color: textColor,
+                      fontSize: fontSizes.title,
+                      textShadow: "0 3px 24px rgba(0,0,0,.3)",
+                    }}
+                  />
+
+                  {!isEmptyLike(subtitle) && (
+                    <Editable
+                      as="p"
+                      multiline
+                      value={subtitle}
+                      onChange={(value) => onChange({ subtitle: value })}
+                      className="banner-subtitle-text mt-5 max-w-[94%] font-semibold leading-[1.25]"
+                      style={{
+                        color: textColor,
+                        fontSize: fontSizes.subtitle,
+                        opacity: 0.96,
+                      }}
+                    />
+                  )}
+
+                  {!isEmptyLike(bodyText) && (
+                    <Editable
+                      as="p"
+                      multiline
+                      value={bodyText}
+                      onChange={(value) => onChange({ body: value })}
+                      className="banner-body-text mt-3 max-w-[92%] leading-[1.45]"
+                      style={{
+                        color: textColor,
+                        fontSize: fontSizes.body,
+                        opacity: 0.82,
+                      }}
+                    />
+                  )}
+
+                  {benefits.length > 0 && (
                     <div
                       className={cn(
-                        "banner-visual-pane absolute inset-y-0 z-0 flex items-center justify-center w-[60%] transition-all duration-500 pointer-events-none",
-                        "[.force-mobile_&]:!relative [.force-mobile_&]:!h-auto [.force-mobile_&]:!aspect-square max-md:!relative max-md:!aspect-square",
-                        isReverse ? "left-0" : "right-0",
-                        isFrame
-                          ? "m-6 rounded-t-[60px] rounded-b-3xl border border-white/20 shadow-2xl overflow-hidden"
-                          : isBlob
-                            ? "m-4 rounded-[40%_60%_70%_30%/40%_50%_60%_50%] overflow-hidden shadow-2xl"
-                            : isGeometric
-                              ? "m-6 rounded-3xl border border-white/10 shadow-[12px_12px_0px_rgba(0,0,0,0.2)] overflow-hidden"
-                              : isArch
-                                ? "m-6 rounded-t-[1000px] rounded-b-3xl border border-white/20 shadow-2xl overflow-hidden"
-                                : isPill
-                                  ? "m-6 rounded-full border border-white/20 shadow-2xl overflow-hidden"
-                                  : isOffset
-                                    ? cn(
-                                        "m-8 rounded-3xl shadow-[0_30px_60px_rgba(0,0,0,0.6)] overflow-hidden scale-95 border border-white/10 [.force-mobile_&]:!m-0",
-                                        !isExportClone && "max-md:!m-0",
-                                      )
-                                    : "overflow-hidden",
-                        cn(
-                          "[.force-mobile_&]:!inset-auto [.force-mobile_&]:!w-full",
-                          !isExportClone && "max-md:!inset-auto max-md:!w-full",
-                        ),
+                        "mt-5 flex flex-wrap gap-2",
+                        effectiveCentered || isMobileLayout
+                          ? "justify-center"
+                          : effectiveReverse
+                            ? "justify-end"
+                            : "justify-start",
                       )}
+                    >
+                      {benefits.map((benefit) => (
+                        <span
+                          key={benefit}
+                          className="banner-benefit-text rounded-full border px-3.5 py-2 font-semibold"
+                          style={{
+                            borderColor: `${textColor}2E`,
+                            backgroundColor: `${secondaryColor}66`,
+                            color: textColor,
+                            fontSize: fontSizes.benefits,
+                          }}
+                        >
+                          {benefit}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {!isEmptyLike(cta) && (
+                    <div
+                      className="mt-7 inline-flex min-h-12 items-center justify-center rounded-xl px-6 py-3.5 text-[17px] font-extrabold shadow-[0_12px_30px_-12px_rgba(0,0,0,.55)]"
                       style={{
-                        backgroundColor: isComplexShape
-                          ? `${themeColor}CC`
-                          : "transparent",
+                        backgroundColor: ctaBackground,
+                        color: ctaTextColor,
                       }}
                     >
-                      {!safeBgUrl &&
-                        draggableImages.length === 0 &&
-                        !isExportClone && (
-                          <div
-                            className={cn(
-                              "relative z-10 flex h-full items-center justify-center w-full pointer-events-auto",
-                              isReverse
-                                ? "justify-start pl-[10%]"
-                                : "justify-end pr-[10%]",
-                            )}
-                          >
-                            <div
-                              className="flex flex-col items-center gap-3 p-8 rounded-3xl border border-white/20 bg-white/10 shadow-lg transition-colors hover:bg-white/20 cursor-pointer"
-                              onClick={() => bgRef.current?.click()}
-                            >
-                              <ImagePlus
-                                className="size-10"
-                                style={{ color: textColor, opacity: 0.8 }}
-                              />
-                              <p
-                                className="text-sm font-semibold tracking-wide"
-                                style={{ color: textColor }}
-                              >
-                                Adicionar Fundo
-                              </p>
-                            </div>
-                          </div>
-                        )}
+                      <Editable
+                        as="span"
+                        value={cta}
+                        onChange={(value) => onChange({ cta: value })}
+                        style={{ color: ctaTextColor }}
+                      />
                     </div>
+                  )}
 
-                    {!isComplexShape && (
-                      <>
-                        <div
-                          className={cn(
-                            "banner-shape-panel absolute inset-y-0 w-[65%] z-10 shadow-[-20px_0_60px_rgba(0,0,0,0.5)] pointer-events-none transition-all duration-700 border-white/10 [.force-mobile_&]:!absolute max-md:!absolute",
-                            isReverse ? "right-0 border-l" : "left-0 border-r",
-                            shapeClass,
-                            cn(
-                              "[.force-mobile_&]:!inset-auto [.force-mobile_&]:!top-0 [.force-mobile_&]:!left-0 [.force-mobile_&]:!w-full [.force-mobile_&]:!h-full [.force-mobile_&]:!border-none",
-                              !isExportClone &&
-                                "max-md:!inset-auto max-md:!top-0 max-md:!left-0 max-md:!w-full max-md:!h-full max-md:!border-none",
-                            ),
-                          )}
-                          style={{ backgroundColor: `${themeColor}D9` }}
-                        />
-
-                        {isCurve && (
-                          <div
-                            className={cn(
-                              "absolute inset-y-0 w-[65%] z-10 border border-white/30 pointer-events-none opacity-50",
-                              isReverse ? "right-0" : "left-0",
-                              lineClass,
-                            )}
-                          />
-                        )}
-                      </>
-                    )}
-
-                    {/* Bloco de Texto - Mobile vira a parte de cima (h-auto livre!) */}
-                    <div
-                      className={cn(
-                        "banner-text-pane relative z-40 w-[50%] h-full flex flex-col justify-center py-8 pointer-events-none",
-                        isReverse
-                          ? cn(
-                              "pr-14 pl-4 items-end text-right [.force-mobile_&]:!pr-8",
-                              !isExportClone && "max-md:!pr-8",
-                            )
-                          : cn(
-                              "pl-14 pr-4 items-start text-left [.force-mobile_&]:!pl-8",
-                              !isExportClone && "max-md:!pl-8",
-                            ),
-                        isComplexShape
-                          ? isReverse
-                            ? cn(
-                                "pr-16 [.force-mobile_&]:!pr-10",
-                                !isExportClone && "max-md:!pr-10",
-                              )
-                            : cn(
-                                "pl-16 [.force-mobile_&]:!pl-10",
-                                !isExportClone && "max-md:!pl-10",
-                              )
-                          : "",
-                        isOffset
-                          ? isReverse
-                            ? "-mr-16 z-40"
-                            : "-ml-16 z-40"
-                          : "",
-                        cn(
-                          "[.force-mobile_&]:!w-full [.force-mobile_&]:!h-auto [.force-mobile_&]:!py-12 [.force-mobile_&]:!mt-0 [.force-mobile_&]:!justify-center [.force-mobile_&]:!items-center [.force-mobile_&]:!text-center [.force-mobile_&]:!px-6 [.force-mobile_&]:!m-0",
-                          !isExportClone &&
-                            "max-md:!w-full max-md:!h-auto max-md:!py-12 max-md:!mt-0 max-md:!justify-center max-md:!items-center max-md:!text-center max-md:!px-6 max-md:!m-0",
-                        ),
-                      )}
-                    >
-                      <DraggableBlock
-                        id="banner-text-split"
-                        isExport={isExportClone}
-                        resetPosition={isMobileLayout}
-                        className={cn(
-                          "banner-mobile-reset pointer-events-auto flex flex-col w-full max-w-[560px]",
-                          isReverse ? "items-end" : "items-start",
-                          cn(
-                            "[.force-mobile_&]:!items-center",
-                            !isExportClone && "max-md:!items-center",
-                          ),
-                        )}
-                      >
-                        <div
-                          className={cn(
-                            "p-10 rounded-[32px] relative mb-6 w-full [.force-mobile_&]:!p-6 [.force-mobile_&]:!max-w-[95%] transition-all",
-                            !isExportClone && "max-md:!p-6 max-md:!max-w-[95%]",
-                            isComplexShape
-                              ? "bg-transparent border-0 shadow-none p-0"
-                              : "border border-white/10 shadow-2xl",
-                            isOffset &&
-                              "!bg-white/90 !p-10 !shadow-2xl !border-l-8 !border-b-8 !rounded-2xl",
-                          )}
-                          style={{
-                            backgroundColor: isComplexShape
-                              ? "transparent"
-                              : isOffset
-                                ? boxColor
-                                : `${boxColor}E6`,
-                            borderColor: isComplexShape
-                              ? "transparent"
-                              : isOffset
-                                ? themeColor
-                                : "rgba(255,255,255,0.1)",
-                            color: textColor,
-                          }}
-                        >
-                          <Editable
-                            as="h2"
-                            value={title}
-                            onChange={(v) => onChange({ title: v })}
-                            className={cn(
-                              "banner-title-text font-extrabold text-[64px] [.force-mobile_&]:!text-[46px] leading-[1.05] tracking-tighter break-words text-balance",
-                              !isOffset && "drop-shadow-lg",
-                              !isExportClone && "max-md:!text-[36px]",
-                            )}
-                            style={{
-                              color: textColor,
-                              fontSize: fontSizes.title,
-                            }}
-                          />
-
-                          {!isComplexShape && !isExportClone && (
-                            <div
-                              className={cn(
-                                "absolute top-6 opacity-30",
-                                isReverse ? "left-6" : "right-6",
-                                "[.force-mobile_&]:!hidden",
-                                !isExportClone && "max-md:!hidden",
-                              )}
-                            >
-                              <ArrowUpRight
-                                className="size-10"
-                                style={{ color: textColor }}
-                                strokeWidth={2}
-                              />
-                            </div>
-                          )}
-                        </div>
-
-                        {hasSubtitle && (
-                          <Editable
-                            as="p"
-                            multiline
-                            value={subtitle}
-                            onChange={(v) => onChange({ subtitle: v })}
-                            className={cn(
-                              "banner-subtitle-text font-semibold opacity-95 text-[28px] [.force-mobile_&]:!text-[22px] leading-relaxed max-w-[95%] break-words mb-3",
-                              (!isComplexShape || isOffset) && "drop-shadow-md",
-                              !isExportClone && "max-md:!text-[18px]",
-                            )}
-                            style={{
-                              color: textColor,
-                              fontSize: fontSizes.subtitle,
-                            }}
-                          />
-                        )}
-
-                        {bodyText && (
-                          <Editable
-                            as="p"
-                            multiline
-                            value={bodyText}
-                            onChange={(v) => onChange({ body: v })}
-                            className={cn(
-                              "banner-body-text font-normal opacity-80 text-[20px] [.force-mobile_&]:!text-[16px] leading-relaxed max-w-[95%] break-words mb-5 block",
-                              (!isComplexShape || isOffset) && "drop-shadow-md",
-                              !isExportClone && "max-md:!text-[14px]",
-                            )}
-                            style={{
-                              color: textColor,
-                              fontSize: fontSizes.body,
-                            }}
-                          />
-                        )}
-
-                        {benefits.length > 0 && (
-                          <div
-                            className={cn(
-                              "flex flex-wrap gap-2 mt-4",
-                              isReverse ? "justify-end" : "justify-start",
-                              "[.force-mobile_&]:!justify-center",
-                              !isExportClone && "max-md:!justify-center",
-                            )}
-                          >
-                            {benefits.map((ben, i) => (
-                              <span
-                                key={i}
-                                className={cn(
-                                  "banner-benefit-text border border-white/10 text-[14px] [.force-mobile_&]:!text-[12px] uppercase tracking-widest font-bold px-4 py-2 rounded-xl shadow-inner",
-                                  !isExportClone && "max-md:!text-[10px]",
-                                )}
-                                style={{
-                                  color: isComplexShape ? boxColor : textColor,
-                                  backgroundColor: isComplexShape
-                                    ? themeColor
-                                    : `${boxColor}40`,
-                                  fontSize: fontSizes.benefits,
-                                }}
-                              >
-                                {ben}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                      </DraggableBlock>
-
-                      {footerInfo && (
-                        <div
-                          className={cn(
-                            "mt-auto pt-8 pointer-events-auto block [.force-mobile_&]:!pt-4",
-                            !isExportClone && "max-md:!pt-4",
-                          )}
-                        >
-                          <Editable
-                            as="p"
-                            value={footerInfo}
-                            onChange={(v) => onChange({ footerInfo: v })}
-                            className={cn(
-                              "banner-footer-text font-medium opacity-60 text-[14px] uppercase tracking-widest break-words drop-shadow-sm",
-                            )}
-                            style={{
-                              color: textColor,
-                              fontSize: fontSizes.footer,
-                            }}
-                          />
-                        </div>
-                      )}
-                    </div>
-
-                    {(badgePrimary || badgeSecondary) && (
-                      <DraggableBlock
-                        id="banner-badge-split"
-                        isExport={isExportClone}
-                        resetPosition={isMobileLayout}
-                        className={cn(
-                          "banner-mobile-badge banner-mobile-reset absolute z-50 flex flex-col items-center gap-3 pointer-events-auto top-1/2 -translate-y-1/2",
-                          isReverse
-                            ? "right-[55%] translate-x-1/2"
-                            : "left-[55%] -translate-x-1/2",
-                          cn(
-                            "[.force-mobile_&]:!right-auto [.force-mobile_&]:!left-1/2 [.force-mobile_&]:!bottom-[42%] [.force-mobile_&]:!top-auto [.force-mobile_&]:!-translate-x-1/2 [.force-mobile_&]:!translate-y-0",
-                            !isExportClone &&
-                              "max-md:!right-auto max-md:!left-1/2 max-md:!bottom-[42%] max-md:!top-auto max-md:!-translate-x-1/2 max-md:!translate-y-0",
-                          ),
-                        )}
-                      >
-                        {badgePrimary && (
-                          <div
-                            className={cn(
-                              "rounded-full size-[180px] [.force-mobile_&]:!size-[140px] flex items-center justify-center text-center p-3 shadow-[0_20px_40px_-10px_rgba(0,0,0,0.5)] border border-white/20",
-                              !isExportClone && "max-md:!size-[110px]",
-                            )}
-                            style={{
-                              backgroundColor: `${boxColor}F2`,
-                              color: textColor,
-                            }}
-                          >
-                            <Editable
-                              as="span"
-                              value={badgePrimary}
-                              onChange={(v) => onChange({ badgePrimary: v })}
-                              className={cn(
-                                "banner-badge-primary-text font-black text-[48px] [.force-mobile_&]:!text-[36px] leading-[1.0] tracking-tighter",
-                                !isExportClone && "max-md:!text-[28px]",
-                              )}
-                              style={{
-                                color: textColor,
-                                fontSize: fontSizes.badgePrimary,
-                              }}
-                            />
-                          </div>
-                        )}
-                        {badgeSecondary && (
-                          <div
-                            className="rounded-full px-5 py-2.5 text-center shadow-lg border border-white/20 relative z-10"
-                            style={{
-                              backgroundColor: themeColor,
-                              color: textColor,
-                            }}
-                          >
-                            <Editable
-                              as="span"
-                              value={badgeSecondary}
-                              onChange={(v) => onChange({ badgeSecondary: v })}
-                              className={cn(
-                                "banner-badge-secondary-text font-bold text-[18px] [.force-mobile_&]:!text-[16px] tracking-wide leading-tight",
-                                !isExportClone && "max-md:!text-[13px]",
-                              )}
-                              style={{
-                                color: textColor,
-                                fontSize: fontSizes.badgeSecondary,
-                              }}
-                            />
-                          </div>
-                        )}
-                      </DraggableBlock>
-                    )}
-                  </>
-                )}
+                  {!isEmptyLike(footerInfo) && (
+                    <Editable
+                      as="p"
+                      value={footerInfo}
+                      onChange={(value) => onChange({ footerInfo: value })}
+                      className="banner-footer-text mt-5 max-w-[95%] leading-snug"
+                      style={{
+                        color: textColor,
+                        fontSize: fontSizes.footer,
+                        opacity: 0.62,
+                      }}
+                    />
+                  )}
+                </div>
               </div>
+
+              {(badgePrimary || badgeSecondary) && (
+                <div
+                  className={cn(
+                    "absolute z-50 flex flex-col gap-2",
+                    isMobileLayout
+                      ? "bottom-8 right-7 items-end"
+                      : effectiveReverse
+                        ? "bottom-10 left-10 items-start"
+                        : "bottom-10 right-10 items-end",
+                  )}
+                >
+                  {badgePrimary && (
+                    <div
+                      className="flex min-h-[104px] min-w-[104px] max-w-[150px] items-center justify-center rounded-full border-4 px-4 text-center shadow-[0_18px_38px_-14px_rgba(0,0,0,.6)]"
+                      style={{
+                        backgroundColor: themeColor,
+                        borderColor: `${textColor}E6`,
+                        color: contrastText(themeColor),
+                      }}
+                    >
+                      <Editable
+                        as="span"
+                        value={badgePrimary}
+                        onChange={(value) => onChange({ badgePrimary: value })}
+                        className="banner-badge-primary-text font-black leading-[0.95] tracking-[-0.04em]"
+                        style={{
+                          color: contrastText(themeColor),
+                          fontSize: fontSizes.badgePrimary,
+                        }}
+                      />
+                    </div>
+                  )}
+                  {badgeSecondary && (
+                    <div
+                      className="rounded-lg border px-3.5 py-2 text-center font-bold"
+                      style={{
+                        backgroundColor: `${secondaryColor}DD`,
+                        borderColor: `${textColor}33`,
+                        color: textColor,
+                      }}
+                    >
+                      <Editable
+                        as="span"
+                        value={badgeSecondary}
+                        onChange={(value) => onChange({ badgeSecondary: value })}
+                        className="banner-badge-secondary-text"
+                        style={{
+                          color: textColor,
+                          fontSize: fontSizes.badgeSecondary,
+                        }}
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>
       </div>
 
       {!isExportClone && (
-        <div className="editor-toolbar mt-3 rounded-2xl border border-border-subtle bg-surface-1/85 p-3 shadow-[var(--shadow-soft)] backdrop-blur-xl">
-          <div className="min-w-0 flex-1 truncate text-[10px] font-semibold uppercase tracking-[0.16em] text-fg-muted flex items-center gap-2">
-            Peça:{" "}
-            <span className="px-2 py-1 rounded bg-brand/10 text-brand">
-              BANNER
-            </span>
-            {analyzingColors && (
-              <span className="text-xs text-brand animate-pulse flex items-center gap-1">
-                <Sparkles className="size-3" /> Extraindo Cores...
-              </span>
-            )}
+        <div className="editor-toolbar mt-3 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-border-subtle bg-surface-1/85 p-3 shadow-[var(--shadow-soft)] backdrop-blur-xl">
+          <div className="flex min-w-0 items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-fg-muted">
+            <span className="rounded bg-brand/10 px-2 py-1 text-brand">BANNER</span>
+            {isRenderingVisual && <span className="animate-pulse">Gerando visual…</span>}
+            {analyzingColors && <span className="animate-pulse">Lendo paleta…</span>}
           </div>
 
-          <div className="editor-toolbar-actions shrink-0">
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 text-xs"
+              onClick={() => productInputRef.current?.click()}
+            >
+              <Upload className="mr-1.5 size-3.5" /> Produto
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 text-xs"
+              onClick={() => backgroundInputRef.current?.click()}
+            >
+              <ImagePlus className="mr-1.5 size-3.5" /> Fundo
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 text-xs"
+              disabled={isRenderingVisual || !imagePrompt}
+              onClick={handleRegenerateVisual}
+            >
+              <RefreshCw
+                className={cn("mr-1.5 size-3.5", isRenderingVisual && "animate-spin")}
+              />
+              Gerar visual
+            </Button>
+
+            {backgroundImageUrl && (
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-8 w-8"
+                title="Remover fundo"
+                onClick={() => onChange({ backgroundImageUrl: null })}
+              >
+                <Trash2 className="size-3.5" />
+              </Button>
+            )}
+
             <Popover>
               <PopoverTrigger asChild>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-8 text-xs font-bold rounded-lg border-border-strong text-fg-primary hover:bg-surface-3"
-                >
+                <Button size="sm" variant="outline" className="h-8 text-xs">
                   <Palette className="mr-1.5 size-3.5" /> Design
                 </Button>
               </PopoverTrigger>
               <PopoverContent
                 side="top"
                 align="end"
-                className="mb-2 max-h-[calc(100vh-96px)] w-[min(380px,calc(100vw-24px))] overflow-y-auto rounded-2xl border-border-strong bg-surface-1 p-4 shadow-[var(--shadow-elevated)] z-50"
+                className="mb-2 max-h-[calc(100vh-96px)] w-[min(390px,calc(100vw-24px))] overflow-y-auto rounded-2xl border-border-strong bg-surface-1 p-4 shadow-[var(--shadow-elevated)]"
               >
-                <div className="space-y-4">
+                <div className="space-y-5">
                   <div className="space-y-2">
-                    <h4 className="text-[10px] font-bold uppercase tracking-widest text-fg-muted flex items-center">
-                      <LayoutTemplate className="mr-1.5 size-3" /> Estrutura
+                    <h4 className="flex items-center text-[10px] font-bold uppercase tracking-widest text-fg-muted">
+                      <LayoutTemplate className="mr-1.5 size-3" /> Composição
                     </h4>
                     <div className="grid grid-cols-3 gap-2">
-                      <Button
-                        size="sm"
-                        variant={
-                          layoutStyle === "split" ? "default" : "outline"
-                        }
-                        onClick={() => onChange({ layoutStyle: "split" })}
-                        className="h-7 text-[11px]"
-                      >
-                        Esquerda
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant={
-                          layoutStyle === "reverse" ? "default" : "outline"
-                        }
-                        onClick={() => onChange({ layoutStyle: "reverse" })}
-                        className="h-7 text-[11px]"
-                      >
-                        Direita
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant={
-                          layoutStyle === "centered" ? "default" : "outline"
-                        }
-                        onClick={() => onChange({ layoutStyle: "centered" })}
-                        className="h-7 text-[11px]"
-                      >
-                        Centro
-                      </Button>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <h4 className="text-[10px] font-bold uppercase tracking-widest text-fg-muted flex items-center">
-                      <Layers className="mr-1.5 size-3" /> Forma Visual
-                      (Overlay)
-                    </h4>
-                    <div className="grid grid-cols-3 gap-2">
-                      <Button
-                        size="sm"
-                        variant={
-                          backgroundShape === "minimalist"
-                            ? "default"
-                            : "outline"
-                        }
-                        onClick={() =>
-                          onChange({ backgroundShape: "minimalist" })
-                        }
-                        className="h-7 text-[11px]"
-                      >
-                        Clean
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant={
-                          backgroundShape === "split" ? "default" : "outline"
-                        }
-                        onClick={() => onChange({ backgroundShape: "split" })}
-                        className="h-7 text-[11px]"
-                      >
-                        Reto
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant={
-                          backgroundShape === "curve" ? "default" : "outline"
-                        }
-                        onClick={() => onChange({ backgroundShape: "curve" })}
-                        className="h-7 text-[11px]"
-                      >
-                        Curva
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant={
-                          backgroundShape === "diagonal" ? "default" : "outline"
-                        }
-                        onClick={() =>
-                          onChange({ backgroundShape: "diagonal" })
-                        }
-                        className="h-7 text-[11px]"
-                      >
-                        Diagonal
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant={
-                          backgroundShape === "wave" ? "default" : "outline"
-                        }
-                        onClick={() => onChange({ backgroundShape: "wave" })}
-                        className="h-7 text-[11px]"
-                      >
-                        Onda
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant={
-                          backgroundShape === "arch" ? "default" : "outline"
-                        }
-                        onClick={() =>
-                          onChange({
-                            backgroundShape: "arch",
-                            layoutStyle:
-                              layoutStyle === "centered"
-                                ? "split"
-                                : layoutStyle,
-                          })
-                        }
-                        className="h-7 text-[11px]"
-                      >
-                        Arco
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant={
-                          backgroundShape === "pill" ? "default" : "outline"
-                        }
-                        onClick={() =>
-                          onChange({
-                            backgroundShape: "pill",
-                            layoutStyle:
-                              layoutStyle === "centered"
-                                ? "split"
-                                : layoutStyle,
-                          })
-                        }
-                        className="h-7 text-[11px]"
-                      >
-                        Pílula
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant={
-                          backgroundShape === "blob" ? "default" : "outline"
-                        }
-                        onClick={() =>
-                          onChange({
-                            backgroundShape: "blob",
-                            layoutStyle:
-                              layoutStyle === "centered"
-                                ? "split"
-                                : layoutStyle,
-                          })
-                        }
-                        className="h-7 text-[11px]"
-                      >
-                        Orgânico
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant={
-                          backgroundShape === "geometric"
-                            ? "default"
-                            : "outline"
-                        }
-                        onClick={() =>
-                          onChange({
-                            backgroundShape: "geometric",
-                            layoutStyle:
-                              layoutStyle === "centered"
-                                ? "split"
-                                : layoutStyle,
-                          })
-                        }
-                        className="h-7 text-[11px]"
-                      >
-                        Grid
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant={
-                          backgroundShape === "frame" ? "default" : "outline"
-                        }
-                        onClick={() =>
-                          onChange({
-                            backgroundShape: "frame",
-                            layoutStyle:
-                              layoutStyle === "centered"
-                                ? "split"
-                                : layoutStyle,
-                          })
-                        }
-                        className="h-7 text-[11px]"
-                      >
-                        Moldura
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant={
-                          backgroundShape === "offset" ? "default" : "outline"
-                        }
-                        onClick={() =>
-                          onChange({
-                            backgroundShape: "offset",
-                            layoutStyle:
-                              layoutStyle === "centered"
-                                ? "split"
-                                : layoutStyle,
-                          })
-                        }
-                        className="h-7 text-[11px]"
-                      >
-                        Editorial
-                      </Button>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <h4 className="text-[10px] font-bold uppercase tracking-widest text-fg-muted flex items-center">
-                      <Palette className="mr-1.5 size-3" /> Cores
-                    </h4>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="space-y-1.5">
-                        <label className="text-[10px] text-fg-secondary">
-                          Filtro / Geometria
-                        </label>
-                        <div className="flex items-center gap-2 border border-border-subtle rounded-md p-1 bg-surface-2">
-                          <input
-                            type="color"
-                            value={themeColor}
-                            onChange={(e) =>
-                              onChange({ themeColor: e.target.value })
-                            }
-                            className="size-5 rounded cursor-pointer border-0 bg-transparent p-0"
-                          />
-                          <span className="text-[10px] uppercase text-fg-primary">
-                            {themeColor}
-                          </span>
-                        </div>
-                      </div>
-                      <div className="space-y-1.5">
-                        <label className="text-[10px] text-fg-secondary">
-                          Caixa de Texto
-                        </label>
-                        <div className="flex items-center gap-2 border border-border-subtle rounded-md p-1 bg-surface-2">
-                          <input
-                            type="color"
-                            value={boxColor}
-                            onChange={(e) =>
-                              onChange({ boxColor: e.target.value })
-                            }
-                            className="size-5 rounded cursor-pointer border-0 bg-transparent p-0"
-                          />
-                          <span className="text-[10px] uppercase text-fg-primary">
-                            {boxColor}
-                          </span>
-                        </div>
-                      </div>
-                      <div className="space-y-1.5 col-span-2">
-                        <label className="text-[10px] text-fg-secondary">
-                          Cor do Texto Principal
-                        </label>
-                        <div className="flex items-center gap-2 border border-border-subtle rounded-md p-1 bg-surface-2">
-                          <input
-                            type="color"
-                            value={textColor}
-                            onChange={(e) =>
-                              onChange({ textColor: e.target.value })
-                            }
-                            className="size-5 rounded cursor-pointer border-0 bg-transparent p-0"
-                          />
-                          <span className="text-[10px] uppercase text-fg-primary">
-                            {textColor}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <h4 className="text-[10px] font-bold uppercase tracking-widest text-fg-muted flex items-center">
-                      <Type className="mr-1.5 size-3" /> Tipografia Premium
-                    </h4>
-                    <div className="grid grid-cols-3 gap-2">
-                      <Button
-                        size="sm"
-                        variant={
-                          !state.fontFamily || state.fontFamily === "sans"
-                            ? "default"
-                            : "outline"
-                        }
-                        onClick={() => onChange({ fontFamily: "sans" })}
-                        className="h-7 text-[11px] font-sans"
-                      >
-                        Modern (Sans)
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant={
-                          state.fontFamily === "serif" ? "default" : "outline"
-                        }
-                        onClick={() => onChange({ fontFamily: "serif" })}
-                        className="h-7 text-[11px] font-serif"
-                      >
-                        Classic (Serif)
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant={
-                          state.fontFamily === "mono" ? "default" : "outline"
-                        }
-                        onClick={() => onChange({ fontFamily: "mono" })}
-                        className="h-7 text-[11px] font-mono"
-                      >
-                        Tech (Mono)
-                      </Button>
-                    </div>
-
-                    <div className="mt-3 border-t border-border-subtle pt-3">
-                      <div className="mb-2 flex items-center justify-between gap-3">
-                        <div>
-                          <p className="text-[10px] font-bold uppercase tracking-widest text-fg-muted">
-                            Tamanho por linha
-                          </p>
-                          <p className="mt-0.5 text-[10px] text-fg-muted">
-                            O mobile acompanha a proporção automaticamente.
-                          </p>
-                        </div>
+                      {([
+                        ["split", "Esquerda"],
+                        ["reverse", "Direita"],
+                        ["centered", "Centro"],
+                      ] as const).map(([value, label]) => (
                         <Button
-                          type="button"
-                          variant="ghost"
+                          key={value}
                           size="sm"
-                          className="h-7 shrink-0 px-2 text-[10px] text-fg-secondary"
-                          disabled={!state.bannerFontSizes}
-                          onClick={() =>
-                            onChange({ bannerFontSizes: undefined })
-                          }
+                          variant={layoutStyle === value ? "default" : "outline"}
+                          className="h-7 text-[11px]"
+                          onClick={() => onChange({ layoutStyle: value })}
                         >
-                          <RotateCcw className="mr-1 size-3" /> Restaurar
+                          {label}
                         </Button>
-                      </div>
+                      ))}
+                    </div>
+                  </div>
 
-                      <div className="grid grid-cols-2 gap-2">
-                        <FontSizeControl
-                          label="Título"
-                          value={fontSizes.title}
-                          min={24}
-                          max={96}
-                          step={2}
-                          onChange={(value) => updateFontSize("title", value)}
-                        />
-                        <FontSizeControl
-                          label="Subtítulo"
-                          value={fontSizes.subtitle}
-                          min={12}
-                          max={48}
-                          step={2}
-                          onChange={(value) =>
-                            updateFontSize("subtitle", value)
-                          }
-                        />
-                        <FontSizeControl
-                          label="Descrição"
-                          value={fontSizes.body}
-                          min={10}
-                          max={36}
-                          onChange={(value) => updateFontSize("body", value)}
-                        />
-                        <FontSizeControl
-                          label="Benefícios"
-                          value={fontSizes.benefits}
-                          min={8}
-                          max={24}
-                          onChange={(value) =>
-                            updateFontSize("benefits", value)
-                          }
-                        />
-                        <FontSizeControl
-                          label="Rodapé"
-                          value={fontSizes.footer}
-                          min={8}
-                          max={24}
-                          onChange={(value) => updateFontSize("footer", value)}
-                        />
-                        <FontSizeControl
-                          label="Selo principal"
-                          value={fontSizes.badgePrimary}
-                          min={16}
-                          max={72}
-                          step={2}
-                          onChange={(value) =>
-                            updateFontSize("badgePrimary", value)
-                          }
-                        />
-                        <FontSizeControl
-                          label="Selo auxiliar"
-                          value={fontSizes.badgeSecondary}
-                          min={8}
-                          max={28}
-                          onChange={(value) =>
-                            updateFontSize("badgeSecondary", value)
-                          }
-                        />
-                      </div>
+                  <div className="space-y-2">
+                    <h4 className="flex items-center text-[10px] font-bold uppercase tracking-widest text-fg-muted">
+                      <Layers className="mr-1.5 size-3" /> Tratamento
+                    </h4>
+                    <div className="grid grid-cols-4 gap-2">
+                      {([
+                        ["minimalist", "Clean"],
+                        ["diagonal", "Diagonal"],
+                        ["frame", "Moldura"],
+                        ["curve", "Curva"],
+                      ] as const).map(([value, label]) => (
+                        <Button
+                          key={value}
+                          size="sm"
+                          variant={backgroundShape === value ? "default" : "outline"}
+                          className="h-7 px-2 text-[10px]"
+                          onClick={() => onChange({ backgroundShape: value })}
+                        >
+                          {label}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <h4 className="flex items-center text-[10px] font-bold uppercase tracking-widest text-fg-muted">
+                      <Palette className="mr-1.5 size-3" /> Paleta
+                    </h4>
+                    <div className="grid grid-cols-3 gap-3">
+                      {([
+                        ["themeColor", "Marca", themeColor],
+                        ["secondaryColor", "Base", secondaryColor],
+                        ["textColor", "Texto", textColor],
+                      ] as const).map(([key, label, value]) => (
+                        <label key={key} className="space-y-1 text-[10px] text-fg-muted">
+                          <span>{label}</span>
+                          <input
+                            type="color"
+                            value={value}
+                            className="h-9 w-full cursor-pointer rounded-lg border border-border-subtle bg-transparent p-1"
+                            onChange={(event) => onChange({ [key]: event.target.value })}
+                          />
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <h4 className="flex items-center text-[10px] font-bold uppercase tracking-widest text-fg-muted">
+                      <Type className="mr-1.5 size-3" /> Tipografia
+                    </h4>
+                    <div className="grid grid-cols-3 gap-2">
+                      {([
+                        ["sans", "Sans"],
+                        ["serif", "Serif"],
+                        ["mono", "Mono"],
+                      ] as const).map(([value, label]) => (
+                        <Button
+                          key={value}
+                          size="sm"
+                          variant={(state.fontFamily ?? "sans") === value ? "default" : "outline"}
+                          className="h-7 text-[11px]"
+                          onClick={() => onChange({ fontFamily: value })}
+                        >
+                          {label}
+                        </Button>
+                      ))}
+                    </div>
+                    <div className="space-y-1.5 pt-1">
+                      <FontSizeControl
+                        label="Título"
+                        value={fontSizes.title}
+                        min={34}
+                        max={82}
+                        onChange={(value) => updateFontSize("title", value)}
+                      />
+                      <FontSizeControl
+                        label="Apoio"
+                        value={fontSizes.subtitle}
+                        min={16}
+                        max={38}
+                        onChange={(value) => updateFontSize("subtitle", value)}
+                      />
+                      <FontSizeControl
+                        label="Corpo"
+                        value={fontSizes.body}
+                        min={13}
+                        max={28}
+                        onChange={(value) => updateFontSize("body", value)}
+                      />
                     </div>
                   </div>
                 </div>
               </PopoverContent>
             </Popover>
-
-            <input
-              type="file"
-              multiple
-              accept="image/*"
-              className="hidden"
-              ref={fileRef}
-              onChange={handleProductChange}
-            />
-            <input
-              type="file"
-              accept="image/*"
-              className="hidden"
-              ref={bgRef}
-              onChange={handleBackgroundChange}
-            />
-
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-8 text-xs font-bold rounded-lg border-border-strong text-fg-primary hover:bg-surface-3"
-              onClick={() => fileRef.current?.click()}
-            >
-              <ImagePlus className="mr-1.5 size-3.5" /> Produtos
-            </Button>
-
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-8 text-xs font-bold rounded-lg border-border-strong text-fg-primary hover:bg-surface-3"
-              onClick={() => bgRef.current?.click()}
-            >
-              <Upload className="mr-1.5 size-3.5" /> Fundo
-            </Button>
-
-            {state.productImageUrl && (
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => onChange({ productImageUrl: null })}
-                title="Remover Fundo"
-                className="text-rose-400 hover:text-rose-500 hover:bg-rose-500/10"
-              >
-                <Trash2 className="size-4" />
-              </Button>
-            )}
-
-            {(state.productImages?.length || 0) > 0 && (
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => onChange({ productImages: [] })}
-                title="Limpar Produtos"
-                className="text-orange-400 hover:text-orange-500 hover:bg-orange-500/10"
-              >
-                <Trash2 className="size-4" />
-              </Button>
-            )}
-
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-8 rounded-lg bg-surface-3 text-xs font-bold text-fg-primary hover:bg-surface-2 sm:ml-2"
-              onClick={handleRegenerate}
-            >
-              <RefreshCw className="mr-1.5 size-3.5" /> IA
-            </Button>
           </div>
+
+          <input
+            ref={productInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            className="hidden"
+            onChange={handleProductChange}
+          />
+          <input
+            ref={backgroundInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={handleBackgroundChange}
+          />
         </div>
       )}
     </div>
