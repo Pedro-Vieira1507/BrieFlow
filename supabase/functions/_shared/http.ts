@@ -5,6 +5,7 @@ import {
 } from "npm:@supabase/supabase-js@2.110.5";
 
 import type { Database } from "./database.ts";
+import { previewOrigins } from "./preview-origins.ts";
 
 export type ServiceClient = SupabaseClient<Database>;
 
@@ -13,32 +14,55 @@ export interface RequestContext {
   service: ServiceClient;
 }
 
-const configuredOrigins = (() => {
-  const values = (Deno.env.get("ALLOWED_ORIGINS") ?? "")
-    .split(",")
-    .map((value) => value.trim())
-    .filter(Boolean);
-  const appUrl = Deno.env.get("APP_URL");
-  if (appUrl) {
-    try {
-      values.push(new URL(appUrl).origin);
-    } catch {
-      // Invalid deployment configuration is reported by the billing function.
+function normalizeConfiguredOrigin(value: string): string | null {
+  const candidate = value.trim();
+  if (!candidate) return null;
+
+  try {
+    const url = new URL(candidate);
+    if (
+      !["http:", "https:"].includes(url.protocol) ||
+      url.username ||
+      url.password
+    ) {
+      return null;
     }
+    return url.origin;
+  } catch {
+    return null;
   }
+}
+
+const configuredOrigins = (() => {
+  const values = [
+    ...(Deno.env.get("ALLOWED_ORIGINS") ?? "").split(","),
+    ...previewOrigins,
+  ]
+    .map(normalizeConfiguredOrigin)
+    .filter((value): value is string => value !== null);
+  const appUrl = Deno.env.get("APP_URL");
+  const appOrigin = appUrl ? normalizeConfiguredOrigin(appUrl) : null;
+  if (appOrigin) values.push(appOrigin);
   return new Set(values);
 })();
 
 function allowedOrigin(req: Request): string | null {
   const origin = req.headers.get("Origin");
   if (!origin) return null;
-  if (configuredOrigins.has(origin)) return origin;
+  let parsedOrigin: URL;
+  try {
+    parsedOrigin = new URL(origin);
+  } catch {
+    return null;
+  }
+  if (configuredOrigins.has(parsedOrigin.origin)) return parsedOrigin.origin;
   if (
     configuredOrigins.size === 0 &&
     Deno.env.get("ENVIRONMENT") !== "production"
   ) {
-    if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin))
-      return origin;
+    if (/^(localhost|127\.0\.0\.1)$/i.test(parsedOrigin.hostname)) {
+      return parsedOrigin.origin;
+    }
   }
   return null;
 }
@@ -49,7 +73,7 @@ export function responseHeaders(req: Request): HeadersInit {
     ...(origin ? { "Access-Control-Allow-Origin": origin } : {}),
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     "Access-Control-Allow-Headers":
-      "authorization, apikey, content-type, x-client-version, x-request-id",
+      "authorization, apikey, content-type, x-client-info, x-client-version, x-request-id",
     "Access-Control-Max-Age": "86400",
     "Content-Type": "application/json; charset=utf-8",
     "Cache-Control": "no-store",
