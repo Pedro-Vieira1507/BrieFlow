@@ -11,8 +11,10 @@ import {
 type ChatRole = "system" | "user" | "assistant";
 type ProviderName = "omniroute" | "groq" | "gemini" | "ollama";
 
+type ProxyMessage = { role?: string; content?: unknown };
+
 interface ProxyBody {
-  messages?: Array<{ role?: string; content?: unknown }>;
+  messages?: ProxyMessage[];
   action?: string;
   stage?: "discovery" | "content";
   temperature?: number;
@@ -32,17 +34,17 @@ interface AuthorizationResult {
   organization_id: string;
 }
 
-interface ProviderAttempt {
-  name: ProviderName;
-  model: string;
-  execute: () => Promise<ProviderResult>;
-}
-
 interface ProviderResult {
   provider: ProviderName;
   model: string;
   content: string;
   usage: { prompt_tokens?: number; completion_tokens?: number };
+}
+
+interface ProviderAttempt {
+  name: ProviderName;
+  model: string;
+  execute: () => Promise<ProviderResult>;
 }
 
 const ACTIONS = new Set([
@@ -67,17 +69,10 @@ function env(name: string): string | null {
 
 function safeEndpoint(raw: string): string {
   const url = new URL(raw);
-  if (
-    !["http:", "https:"].includes(url.protocol) ||
-    url.username ||
-    url.password
-  ) {
+  if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) {
     throw new Error("provider_endpoint_invalid");
   }
-  if (
-    url.protocol !== "https:" &&
-    Deno.env.get("ENVIRONMENT") === "production"
-  ) {
+  if (url.protocol !== "https:" && Deno.env.get("ENVIRONMENT") === "production") {
     throw new Error("provider_endpoint_insecure");
   }
   return url.toString();
@@ -94,6 +89,35 @@ function isValidJsonContent(content: string): boolean {
   } catch {
     return false;
   }
+}
+
+function normalizeMessages(
+  rawMessages: ProxyMessage[],
+): Array<{ role: ChatRole; content: string }> {
+  const messages: Array<{ role: ChatRole; content: string }> = [];
+  let totalCharacters = 0;
+
+  for (const message of rawMessages) {
+    if (!message || !["system", "user", "assistant"].includes(String(message.role))) {
+      throw new Error("invalid_messages");
+    }
+
+    const role = message.role as ChatRole;
+    const content = String(message.content ?? "").trim();
+
+    // The web chat creates an empty assistant placeholder while waiting for the
+    // response. It is UI state, not conversation content, so it must never make
+    // a valid request fail validation.
+    if (!content && role === "assistant") continue;
+    if (!content || content.length > 32_000) throw new Error("invalid_messages");
+
+    totalCharacters += content.length;
+    messages.push({ role, content });
+  }
+
+  if (messages.length === 0) throw new Error("invalid_messages");
+  if (totalCharacters > 64_000) throw new Error("prompt_too_large");
+  return messages;
 }
 
 async function openAiRequest(options: {
@@ -128,9 +152,8 @@ async function openAiRequest(options: {
           : {}),
       }),
     });
-    if (!response.ok) {
-      throw new Error(`${options.provider}_http_${response.status}`);
-    }
+    if (!response.ok) throw new Error(`${options.provider}_http_${response.status}`);
+
     const raw = await response.text();
     if (raw.length > 2_000_000) throw new Error("provider_response_too_large");
     const payload = JSON.parse(raw) as {
@@ -143,6 +166,7 @@ async function openAiRequest(options: {
     if (options.jsonMode && !isValidJsonContent(content)) {
       throw new Error(`${options.provider}_invalid_json`);
     }
+
     return {
       provider: options.provider,
       model: payload.model ?? options.model,
@@ -183,6 +207,7 @@ async function ollamaRequest(options: {
       }),
     });
     if (!response.ok) throw new Error(`ollama_http_${response.status}`);
+
     const payload = (await response.json()) as {
       model?: string;
       message?: { content?: string };
@@ -191,8 +216,10 @@ async function ollamaRequest(options: {
     };
     const content = payload.message?.content?.trim() ?? "";
     if (!content) throw new Error("ollama_empty_response");
-    if (options.jsonMode && !isValidJsonContent(content))
+    if (options.jsonMode && !isValidJsonContent(content)) {
       throw new Error("ollama_invalid_json");
+    }
+
     return {
       provider: "ollama",
       model: payload.model ?? options.model,
@@ -248,7 +275,7 @@ function buildAttempts(options: {
 
   const groqKey = env("GROQ_API_KEY");
   if (groqKey) {
-    const modelNames =
+    const configuredModels =
       options.stage === "discovery"
         ? [env("GROQ_DISCOVERY_MODEL")]
         : [
@@ -256,9 +283,12 @@ function buildAttempts(options: {
             env("GROQ_FIRST_FALLBACK_MODEL"),
             env("GROQ_SECOND_FALLBACK_MODEL"),
           ];
-    for (const model of [
-      ...new Set(modelNames.filter((value): value is string => Boolean(value))),
-    ]) {
+    const models = [
+      ...new Set(
+        configuredModels.filter((value): value is string => Boolean(value)),
+      ),
+    ];
+    for (const model of models) {
       attempts.push({
         name: "groq",
         model,
@@ -326,6 +356,7 @@ function buildAttempts(options: {
 Deno.serve(async (req: Request) => {
   const optionsResponse = preflight(req);
   if (optionsResponse) return optionsResponse;
+
   const methodResponse = requirePost(req);
   if (methodResponse) return methodResponse;
 
@@ -337,16 +368,18 @@ Deno.serve(async (req: Request) => {
 
   try {
     context = await authenticate(req);
-    if (!context)
+    if (!context) {
       return json(req, 401, {
         error: "unauthorized",
         message: "Sessão inválida.",
       });
+    }
 
     const body = await readJson<ProxyBody>(req, 96_000);
     action = String(body.action ?? "chat").toLowerCase();
-    if (!ACTIONS.has(action))
+    if (!ACTIONS.has(action)) {
       return json(req, 400, { error: "invalid_action" });
+    }
 
     requestId = body.request_id?.trim() || crypto.randomUUID();
     if (!/^[a-zA-Z0-9_-]{8,128}$/.test(requestId)) {
@@ -360,22 +393,17 @@ Deno.serve(async (req: Request) => {
     ) {
       return json(req, 400, { error: "invalid_messages" });
     }
-    let totalCharacters = 0;
-    const messages = body.messages.map((message) => {
-      if (
-        !message ||
-        !["system", "user", "assistant"].includes(String(message.role))
-      ) {
-        throw new Error("invalid_messages");
+
+    let messages: Array<{ role: ChatRole; content: string }>;
+    try {
+      messages = normalizeMessages(body.messages);
+    } catch (error) {
+      const code = error instanceof Error ? error.message : "invalid_messages";
+      if (code === "prompt_too_large") {
+        return json(req, 413, { error: code });
       }
-      const content = String(message.content ?? "").trim();
-      if (!content || content.length > 32_000)
-        throw new Error("invalid_messages");
-      totalCharacters += content.length;
-      return { role: message.role as ChatRole, content };
-    });
-    if (totalCharacters > 64_000)
-      return json(req, 413, { error: "prompt_too_large" });
+      return json(req, 400, { error: "invalid_messages" });
+    }
 
     const { data, error: authorizationError } = await context.service.rpc(
       "authorize_generation",
@@ -390,6 +418,7 @@ Deno.serve(async (req: Request) => {
       },
     );
     if (authorizationError) throw new Error("authorization_failed");
+
     const authorization = (
       Array.isArray(data) ? data[0] : data
     ) as AuthorizationResult | null;
@@ -398,7 +427,9 @@ Deno.serve(async (req: Request) => {
       const status =
         code === "rate_limit_exceeded"
           ? 429
-          : code === "insufficient_credits"
+          : ["insufficient_credits", "monthly_credit_limit_exceeded"].includes(
+                code,
+              )
             ? 402
             : code === "duplicate_request"
               ? 409
@@ -437,6 +468,7 @@ Deno.serve(async (req: Request) => {
       8192,
     );
     const jsonMode = body.response_format?.type === "json_object";
+
     const attempts = buildAttempts({
       stage,
       preferred: ["omniroute", "groq", "gemini", "ollama"].includes(
@@ -473,19 +505,21 @@ Deno.serve(async (req: Request) => {
     if (!result) throw new Error("all_providers_failed");
 
     const latencyMs = Date.now() - startedAt;
-    const logPromise = context.service.from("ai_usage_log").insert({
-      organization_id: authorization.organization_id,
-      user_id: context.user.id,
-      request_id: requestId,
-      action,
-      provider: result.provider,
-      model: result.model,
-      prompt_tokens: result.usage.prompt_tokens ?? null,
-      completion_tokens: result.usage.completion_tokens ?? null,
-      latency_ms: latencyMs,
-      success: true,
-    });
-    runInBackground("ai_usage_log", logPromise);
+    runInBackground(
+      "ai_usage_log",
+      context.service.from("ai_usage_log").insert({
+        organization_id: authorization.organization_id,
+        user_id: context.user.id,
+        request_id: requestId,
+        action,
+        provider: result.provider,
+        model: result.model,
+        prompt_tokens: result.usage.prompt_tokens ?? null,
+        completion_tokens: result.usage.completion_tokens ?? null,
+        latency_ms: latencyMs,
+        success: true,
+      }),
+    );
 
     return json(req, 200, {
       model: result.model,
@@ -508,6 +542,7 @@ Deno.serve(async (req: Request) => {
     });
   } catch (error) {
     const code = error instanceof Error ? error.message : "internal_error";
+
     if (context && requestId && authorized) {
       await context.service.rpc("refund_generation", {
         p_user_id: context.user.id,
@@ -525,6 +560,7 @@ Deno.serve(async (req: Request) => {
         error_code: code.slice(0, 120),
       });
     }
+
     const publicCode = [
       "invalid_json",
       "request_too_large",
@@ -541,6 +577,7 @@ Deno.serve(async (req: Request) => {
         : publicCode === "no_provider_configured"
           ? 503
           : 502;
+
     return json(req, status, {
       error: publicCode,
       message: publicError(error),
