@@ -31,25 +31,28 @@ function findGeneratedImage(value: unknown): GeneratedImage | null {
   if (!value || typeof value !== "object") return null;
 
   const record = value as Record<string, unknown>;
-  const directData =
-    typeof record.b64_json === "string"
-      ? record.b64_json
-      : typeof record.data === "string"
-        ? record.data
-        : null;
-  const mimeType =
+  const explicitMimeType =
     typeof record.mime_type === "string"
       ? record.mime_type
       : typeof record.mimeType === "string"
         ? record.mimeType
-        : "image/png";
-  const looksLikeImage =
-    record.type === "image" ||
-    mimeType.startsWith("image/") ||
-    typeof record.b64_json === "string";
+        : null;
+  const base64Json =
+    typeof record.b64_json === "string" ? record.b64_json : null;
+  const inlineData =
+    typeof record.data === "string" &&
+    (record.type === "image" || explicitMimeType?.startsWith("image/"))
+      ? record.data
+      : null;
+  const directData = base64Json ?? inlineData;
 
-  if (directData && looksLikeImage && directData.length > 100) {
-    return { data: directData, mimeType };
+  if (directData && directData.length > 100) {
+    return {
+      data: directData,
+      mimeType: explicitMimeType?.startsWith("image/")
+        ? explicitMimeType
+        : "image/png",
+    };
   }
 
   for (const child of Object.values(record)) {
@@ -217,7 +220,8 @@ Deno.serve(async (req: Request) => {
     });
   } catch (error) {
     const code = error instanceof Error ? error.message : "internal_error";
-    const status = code === "invalid_json" ? 400 : code === "request_too_large" ? 413 : 500;
+    const status =
+      code === "invalid_json" ? 400 : code === "request_too_large" ? 413 : 500;
     return json(req, status, {
       error: ["invalid_json", "request_too_large"].includes(code)
         ? code
