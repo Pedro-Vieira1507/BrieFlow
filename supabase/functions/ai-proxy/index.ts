@@ -47,6 +47,12 @@ interface ProviderAttempt {
   execute: () => Promise<ProviderResult>;
 }
 
+interface ProviderFailure {
+  provider: ProviderName;
+  model: string;
+  code: string;
+}
+
 const ACTIONS = new Set([
   "banner",
   "email",
@@ -60,6 +66,15 @@ const ACTIONS = new Set([
   "podcast",
   "chat",
   "discovery",
+]);
+
+const SHORT_STRUCTURED_ACTIONS = new Set([
+  "banner",
+  "email",
+  "social",
+  "whatsapp",
+  "discovery",
+  "chat",
 ]);
 
 function env(name: string): string | null {
@@ -78,17 +93,30 @@ function safeEndpoint(raw: string): string {
   return url.toString();
 }
 
-function isValidJsonContent(content: string): boolean {
-  const normalized = content
+function normalizeJsonContent(content: string): string | null {
+  const stripped = content
     .trim()
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
     .replace(/^```(?:json)?\s*/i, "")
-    .replace(/\s*```$/, "");
-  try {
-    JSON.parse(normalized);
-    return true;
-  } catch {
-    return false;
+    .replace(/\s*```$/i, "")
+    .trim();
+
+  const candidates = [stripped];
+  const firstBrace = stripped.indexOf("{");
+  const lastBrace = stripped.lastIndexOf("}");
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    candidates.push(stripped.slice(firstBrace, lastBrace + 1));
   }
+
+  for (const candidate of candidates) {
+    try {
+      return JSON.stringify(JSON.parse(candidate));
+    } catch {
+      // Try the next conservative extraction. Never attempt heuristic repair of
+      // arbitrary malformed JSON because it can alter campaign facts.
+    }
+  }
+  return null;
 }
 
 function normalizeMessages(
@@ -104,10 +132,6 @@ function normalizeMessages(
 
     const role = message.role as ChatRole;
     const content = String(message.content ?? "").trim();
-
-    // The web chat creates an empty assistant placeholder while waiting for the
-    // response. It is UI state, not conversation content, so it must never make
-    // a valid request fail validation.
     if (!content && role === "assistant") continue;
     if (!content || content.length > 32_000) throw new Error("invalid_messages");
 
@@ -147,25 +171,27 @@ async function openAiRequest(options: {
         messages: options.messages,
         temperature: options.temperature,
         max_tokens: options.maxTokens,
-        ...(options.jsonMode
-          ? { response_format: { type: "json_object" } }
-          : {}),
+        ...(options.jsonMode ? { response_format: { type: "json_object" } } : {}),
       }),
     });
-    if (!response.ok) throw new Error(`${options.provider}_http_${response.status}`);
+
+    if (!response.ok) {
+      throw new Error(`${options.provider}_http_${response.status}`);
+    }
 
     const raw = await response.text();
     if (raw.length > 2_000_000) throw new Error("provider_response_too_large");
+
     const payload = JSON.parse(raw) as {
       model?: string;
       choices?: Array<{ message?: { content?: string } }>;
       usage?: { prompt_tokens?: number; completion_tokens?: number };
     };
-    const content = payload.choices?.[0]?.message?.content?.trim() ?? "";
-    if (!content) throw new Error(`${options.provider}_empty_response`);
-    if (options.jsonMode && !isValidJsonContent(content)) {
-      throw new Error(`${options.provider}_invalid_json`);
-    }
+    const received = payload.choices?.[0]?.message?.content?.trim() ?? "";
+    if (!received) throw new Error(`${options.provider}_empty_response`);
+
+    const content = options.jsonMode ? normalizeJsonContent(received) : received;
+    if (!content) throw new Error(`${options.provider}_invalid_json`);
 
     return {
       provider: options.provider,
@@ -214,11 +240,11 @@ async function ollamaRequest(options: {
       prompt_eval_count?: number;
       eval_count?: number;
     };
-    const content = payload.message?.content?.trim() ?? "";
-    if (!content) throw new Error("ollama_empty_response");
-    if (options.jsonMode && !isValidJsonContent(content)) {
-      throw new Error("ollama_invalid_json");
-    }
+    const received = payload.message?.content?.trim() ?? "";
+    if (!received) throw new Error("ollama_empty_response");
+
+    const content = options.jsonMode ? normalizeJsonContent(received) : received;
+    if (!content) throw new Error("ollama_invalid_json");
 
     return {
       provider: "ollama",
@@ -253,11 +279,8 @@ function buildAttempts(options: {
   const omnirouteKey = env("OMNIROUTE_API_KEY");
   const omnirouteUrl = env("OMNIROUTE_API_URL");
   const omnirouteModel =
-    env(
-      options.stage === "discovery"
-        ? "OMNIROUTE_DISCOVERY_MODEL"
-        : "OMNIROUTE_CONTENT_MODEL",
-    ) ?? env("OMNIROUTE_MODEL");
+    env(options.stage === "discovery" ? "OMNIROUTE_DISCOVERY_MODEL" : "OMNIROUTE_CONTENT_MODEL") ??
+    env("OMNIROUTE_MODEL");
   if (omnirouteKey && omnirouteUrl && omnirouteModel) {
     attempts.push({
       name: "omniroute",
@@ -275,19 +298,18 @@ function buildAttempts(options: {
 
   const groqKey = env("GROQ_API_KEY");
   if (groqKey) {
+    const discoveryModel = env("GROQ_DISCOVERY_MODEL");
     const configuredModels =
       options.stage === "discovery"
-        ? [env("GROQ_DISCOVERY_MODEL")]
+        ? [discoveryModel]
         : [
             env("GROQ_PRIMARY_MODEL"),
             env("GROQ_FIRST_FALLBACK_MODEL"),
             env("GROQ_SECOND_FALLBACK_MODEL"),
+            discoveryModel,
           ];
-    const models = [
-      ...new Set(
-        configuredModels.filter((value): value is string => Boolean(value)),
-      ),
-    ];
+
+    const models = [...new Set(configuredModels.filter((value): value is string => Boolean(value)))];
     for (const model of models) {
       attempts.push({
         name: "groq",
@@ -306,9 +328,7 @@ function buildAttempts(options: {
 
   const geminiKey = env("GEMINI_API_KEY");
   const geminiModel = env(
-    options.stage === "discovery"
-      ? "GEMINI_DISCOVERY_MODEL"
-      : "GEMINI_CONTENT_MODEL",
+    options.stage === "discovery" ? "GEMINI_DISCOVERY_MODEL" : "GEMINI_CONTENT_MODEL",
   );
   if (geminiKey && geminiModel) {
     attempts.push({
@@ -318,8 +338,7 @@ function buildAttempts(options: {
         openAiRequest({
           ...shared,
           provider: "gemini",
-          endpoint:
-            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+          endpoint: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
           apiKey: geminiKey,
           model: geminiModel,
           extraHeaders: { "x-goog-api-key": geminiKey },
@@ -329,11 +348,8 @@ function buildAttempts(options: {
 
   const ollamaUrl = env("OLLAMA_API_URL");
   const ollamaModel =
-    env(
-      options.stage === "discovery"
-        ? "OLLAMA_DISCOVERY_MODEL"
-        : "OLLAMA_CONTENT_MODEL",
-    ) ?? env("OLLAMA_MODEL");
+    env(options.stage === "discovery" ? "OLLAMA_DISCOVERY_MODEL" : "OLLAMA_CONTENT_MODEL") ??
+    env("OLLAMA_MODEL");
   if (ollamaUrl && ollamaModel) {
     attempts.push({
       name: "ollama",
@@ -345,9 +361,7 @@ function buildAttempts(options: {
 
   if (options.preferred) {
     attempts.sort(
-      (a, b) =>
-        Number(b.name === options.preferred) -
-        Number(a.name === options.preferred),
+      (a, b) => Number(b.name === options.preferred) - Number(a.name === options.preferred),
     );
   }
   return attempts;
@@ -365,32 +379,24 @@ Deno.serve(async (req: Request) => {
   let requestId = "";
   let authorized = false;
   let action = "chat";
+  let providerFailures: ProviderFailure[] = [];
 
   try {
     context = await authenticate(req);
     if (!context) {
-      return json(req, 401, {
-        error: "unauthorized",
-        message: "Sessão inválida.",
-      });
+      return json(req, 401, { error: "unauthorized", message: "Sessão inválida." });
     }
 
     const body = await readJson<ProxyBody>(req, 96_000);
     action = String(body.action ?? "chat").toLowerCase();
-    if (!ACTIONS.has(action)) {
-      return json(req, 400, { error: "invalid_action" });
-    }
+    if (!ACTIONS.has(action)) return json(req, 400, { error: "invalid_action" });
 
     requestId = body.request_id?.trim() || crypto.randomUUID();
     if (!/^[a-zA-Z0-9_-]{8,128}$/.test(requestId)) {
       return json(req, 400, { error: "invalid_request_id" });
     }
 
-    if (
-      !Array.isArray(body.messages) ||
-      body.messages.length === 0 ||
-      body.messages.length > 32
-    ) {
+    if (!Array.isArray(body.messages) || body.messages.length === 0 || body.messages.length > 32) {
       return json(req, 400, { error: "invalid_messages" });
     }
 
@@ -399,9 +405,7 @@ Deno.serve(async (req: Request) => {
       messages = normalizeMessages(body.messages);
     } catch (error) {
       const code = error instanceof Error ? error.message : "invalid_messages";
-      if (code === "prompt_too_large") {
-        return json(req, 413, { error: code });
-      }
+      if (code === "prompt_too_large") return json(req, 413, { error: code });
       return json(req, 400, { error: "invalid_messages" });
     }
 
@@ -419,25 +423,17 @@ Deno.serve(async (req: Request) => {
     );
     if (authorizationError) throw new Error("authorization_failed");
 
-    const authorization = (
-      Array.isArray(data) ? data[0] : data
-    ) as AuthorizationResult | null;
+    const authorization = (Array.isArray(data) ? data[0] : data) as AuthorizationResult | null;
     if (!authorization?.ok) {
       const code = authorization?.code ?? "authorization_failed";
       const status =
         code === "rate_limit_exceeded"
           ? 429
-          : ["insufficient_credits", "monthly_credit_limit_exceeded"].includes(
-                code,
-              )
+          : ["insufficient_credits", "monthly_credit_limit_exceeded"].includes(code)
             ? 402
             : code === "duplicate_request"
               ? 409
-              : [
-                    "format_not_allowed",
-                    "subscription_inactive",
-                    "membership_inactive",
-                  ].includes(code)
+              : ["format_not_allowed", "subscription_inactive", "membership_inactive"].includes(code)
                 ? 403
                 : 500;
       return json(req, status, {
@@ -452,20 +448,13 @@ Deno.serve(async (req: Request) => {
     const requestedTemperature = Number(body.temperature ?? 0.3);
     const requestedMaxTokens = Number(body.max_tokens ?? 4096);
     const temperature = Math.min(
-      Math.max(
-        Number.isFinite(requestedTemperature) ? requestedTemperature : 0.3,
-        0,
-      ),
+      Math.max(Number.isFinite(requestedTemperature) ? requestedTemperature : 0.3, 0),
       1.2,
     );
+    const actionTokenCeiling = SHORT_STRUCTURED_ACTIONS.has(action) ? 4096 : 8192;
     const maxTokens = Math.min(
-      Math.max(
-        Number.isFinite(requestedMaxTokens)
-          ? Math.floor(requestedMaxTokens)
-          : 4096,
-        256,
-      ),
-      8192,
+      Math.max(Number.isFinite(requestedMaxTokens) ? Math.floor(requestedMaxTokens) : 4096, 256),
+      actionTokenCeiling,
     );
     const jsonMode = body.response_format?.type === "json_object";
 
@@ -492,6 +481,7 @@ Deno.serve(async (req: Request) => {
         break;
       } catch (error) {
         const code = error instanceof Error ? error.message : "provider_failed";
+        providerFailures.push({ provider: attempt.name, model: attempt.model, code });
         console.warn(
           JSON.stringify({
             event: "ai_provider_failed",
@@ -542,6 +532,10 @@ Deno.serve(async (req: Request) => {
     });
   } catch (error) {
     const code = error instanceof Error ? error.message : "internal_error";
+    const failureSummary = providerFailures
+      .map((failure) => `${failure.provider}:${failure.model}:${failure.code}`)
+      .join("|")
+      .slice(0, 115);
 
     if (context && requestId && authorized) {
       await context.service.rpc("refund_generation", {
@@ -557,15 +551,11 @@ Deno.serve(async (req: Request) => {
         model: "none",
         latency_ms: Date.now() - startedAt,
         success: false,
-        error_code: code.slice(0, 120),
+        error_code: failureSummary || code.slice(0, 120),
       });
     }
 
-    const publicCode = [
-      "invalid_json",
-      "request_too_large",
-      "invalid_messages",
-    ].includes(code)
+    const publicCode = ["invalid_json", "request_too_large", "invalid_messages"].includes(code)
       ? code
       : code === "no_provider_configured"
         ? code
@@ -581,6 +571,11 @@ Deno.serve(async (req: Request) => {
     return json(req, status, {
       error: publicCode,
       message: publicError(error),
+      provider_failures: providerFailures.map(({ provider, model, code: failureCode }) => ({
+        provider,
+        model,
+        code: failureCode,
+      })),
     });
   }
 });
