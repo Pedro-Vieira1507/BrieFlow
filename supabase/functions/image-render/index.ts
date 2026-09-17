@@ -32,73 +32,10 @@ const ALLOWED_ASPECT_RATIOS = new Set([
   "4:5",
   "9:16",
 ]);
-const ALLOWED_IMAGE_SIZES = new Set(["512", "1K", "2K"]);
 const IMAGE_RENDERS_PER_MINUTE = 8;
-const INTERACTIONS_ENDPOINT =
-  "https://generativelanguage.googleapis.com/v1beta/interactions";
-const LEGACY_IMAGE_MODEL = "gemini-2.5-flash-image";
-
-function uniqueModels(values: Array<string | null | undefined>): string[] {
-  return Array.from(
-    new Set(values.map((value) => value?.trim()).filter((value): value is string => Boolean(value))),
-  );
-}
-
-function imageModels(): string[] {
-  const configured = (Deno.env.get("GEMINI_IMAGE_MODELS") ?? "")
-    .split(",")
-    .map((value) => value.trim())
-    .filter(Boolean);
-  return uniqueModels([
-    Deno.env.get("GEMINI_IMAGE_MODEL"),
-    ...configured,
-    "gemini-3.1-flash-image",
-    "gemini-3.1-flash-lite-image",
-  ]);
-}
-
-function findGeneratedImage(value: unknown): GeneratedImage | null {
-  if (!value || typeof value !== "object") return null;
-
-  const record = value as Record<string, unknown>;
-  const explicitMimeType =
-    typeof record.mime_type === "string"
-      ? record.mime_type
-      : typeof record.mimeType === "string"
-        ? record.mimeType
-        : null;
-  const base64Json =
-    typeof record.b64_json === "string" ? record.b64_json : null;
-  const inlineData =
-    typeof record.data === "string" &&
-    (record.type === "image" || explicitMimeType?.startsWith("image/"))
-      ? record.data
-      : null;
-  const directData = base64Json ?? inlineData;
-
-  if (directData && directData.length > 100) {
-    return {
-      data: directData,
-      mimeType: explicitMimeType?.startsWith("image/")
-        ? explicitMimeType
-        : "image/png",
-    };
-  }
-
-  for (const child of Object.values(record)) {
-    if (Array.isArray(child)) {
-      for (const item of child) {
-        const nested = findGeneratedImage(item);
-        if (nested) return nested;
-      }
-      continue;
-    }
-    const nested = findGeneratedImage(child);
-    if (nested) return nested;
-  }
-
-  return null;
-}
+const CLOUDFLARE_PRIMARY_MODEL = "@cf/black-forest-labs/flux-2-klein-4b";
+const CLOUDFLARE_FALLBACK_MODEL = "@cf/black-forest-labs/flux-1-schnell";
+const SCHNELL_MAX_PROMPT = 2_048;
 
 function decodeBase64(value: string): Uint8Array {
   const binary = atob(value.replace(/^data:[^;]+;base64,/, ""));
@@ -115,9 +52,64 @@ function extensionForMime(mimeType: string): string {
   return "png";
 }
 
+function aspectRatioToDimensions(aspectRatio: string): {
+  width: number;
+  height: number;
+} {
+  switch (aspectRatio) {
+    case "21:9":
+      return { width: 1344, height: 576 };
+    case "4:3":
+      return { width: 1152, height: 864 };
+    case "1:1":
+      return { width: 1024, height: 1024 };
+    case "4:5":
+      return { width: 896, height: 1120 };
+    case "9:16":
+      return { width: 768, height: 1365 };
+    case "16:9":
+    default:
+      return { width: 1344, height: 768 };
+  }
+}
+
 function safeProviderMessage(value: unknown): string {
   if (typeof value !== "string") return "";
-  return value.replace(/AIza[0-9A-Za-z_-]{20,}/g, "[redacted]").slice(0, 500);
+  return value.slice(0, 500);
+}
+
+function providerFailureFromPayload(
+  payload: unknown,
+  model: string,
+  status: number,
+): ProviderFailure {
+  if (!payload || typeof payload !== "object") {
+    return {
+      model,
+      status,
+      code: "provider_error",
+      message: "Cloudflare Workers AI returned an invalid response.",
+    };
+  }
+
+  const record = payload as Record<string, unknown>;
+  const errors = Array.isArray(record.errors) ? record.errors : [];
+  const first =
+    errors[0] && typeof errors[0] === "object"
+      ? (errors[0] as Record<string, unknown>)
+      : undefined;
+
+  return {
+    model,
+    status,
+    code:
+      typeof first?.code === "number" || typeof first?.code === "string"
+        ? String(first.code)
+        : "provider_error",
+    message:
+      safeProviderMessage(first?.message) ||
+      "Cloudflare Workers AI could not generate the image.",
+  };
 }
 
 async function providerFailure(
@@ -125,27 +117,20 @@ async function providerFailure(
   model: string,
 ): Promise<ProviderFailure> {
   const raw = await response.text();
-  let code = "provider_error";
-  let message = raw.slice(0, 500);
   try {
-    const parsed = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
-    const nested =
-      parsed.error && typeof parsed.error === "object"
-        ? (parsed.error as Record<string, unknown>)
-        : parsed;
-    if (typeof nested.status === "string") code = nested.status;
-    else if (typeof nested.code === "string") code = nested.code;
-    else if (typeof nested.code === "number") code = String(nested.code);
-    if (typeof nested.message === "string") message = nested.message;
+    return providerFailureFromPayload(
+      raw ? (JSON.parse(raw) as unknown) : {},
+      model,
+      response.status,
+    );
   } catch {
-    // Keep the compact raw response when the provider did not return JSON.
+    return {
+      model,
+      status: response.status,
+      code: "provider_error",
+      message: safeProviderMessage(raw) || "Cloudflare Workers AI request failed.",
+    };
   }
-  return {
-    model,
-    status: response.status,
-    code: safeProviderMessage(code) || "provider_error",
-    message: safeProviderMessage(message),
-  };
 }
 
 async function fetchWithTimeout(
@@ -162,88 +147,102 @@ async function fetchWithTimeout(
   }
 }
 
-async function tryInteractionsModel(input: {
-  apiKey: string;
-  model: string;
-  prompt: string;
-  aspectRatio: string;
-  imageSize: string;
-}): Promise<{ image?: GeneratedImage; failure?: ProviderFailure }> {
-  const response = await fetchWithTimeout(INTERACTIONS_ENDPOINT, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-goog-api-key": input.apiKey,
-    },
-    body: JSON.stringify({
-      model: input.model,
-      input: input.prompt,
-      response_format: {
-        type: "image",
-        mime_type: "image/jpeg",
-        aspect_ratio: input.aspectRatio,
-        image_size: input.imageSize,
-      },
-    }),
-  });
-
-  if (!response.ok) {
-    return { failure: await providerFailure(response, input.model) };
-  }
-
-  const payload = (await response.json()) as unknown;
-  const image = findGeneratedImage(payload);
-  if (!image) {
-    return {
-      failure: {
-        model: input.model,
-        status: 502,
-        code: "EMPTY_IMAGE_RESPONSE",
-        message: "The provider returned no image payload.",
-      },
-    };
-  }
-  return { image };
+function extractCloudflareImage(payload: unknown): GeneratedImage | null {
+  if (!payload || typeof payload !== "object") return null;
+  const record = payload as Record<string, unknown>;
+  const result =
+    record.result && typeof record.result === "object"
+      ? (record.result as Record<string, unknown>)
+      : record;
+  const image = typeof result.image === "string" ? result.image : null;
+  if (!image || image.length < 100) return null;
+  return { data: image, mimeType: "image/jpeg" };
 }
 
-async function tryLegacyModel(input: {
-  apiKey: string;
+function compactPrompt(rawPrompt: string): string {
+  const suffix =
+    "\n\nCommercial advertising key visual only. No words, letters, numbers, logos, watermarks, UI, captions or labels. Clean premium composition, one clear focal idea, realistic materials and lighting, usable negative space for external typography. The application adds final typography and any real product cutout separately.";
+  const available = Math.max(400, SCHNELL_MAX_PROMPT - suffix.length - 1);
+  const normalized = rawPrompt.replace(/\s+/g, " ").trim();
+  return `${normalized.slice(0, available)}${suffix}`;
+}
+
+async function tryFlux2Klein(input: {
+  accountId: string;
+  apiToken: string;
   prompt: string;
   aspectRatio: string;
 }): Promise<{ image?: GeneratedImage; failure?: ProviderFailure }> {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${LEGACY_IMAGE_MODEL}:generateContent`;
-  const response = await fetchWithTimeout(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-goog-api-key": input.apiKey,
-    },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: input.prompt }] }],
-      generationConfig: {
-        responseModalities: ["IMAGE"],
-        imageConfig: { aspectRatio: input.aspectRatio },
+  const { width, height } = aspectRatioToDimensions(input.aspectRatio);
+  const form = new FormData();
+  form.append("prompt", input.prompt);
+  form.append("width", String(width));
+  form.append("height", String(height));
+  form.append("guidance", "3.5");
+
+  const response = await fetchWithTimeout(
+    `https://api.cloudflare.com/client/v4/accounts/${input.accountId}/ai/run/${CLOUDFLARE_PRIMARY_MODEL}`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${input.apiToken}`,
       },
-    }),
-  });
+      body: form,
+    },
+  );
 
   if (!response.ok) {
-    return { failure: await providerFailure(response, LEGACY_IMAGE_MODEL) };
+    return { failure: await providerFailure(response, CLOUDFLARE_PRIMARY_MODEL) };
   }
 
   const payload = (await response.json()) as unknown;
-  const image = findGeneratedImage(payload);
-  if (!image) {
-    return {
-      failure: {
-        model: LEGACY_IMAGE_MODEL,
-        status: 502,
-        code: "EMPTY_IMAGE_RESPONSE",
-        message: "The legacy provider returned no image payload.",
+  const image = extractCloudflareImage(payload);
+  if (image) return { image };
+
+  return {
+    failure: providerFailureFromPayload(
+      payload,
+      CLOUDFLARE_PRIMARY_MODEL,
+      502,
+    ),
+  };
+}
+
+async function tryFlux1Schnell(input: {
+  accountId: string;
+  apiToken: string;
+  prompt: string;
+}): Promise<{ image?: GeneratedImage; failure?: ProviderFailure }> {
+  const response = await fetchWithTimeout(
+    `https://api.cloudflare.com/client/v4/accounts/${input.accountId}/ai/run/${CLOUDFLARE_FALLBACK_MODEL}`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${input.apiToken}`,
+        "Content-Type": "application/json",
       },
-    };
+      body: JSON.stringify({
+        prompt: input.prompt.slice(0, SCHNELL_MAX_PROMPT),
+        steps: 4,
+      }),
+    },
+  );
+
+  if (!response.ok) {
+    return { failure: await providerFailure(response, CLOUDFLARE_FALLBACK_MODEL) };
   }
-  return { image };
+
+  const payload = (await response.json()) as unknown;
+  const image = extractCloudflareImage(payload);
+  if (image) return { image };
+
+  return {
+    failure: providerFailureFromPayload(
+      payload,
+      CLOUDFLARE_FALLBACK_MODEL,
+      502,
+    ),
+  };
 }
 
 function quotaFailure(failures: ProviderFailure[]): boolean {
@@ -251,19 +250,20 @@ function quotaFailure(failures: ProviderFailure[]): boolean {
     const detail = `${failure.code} ${failure.message}`.toLowerCase();
     return (
       failure.status === 429 ||
-      /resource_exhausted|quota|billing|paid tier|free tier|limit:\s*0|limit 0/.test(detail)
+      /quota|neuron|usage limit|daily limit|billing/.test(detail)
     );
   });
 }
 
 function authFailure(failures: ProviderFailure[]): boolean {
-  return failures.some(
-    (failure) =>
+  return failures.some((failure) => {
+    const detail = `${failure.code} ${failure.message}`.toLowerCase();
+    return (
       failure.status === 401 ||
-      /api key not valid|permission_denied|unauthenticated/i.test(
-        `${failure.code} ${failure.message}`,
-      ),
-  );
+      failure.status === 403 ||
+      /authentication|authorization|permission|token/.test(detail)
+    );
+  });
 }
 
 Deno.serve(async (req: Request) => {
@@ -309,72 +309,76 @@ Deno.serve(async (req: Request) => {
       return json(req, 400, { error: "invalid_prompt" });
     }
 
-    const geminiKey = Deno.env.get("GEMINI_API_KEY")?.trim();
-    if (!geminiKey) {
+    const accountId = Deno.env.get("CLOUDFLARE_ACCOUNT_ID")?.trim();
+    const apiToken = Deno.env.get("CLOUDFLARE_API_TOKEN")?.trim();
+    if (!accountId || !apiToken) {
       return json(req, 503, { error: "image_provider_not_configured" });
     }
 
     const requestedAspect =
       typeof body.aspect_ratio === "string" ? body.aspect_ratio : "16:9";
-    const requestedSize =
-      typeof body.image_size === "string" ? body.image_size : "1K";
     const aspectRatio = ALLOWED_ASPECT_RATIOS.has(requestedAspect)
       ? requestedAspect
       : "16:9";
-    const imageSize = ALLOWED_IMAGE_SIZES.has(requestedSize)
-      ? requestedSize
-      : "1K";
-
-    const prompt = `${rawPrompt}\n\nCommercial advertising key visual. Do not render any words, letters, numbers, logos, watermarks, UI, captions or labels. Keep the composition clean, photorealistic when appropriate, with a single clear focal idea and usable negative space for external typography. The final typography and real product cutout will be added separately by the application.`;
+    const providerPrompt = compactPrompt(rawPrompt);
 
     const failures: ProviderFailure[] = [];
     let generated: GeneratedImage | undefined;
     let selectedModel = "";
 
-    for (const model of imageModels()) {
-      try {
-        const attempt = await tryInteractionsModel({
-          apiKey: geminiKey,
-          model,
-          prompt,
-          aspectRatio,
-          imageSize,
-        });
-        if (attempt.image) {
-          generated = attempt.image;
-          selectedModel = model;
-          break;
-        }
-        if (attempt.failure) failures.push(attempt.failure);
-      } catch (error) {
-        failures.push({
-          model,
-          status: 504,
-          code: error instanceof DOMException && error.name === "AbortError" ? "TIMEOUT" : "NETWORK_ERROR",
-          message: error instanceof Error ? error.message.slice(0, 500) : "Provider request failed.",
-        });
+    try {
+      const primary = await tryFlux2Klein({
+        accountId,
+        apiToken,
+        prompt: providerPrompt,
+        aspectRatio,
+      });
+      if (primary.image) {
+        generated = primary.image;
+        selectedModel = CLOUDFLARE_PRIMARY_MODEL;
+      } else if (primary.failure) {
+        failures.push(primary.failure);
       }
+    } catch (error) {
+      failures.push({
+        model: CLOUDFLARE_PRIMARY_MODEL,
+        status: 504,
+        code:
+          error instanceof DOMException && error.name === "AbortError"
+            ? "TIMEOUT"
+            : "NETWORK_ERROR",
+        message:
+          error instanceof Error
+            ? error.message.slice(0, 500)
+            : "Cloudflare primary model request failed.",
+      });
     }
 
     if (!generated) {
       try {
-        const legacy = await tryLegacyModel({
-          apiKey: geminiKey,
-          prompt,
-          aspectRatio,
+        const fallback = await tryFlux1Schnell({
+          accountId,
+          apiToken,
+          prompt: providerPrompt,
         });
-        if (legacy.image) {
-          generated = legacy.image;
-          selectedModel = LEGACY_IMAGE_MODEL;
-        } else if (legacy.failure) {
-          failures.push(legacy.failure);
+        if (fallback.image) {
+          generated = fallback.image;
+          selectedModel = CLOUDFLARE_FALLBACK_MODEL;
+        } else if (fallback.failure) {
+          failures.push(fallback.failure);
         }
       } catch (error) {
         failures.push({
-          model: LEGACY_IMAGE_MODEL,
+          model: CLOUDFLARE_FALLBACK_MODEL,
           status: 504,
-          code: error instanceof DOMException && error.name === "AbortError" ? "TIMEOUT" : "NETWORK_ERROR",
-          message: error instanceof Error ? error.message.slice(0, 500) : "Legacy provider request failed.",
+          code:
+            error instanceof DOMException && error.name === "AbortError"
+              ? "TIMEOUT"
+              : "NETWORK_ERROR",
+          message:
+            error instanceof Error
+              ? error.message.slice(0, 500)
+              : "Cloudflare fallback model request failed.",
         });
       }
     }
@@ -389,7 +393,7 @@ Deno.serve(async (req: Request) => {
       console.warn(
         JSON.stringify({
           event: error,
-          provider: "gemini",
+          provider: "cloudflare-workers-ai",
           failures,
         }),
       );
@@ -397,7 +401,8 @@ Deno.serve(async (req: Request) => {
         error,
         provider_status: lastFailure?.status ?? 502,
         provider_code: lastFailure?.code ?? "provider_error",
-        provider_message: lastFailure?.message ?? "Image generation failed.",
+        provider_message:
+          lastFailure?.message ?? "Cloudflare Workers AI image generation failed.",
         models_tried: failures.map((failure) => failure.model),
       });
     }
@@ -437,6 +442,7 @@ Deno.serve(async (req: Request) => {
       url: signed.signedUrl,
       path: storagePath,
       model: selectedModel,
+      provider: "cloudflare-workers-ai",
       aspect_ratio: aspectRatio,
     });
   } catch (error) {
