@@ -58,8 +58,19 @@ Deno.serve(async (req: Request) => {
 
     const apiKey = Deno.env.get("GOOGLE_SEARCH_API_KEY")?.trim();
     const searchEngineId = Deno.env.get("GOOGLE_SEARCH_CX")?.trim();
-    if (!apiKey || !searchEngineId)
-      throw new Error("image_search_not_configured");
+    if (!apiKey || !searchEngineId) {
+      await refund(context, requestId, "image_search_not_configured");
+      charged = false;
+      return json(req, 200, {
+        found: false,
+        imageUrl: null,
+        _meta: {
+          request_id: requestId,
+          credits_remaining: access.credits_remaining,
+          provider: "disabled",
+        },
+      });
+    }
 
     const searchUrl = new URL("https://www.googleapis.com/customsearch/v1");
     searchUrl.searchParams.set("key", apiKey);
@@ -139,8 +150,7 @@ Deno.serve(async (req: Request) => {
   } catch (error) {
     const code = error instanceof Error ? error.message : "image_search_failed";
     if (charged && requestId) await refund(context, requestId, code);
-    const status = code === "image_search_not_configured" ? 503 : 502;
-    return json(req, status, {
+    return json(req, 502, {
       found: false,
       imageUrl: null,
       error:
