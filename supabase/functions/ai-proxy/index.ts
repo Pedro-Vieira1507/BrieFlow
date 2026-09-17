@@ -194,10 +194,7 @@ async function openAiRequest(options: {
   const timeout = setTimeout(() => controller.abort(), 75_000);
 
   try {
-    let response = await performOpenAiRequest({
-      ...options,
-      signal: controller.signal,
-    });
+    let response = await performOpenAiRequest({ ...options, signal: controller.signal });
 
     if (response.status === 413 && options.maxTokens > 1024) {
       response = await performOpenAiRequest({
@@ -220,9 +217,7 @@ async function openAiRequest(options: {
       });
     }
 
-    if (!response.ok) {
-      throw new Error(`${options.provider}_http_${response.status}`);
-    }
+    if (!response.ok) throw new Error(`${options.provider}_http_${response.status}`);
 
     const raw = await response.text();
     if (raw.length > 2_000_000) throw new Error("provider_response_too_large");
@@ -243,6 +238,101 @@ async function openAiRequest(options: {
       model: payload.model ?? options.model,
       content,
       usage: payload.usage ?? {},
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function cloudflareJsonMessages(
+  messages: Array<{ role: ChatRole; content: string }>,
+  jsonMode: boolean,
+): Array<{ role: ChatRole; content: string }> {
+  if (!jsonMode) return messages;
+
+  const instruction =
+    "Return only the requested valid JSON object. Do not use markdown fences, commentary, or prose outside the JSON.";
+  const next = messages.map((message) => ({ ...message }));
+  const systemIndex = next.findIndex((message) => message.role === "system");
+  if (systemIndex >= 0) {
+    next[systemIndex] = {
+      ...next[systemIndex],
+      content: `${next[systemIndex].content}\n\n${instruction}`,
+    };
+  } else {
+    next.unshift({ role: "system", content: instruction });
+  }
+  return next;
+}
+
+async function cloudflareRequest(options: {
+  accountId: string;
+  apiToken: string;
+  model: string;
+  messages: Array<{ role: ChatRole; content: string }>;
+  temperature: number;
+  maxTokens: number;
+  jsonMode: boolean;
+}): Promise<ProviderResult> {
+  const endpoint = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(options.accountId)}/ai/run/${options.model}`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 75_000);
+
+  try {
+    const request = async (): Promise<Response> =>
+      fetch(safeEndpoint(endpoint), {
+        method: "POST",
+        signal: controller.signal,
+        headers: {
+          Authorization: `Bearer ${options.apiToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          messages: cloudflareJsonMessages(options.messages, options.jsonMode),
+          temperature: options.temperature,
+          max_tokens: options.maxTokens,
+        }),
+      });
+
+    let response = await request();
+    if (response.status === 429) {
+      const retryAfter = Number(response.headers.get("retry-after") ?? "0");
+      const delayMs = Number.isFinite(retryAfter) && retryAfter > 0
+        ? Math.min(4_000, Math.max(750, retryAfter * 1_000))
+        : 1_250;
+      await sleep(delayMs);
+      response = await request();
+    }
+
+    if (!response.ok) throw new Error(`cloudflare_http_${response.status}`);
+
+    const payload = await response.json() as {
+      success?: boolean;
+      result?:
+        | string
+        | {
+            response?: string;
+            choices?: Array<{ message?: { content?: string } }>;
+            usage?: { prompt_tokens?: number; completion_tokens?: number };
+          };
+      usage?: { prompt_tokens?: number; completion_tokens?: number };
+    };
+
+    const result = payload.result;
+    const received =
+      typeof result === "string"
+        ? result.trim()
+        : result?.response?.trim() ?? result?.choices?.[0]?.message?.content?.trim() ?? "";
+    if (!received) throw new Error("cloudflare_empty_response");
+
+    const content = options.jsonMode ? normalizeJsonContent(received) : received;
+    if (!content) throw new Error("cloudflare_invalid_json");
+
+    return {
+      provider: "cloudflare",
+      model: options.model,
+      content,
+      usage: typeof result === "object" && result?.usage ? result.usage : payload.usage ?? {},
     };
   } finally {
     clearTimeout(timeout);
@@ -306,6 +396,7 @@ async function ollamaRequest(options: {
 }
 
 function buildAttempts(options: {
+  action: string;
   stage: "discovery" | "content";
   preferred?: ProviderName;
   messages: Array<{ role: ChatRole; content: string }>;
@@ -341,6 +432,7 @@ function buildAttempts(options: {
   }
 
   const groqKey = env("GROQ_API_KEY");
+  const groqAttempts: ProviderAttempt[] = [];
   if (groqKey) {
     const discoveryModel = env("GROQ_DISCOVERY_MODEL");
     const configuredModels = options.stage === "discovery"
@@ -349,12 +441,11 @@ function buildAttempts(options: {
           env("GROQ_PRIMARY_MODEL"),
           env("GROQ_SECOND_FALLBACK_MODEL"),
           discoveryModel,
-          env("GROQ_FIRST_FALLBACK_MODEL"),
         ];
     const models = [...new Set(configuredModels.filter((value): value is string => Boolean(value)))];
 
     for (const model of models) {
-      attempts.push({
+      groqAttempts.push({
         name: "groq",
         model,
         execute: () => openAiRequest({
@@ -371,19 +462,30 @@ function buildAttempts(options: {
   const cloudflareAccountId = env("CLOUDFLARE_ACCOUNT_ID");
   const cloudflareToken = env("CLOUDFLARE_API_TOKEN");
   const cloudflareModel = env("CLOUDFLARE_TEXT_MODEL") ?? "@cf/zai-org/glm-4.7-flash";
-  if (cloudflareAccountId && cloudflareToken) {
-    attempts.push({
-      name: "cloudflare",
-      model: cloudflareModel,
-      execute: () => openAiRequest({
-        ...shared,
-        provider: "cloudflare",
-        endpoint: `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(cloudflareAccountId)}/ai/v1/chat/completions`,
-        apiKey: cloudflareToken,
-        model: cloudflareModel,
-        supportsResponseFormat: false,
-      }),
-    });
+  const cloudflareAttempt: ProviderAttempt | null =
+    cloudflareAccountId && cloudflareToken
+      ? {
+          name: "cloudflare",
+          model: cloudflareModel,
+          execute: () => cloudflareRequest({
+            ...shared,
+            accountId: cloudflareAccountId,
+            apiToken: cloudflareToken,
+            model: cloudflareModel,
+          }),
+        }
+      : null;
+
+  // Banner briefs can be substantially longer than the lightweight discovery
+  // prompts. Try the preferred Groq model once, then immediately fall back to
+  // Cloudflare's long-context model before spending time on other Groq routes.
+  if (options.action === "banner" && options.stage === "content") {
+    if (groqAttempts[0]) attempts.push(groqAttempts[0]);
+    if (cloudflareAttempt) attempts.push(cloudflareAttempt);
+    attempts.push(...groqAttempts.slice(1));
+  } else {
+    attempts.push(...groqAttempts);
+    if (cloudflareAttempt) attempts.push(cloudflareAttempt);
   }
 
   const geminiKey = env("GEMINI_API_KEY");
@@ -521,6 +623,7 @@ Deno.serve(async (req: Request) => {
     const jsonMode = body.response_format?.type === "json_object";
 
     const attempts = buildAttempts({
+      action,
       stage,
       preferred: ["omniroute", "groq", "gemini", "cloudflare", "ollama"].includes(
         String(body.preferred_provider),
@@ -595,7 +698,7 @@ Deno.serve(async (req: Request) => {
     const failureSummary = providerFailures
       .map((failure) => `${failure.provider}:${failure.model}:${failure.code}`)
       .join("|")
-      .slice(0, 115);
+      .slice(-115);
 
     if (context && requestId && authorized) {
       await context.service.rpc("refund_generation", {
