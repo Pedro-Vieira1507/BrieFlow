@@ -40,3 +40,25 @@ test("premium product cleanup preserves photographed objects and blocks white-ba
   assert.match(product, /preserves every object that was actually/i);
   assert.match(product, /cropTransparentMargins/);
 });
+
+
+test("premium product rendering prefers Cloudflare BiRefNet segmentation", () => {
+  const product = source("../src/components/briefflow/PremiumProductImage.tsx");
+  const segmentClient = source("../src/lib/productSegment.ts");
+  const supabase = source("../src/lib/supabase.ts");
+  const draggable = source("../src/components/briefflow/DraggableImage.tsx");
+
+  assert.match(product, /segmentProductImage/);
+  assert.match(product, /segmentationFailureCache/);
+  assert.match(product, /applyLocalFallback/);
+  assert.match(segmentClient, /"product-segment"/);
+  assert.match(supabase, /"product-segment"/);
+  assert.match(draggable, /isSupabaseStorageAsset/);
+});
+
+test("Cloudflare segmentation worker uses foreground subject isolation", () => {
+  const worker = source("../cloudflare/product-segment-worker/src/index.ts");
+  assert.match(worker, /segment: "foreground"/);
+  assert.match(worker, /BRIEFLOW_SEGMENT_SECRET/);
+  assert.match(worker, /image\/webp/);
+});
