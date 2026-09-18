@@ -1,0 +1,6 @@
+name = "brieflow-product-segment"
+main = "src/index.ts"
+compatibility_date = "2026-09-18"
+
+[images]
+binding = "IMAGES"
