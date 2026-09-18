@@ -125,6 +125,7 @@ export function ChatInput({
         <div className="flex items-end gap-1.5">
           <input
             ref={fileInputRef}
+            suppressHydrationWarning
             type="file"
             accept="image/png,image/jpeg,image/webp"
             className="hidden"
