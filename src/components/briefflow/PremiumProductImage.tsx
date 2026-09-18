@@ -32,7 +32,7 @@ const MAX_PROCESSING_SIDE = 1800;
 function proxiedSource(src: string): string {
   if (!/^https?:\/\//i.test(src)) return src;
   if (src.includes("wsrv.nl")) return src;
-  return `https://wsrv.nl/?url=${encodeURIComponent(src)}&output=png&w=${MAX_PROCESSING_SIDE}&q=96`;
+  return `https://wsrv.nl/?url=${encodeURIComponent(src)}&output=png&w=${MAX_PROCESSING_SIDE}&q=98`;
 }
 
 function loadImage(src: string): Promise<HTMLImageElement> {
