@@ -27,7 +27,7 @@ type Component = {
 
 const cleanedImageCache = new Map<string, string>();
 const cleanupFailureCache = new Set<string>();
-const MAX_PROCESSING_SIDE = 1400;
+const MAX_PROCESSING_SIDE = 1800;
 
 function proxiedSource(src: string): string {
   if (!/^https?:\/\//i.test(src)) return src;
@@ -61,21 +61,29 @@ function luminance(r: number, g: number, b: number): number {
   return 0.299 * r + 0.587 * g + 0.114 * b;
 }
 
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? (sorted[middle - 1] + sorted[middle]) / 2
+    : sorted[middle];
+}
+
 function estimateEdgeBackground(
   data: Uint8ClampedArray,
   width: number,
   height: number,
 ): Rgb | null {
   const samples: Rgb[] = [];
-  const steps = 12;
-  const insetX = Math.max(1, Math.round(width * 0.012));
-  const insetY = Math.max(1, Math.round(height * 0.012));
+  const steps = 18;
+  const insetX = Math.max(1, Math.round(width * 0.01));
+  const insetY = Math.max(1, Math.round(height * 0.01));
 
   const read = (x: number, y: number) => {
     const offset = (y * width + x) * 4;
     const alpha = data[offset + 3];
     const rgb: Rgb = [data[offset], data[offset + 1], data[offset + 2]];
-    if (alpha > 220 && luminance(...rgb) > 205) samples.push(rgb);
+    if (alpha > 235 && luminance(...rgb) > 218) samples.push(rgb);
   };
 
   for (let step = 0; step <= steps; step += 1) {
@@ -93,169 +101,150 @@ function estimateEdgeBackground(
     read(width - insetX - 1, y);
   }
 
-  if (samples.length < 18) return null;
+  if (samples.length < 24) return null;
 
-  const sum = samples.reduce<Rgb>(
-    (acc, value) => [acc[0] + value[0], acc[1] + value[1], acc[2] + value[2]],
-    [0, 0, 0],
-  );
+  // Median is deliberately used instead of the mean so a photographed object
+  // touching one edge cannot pull the sampled background toward the product.
   const background: Rgb = [
-    sum[0] / samples.length,
-    sum[1] / samples.length,
-    sum[2] / samples.length,
+    median(samples.map((value) => value[0])),
+    median(samples.map((value) => value[1])),
+    median(samples.map((value) => value[2])),
   ];
-  const maxDeviation = Math.max(
-    ...samples.map(([r, g, b]) =>
+
+  const deviations = samples
+    .map(([r, g, b]) =>
       Math.sqrt(
         (r - background[0]) ** 2 +
           (g - background[1]) ** 2 +
           (b - background[2]) ** 2,
       ),
-    ),
-  );
+    )
+    .sort((a, b) => a - b);
+  const p90 = deviations[Math.floor((deviations.length - 1) * 0.9)] ?? Infinity;
 
-  // Only attempt automatic removal on a genuinely bright, uniform catalogue
-  // background. Anything ambiguous stays untouched rather than producing a
-  // damaged cutout.
-  return luminance(...background) >= 232 && maxDeviation <= 28
+  // Only remove a genuinely bright, uniform catalogue background. White
+  // laboratory products are common, so ambiguous sources stay untouched.
+  return luminance(...background) >= 238 && p90 <= 20
     ? background
     : null;
 }
 
-function findForegroundComponents(
-  data: Uint8ClampedArray,
+function touchesRemovedPixel(
   removed: Uint8Array,
-  width: number,
-  height: number,
-): { labels: Int32Array; components: Component[]; foregroundArea: number } {
-  const total = width * height;
-  const labels = new Int32Array(total);
-  labels.fill(-1);
-  const queue = new Int32Array(total);
-  const components: Component[] = [];
-  let foregroundArea = 0;
-
-  const isForeground = (index: number) =>
-    !removed[index] && data[index * 4 + 3] > 16;
-
-  for (let start = 0; start < total; start += 1) {
-    if (!isForeground(start) || labels[start] !== -1) continue;
-
-    const id = components.length;
-    let head = 0;
-    let tail = 0;
-    let area = 0;
-    let minX = width;
-    let minY = height;
-    let maxX = 0;
-    let maxY = 0;
-    labels[start] = id;
-    queue[tail++] = start;
-
-    while (head < tail) {
-      const index = queue[head++];
-      area += 1;
-      foregroundArea += 1;
-      const x = index % width;
-      const y = Math.floor(index / width);
-      minX = Math.min(minX, x);
-      minY = Math.min(minY, y);
-      maxX = Math.max(maxX, x);
-      maxY = Math.max(maxY, y);
-
-      const visit = (next: number) => {
-        if (
-          next < 0 ||
-          next >= total ||
-          labels[next] !== -1 ||
-          !isForeground(next)
-        ) {
-          return;
-        }
-        labels[next] = id;
-        queue[tail++] = next;
-      };
-
-      if (x > 0) visit(index - 1);
-      if (x + 1 < width) visit(index + 1);
-      if (y > 0) visit(index - width);
-      if (y + 1 < height) visit(index + width);
-    }
-
-    components.push({ id, area, minX, minY, maxX, maxY });
-  }
-
-  return { labels, components, foregroundArea };
-}
-
-function boxesNear(
-  candidate: Component,
-  hero: Component,
+  index: number,
   width: number,
   height: number,
 ): boolean {
-  const padX = width * 0.075;
-  const padY = height * 0.075;
-  return !(
-    candidate.maxX < hero.minX - padX ||
-    candidate.minX > hero.maxX + padX ||
-    candidate.maxY < hero.minY - padY ||
-    candidate.minY > hero.maxY + padY
+  const x = index % width;
+  const y = Math.floor(index / width);
+  return (
+    (x > 0 && removed[index - 1] === 1) ||
+    (x + 1 < width && removed[index + 1] === 1) ||
+    (y > 0 && removed[index - width] === 1) ||
+    (y + 1 < height && removed[index + width] === 1)
   );
 }
 
-function isolatePrimaryObject(
+function bestInteriorNeighbor(
+  data: Uint8ClampedArray,
+  removed: Uint8Array,
+  index: number,
+  width: number,
+  height: number,
+  background: Rgb,
+): number | null {
+  const x = index % width;
+  const y = Math.floor(index / width);
+  const candidates: number[] = [];
+  if (x > 0) candidates.push(index - 1);
+  if (x + 1 < width) candidates.push(index + 1);
+  if (y > 0) candidates.push(index - width);
+  if (y + 1 < height) candidates.push(index + width);
+
+  let best: number | null = null;
+  let bestDistance = -1;
+  for (const candidate of candidates) {
+    if (removed[candidate]) continue;
+    const offset = candidate * 4;
+    if (data[offset + 3] <= 32) continue;
+    const distance = pixelDistance(data, offset, background);
+    if (distance > bestDistance) {
+      best = candidate;
+      bestDistance = distance;
+    }
+  }
+  return best;
+}
+
+function refineCutoutEdge(
   data: Uint8ClampedArray,
   removed: Uint8Array,
   width: number,
   height: number,
-): void {
-  const { labels, components, foregroundArea } = findForegroundComponents(
-    data,
-    removed,
-    width,
-    height,
-  );
-  if (!foregroundArea || components.length < 2) return;
+  background: Rgb,
+): { edgePixels: number; riskyPixels: number } {
+  const total = width * height;
+  let edgePixels = 0;
+  let riskyPixels = 0;
 
-  const sorted = [...components].sort((a, b) => b.area - a.area);
-  const hero = sorted[0];
-  const second = sorted[1];
-  const heroCenterX = (hero.minX + hero.maxX) / 2;
-  const heroCenterY = (hero.minY + hero.maxY) / 2;
-  const secondCenterX = (second.minX + second.maxX) / 2;
-  const secondCenterY = (second.minY + second.maxY) / 2;
-  const centerDistance = Math.hypot(
-    heroCenterX - secondCenterX,
-    heroCenterY - secondCenterY,
-  );
+  for (let index = 0; index < total; index += 1) {
+    const offset = index * 4;
+    if (removed[index] || data[offset + 3] <= 32) continue;
+    if (!touchesRemovedPixel(removed, index, width, height)) continue;
 
-  const hasMultipleLargeObjects =
-    hero.area >= foregroundArea * 0.18 &&
-    second.area >= foregroundArea * 0.12 &&
-    second.area >= hero.area * 0.24 &&
-    centerDistance >= Math.min(width, height) * 0.18;
+    edgePixels += 1;
+    const lightness = luminance(
+      data[offset],
+      data[offset + 1],
+      data[offset + 2],
+    );
+    const distance = pixelDistance(data, offset, background);
 
-  if (!hasMultipleLargeObjects) return;
+    if (lightness > 232 && distance < 36) riskyPixels += 1;
 
-  // Product-page images frequently contain a contact sheet with several views.
-  // Keep the dominant view and nearby detached details/shadows; discard remote
-  // variants so the banner still has one commercial hero object.
-  const keepIds = new Set<number>([hero.id]);
-  for (const component of components) {
-    if (
-      component.id !== hero.id &&
-      component.area >= foregroundArea * 0.004 &&
-      boxesNear(component, hero, width, height)
-    ) {
-      keepIds.add(component.id);
+    // Feather only the one-pixel antialiasing fringe. Never reduce alpha
+    // enough to create the visibly "eaten" white-plastic edges.
+    if (lightness > 214 && distance >= 22 && distance < 42) {
+      const t = (distance - 22) / 20;
+      const alpha = Math.round(210 + Math.max(0, Math.min(1, t)) * 45);
+      data[offset + 3] = Math.min(data[offset + 3], alpha);
+    }
+
+    // Reduce white matte contamination by borrowing a little colour from the
+    // nearest interior foreground pixel instead of deleting more pixels.
+    if (lightness > 205 && distance < 58) {
+      const interior = bestInteriorNeighbor(
+        data,
+        removed,
+        index,
+        width,
+        height,
+        background,
+      );
+      if (interior !== null) {
+        const interiorOffset = interior * 4;
+        const interiorLightness = luminance(
+          data[interiorOffset],
+          data[interiorOffset + 1],
+          data[interiorOffset + 2],
+        );
+        const matteBias = Math.max(
+          0,
+          Math.min(0.28, (lightness - interiorLightness) / 180),
+        );
+        if (matteBias > 0.04) {
+          for (let channel = 0; channel < 3; channel += 1) {
+            data[offset + channel] = Math.round(
+              data[offset + channel] * (1 - matteBias) +
+                data[interiorOffset + channel] * matteBias,
+            );
+          }
+        }
+      }
     }
   }
 
-  for (let index = 0; index < labels.length; index += 1) {
-    const id = labels[index];
-    if (id >= 0 && !keepIds.has(id)) data[index * 4 + 3] = 0;
-  }
+  return { edgePixels, riskyPixels };
 }
 
 function cropTransparentMargins(
@@ -299,11 +288,11 @@ function cropTransparentMargins(
 }
 
 /**
- * Conservative catalogue-image cleanup. It only removes a bright, uniform
- * edge-connected background, isolates the dominant object when the source is a
- * multi-view contact sheet, and falls back to the untouched source whenever
- * confidence is low. This is intentionally safer than aggressive chroma-keying
- * for white laboratory equipment and other light products.
+ * Conservative catalogue-image cleanup. It removes only a bright, uniform
+ * edge-connected background and preserves every object that was actually
+ * photographed. When confidence is low it falls back to the untouched source.
+ * This is intentionally safer than aggressive chroma-keying for white
+ * laboratory equipment and other light products.
  */
 async function cleanupProductImage(src: string): Promise<string> {
   if (cleanedImageCache.has(src)) return cleanedImageCache.get(src)!;
@@ -347,8 +336,8 @@ async function cleanupProductImage(src: string): Promise<string> {
       if (data[offset + 3] === 0) return true;
       const lightness = luminance(data[offset], data[offset + 1], data[offset + 2]);
       return (
-        lightness >= Math.max(198, backgroundLuminance - 42) &&
-        pixelDistance(data, offset, background) <= 38
+        lightness >= Math.max(222, backgroundLuminance - 24) &&
+        pixelDistance(data, offset, background) <= 24
       );
     };
 
@@ -379,7 +368,7 @@ async function cleanupProductImage(src: string): Promise<string> {
     }
 
     const removedRatio = tail / total;
-    if (removedRatio < 0.1 || removedRatio > 0.84) {
+    if (removedRatio < 0.08 || removedRatio > 0.86) {
       cleanedImageCache.set(src, src);
       return src;
     }
@@ -390,34 +379,18 @@ async function cleanupProductImage(src: string): Promise<string> {
 
     isolatePrimaryObject(data, removed, width, height);
 
-    // Soften only bright pixels immediately touching removed background. This
-    // reduces white halos without erasing internal white product surfaces.
-    let riskyEdgePixels = 0;
-    let edgePixels = 0;
-    for (let index = 0; index < total; index += 1) {
-      const offset = index * 4;
-      if (data[offset + 3] <= 16) continue;
-      const x = index % width;
-      const y = Math.floor(index / width);
-      const touchesRemoved =
-        (x > 0 && removed[index - 1]) ||
-        (x + 1 < width && removed[index + 1]) ||
-        (y > 0 && removed[index - width]) ||
-        (y + 1 < height && removed[index + width]);
-      if (!touchesRemoved) continue;
-      edgePixels += 1;
-      const lightness = luminance(data[offset], data[offset + 1], data[offset + 2]);
-      if (lightness > 238) riskyEdgePixels += 1;
-      const distance = pixelDistance(data, offset, background);
-      if (lightness > 205 && distance < 58) {
-        const alpha = Math.round(Math.max(120, Math.min(255, ((distance - 28) / 30) * 255)));
-        data[offset + 3] = Math.min(data[offset + 3], alpha);
-      }
-    }
+    const { edgePixels, riskyPixels } = refineCutoutEdge(
+      data,
+      removed,
+      width,
+      height,
+      background,
+    );
 
-    // A mostly white foreground touching a white background is ambiguous. In
-    // that case the original is safer than a visibly chewed-up cutout.
-    if (edgePixels > 0 && riskyEdgePixels / edgePixels > 0.58) {
+    // If most surviving edge pixels remain practically indistinguishable from
+    // the white background, segmentation is too ambiguous to trust. Falling
+    // back to the untouched photo is preferable to a damaged product.
+    if (edgePixels > 24 && riskyPixels / edgePixels > 0.72) {
       cleanedImageCache.set(src, src);
       return src;
     }
