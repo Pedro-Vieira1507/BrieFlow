@@ -283,6 +283,8 @@ function cropTransparentMargins(
   output.height = Math.max(1, ey - sy);
   const outputContext = output.getContext("2d");
   if (!outputContext) return null;
+  outputContext.imageSmoothingEnabled = true;
+  outputContext.imageSmoothingQuality = "high";
   outputContext.drawImage(source, sx, sy, output.width, output.height, 0, 0, output.width, output.height);
   return output;
 }
@@ -314,6 +316,8 @@ async function cleanupProductImage(src: string): Promise<string> {
     canvas.height = height;
     const context = canvas.getContext("2d", { willReadFrequently: true });
     if (!context) throw new Error("canvas_context_unavailable");
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = "high";
 
     context.drawImage(image, 0, 0, width, height);
     const imageData = context.getImageData(0, 0, width, height);
@@ -376,10 +380,7 @@ async function cleanupProductImage(src: string): Promise<string> {
     for (let index = 0; index < total; index += 1) {
       if (removed[index]) data[index * 4 + 3] = 0;
     }
-
-    isolatePrimaryObject(data, removed, width, height);
-
-    const { edgePixels, riskyPixels } = refineCutoutEdge(
+const { edgePixels, riskyPixels } = refineCutoutEdge(
       data,
       removed,
       width,
