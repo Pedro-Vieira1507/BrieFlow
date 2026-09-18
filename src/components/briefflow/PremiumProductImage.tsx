@@ -16,15 +16,6 @@ interface Props {
 }
 
 type Rgb = [number, number, number];
-type Component = {
-  id: number;
-  area: number;
-  minX: number;
-  minY: number;
-  maxX: number;
-  maxY: number;
-};
-
 const cleanedImageCache = new Map<string, string>();
 const cleanupFailureCache = new Set<string>();
 const MAX_PROCESSING_SIDE = 1800;
