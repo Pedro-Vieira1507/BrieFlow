@@ -30,12 +30,12 @@ test("image render globally hardens background-only prompts", () => {
   assert.match(renderer, /no pasted photo rectangles/);
 });
 
-test("premium product cleanup is conservative and isolates contact-sheet variants", () => {
+test("premium product cleanup preserves photographed objects and blocks white-background bleed", () => {
   const product = source("../src/components/briefflow/PremiumProductImage.tsx");
   assert.match(product, /estimateEdgeBackground/);
-  assert.match(product, /isolatePrimaryObject/);
-  assert.match(product, /hasMultipleLargeObjects/);
-  assert.match(product, /riskyEdgePixels/);
-  assert.match(product, /mostly white foreground touching a white background is ambiguous/i);
+  assert.match(product, /localGradientMagnitude/);
+  assert.match(product, /gradient <= 26/);
+  assert.doesNotMatch(product, /isolatePrimaryObject/);
+  assert.match(product, /preserves every object that was actually/i);
   assert.match(product, /cropTransparentMargins/);
 });
