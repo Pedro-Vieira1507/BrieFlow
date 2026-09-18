@@ -24,6 +24,7 @@ import { parseStructuredJson } from "@/lib/structuredOutput";
 import { extractMaterialBriefing } from "@/lib/marketingPromptCore";
 import { isMaterialType } from "@/types/brief";
 import { requestAiCompletion, type AiProviderName } from "@/lib/aiClient";
+import { withAttachedProductImage } from "@/lib/productImageContext";
 
 // ============================================================
 // PROMPTS
@@ -84,6 +85,12 @@ ${formatSiteContextForAgent(brandContext.site)}
 
 === PLANO ATUAL ===
 ${currentPlan ? JSON.stringify(currentPlan) : "Nenhum plano ainda."}
+
+=== ESTADO DA FOTO REAL DO PRODUTO ===
+${currentPlan?.productImageUrl
+  ? `A FOTO REAL JÁ FOI RECEBIDA E ESTÁ DISPONÍVEL EM productImageUrl: ${currentPlan.productImageUrl}
+NÃO peça foto, imagem, anexo ou reenvio do produto. Considere esse requisito totalmente atendido e prossiga com o próximo passo estratégico ou com a geração solicitada.`
+  : "Nenhuma foto real de produto está registrada no plano atual."}
 
 === FORMATO DE RESPOSTA ===
 Responda SEMPRE em JSON válido com esta estrutura:
@@ -358,6 +365,21 @@ function normalizeBuilder(
       }));
     return { type: "campaign", campaignAssets };
   }
+
+  if (
+    builder.type === "discovery_plan" &&
+    builder.discoveryPlan &&
+    currentPlan?.productImageUrl
+  ) {
+    return {
+      ...builder,
+      discoveryPlan: withAttachedProductImage(
+        builder.discoveryPlan,
+        currentPlan.productImageUrl,
+      ),
+    };
+  }
+
   return builder;
 }
 
