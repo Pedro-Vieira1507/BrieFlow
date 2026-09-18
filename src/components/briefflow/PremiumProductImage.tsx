@@ -132,20 +132,21 @@ function estimateEdgeBackground(
     median(samples.map((value) => value[2])),
   ];
 
-  const deviations = samples
-    .map(([r, g, b]) =>
-      Math.sqrt(
-        (r - background[0]) ** 2 +
-          (g - background[1]) ** 2 +
-          (b - background[2]) ** 2,
-      ),
-    )
-    .sort((a, b) => a - b);
-  const p90 = deviations[Math.floor((deviations.length - 1) * 0.9)] ?? Infinity;
+  const deviations = samples.map(([r, g, b]) =>
+    Math.sqrt(
+      (r - background[0]) ** 2 +
+        (g - background[1]) ** 2 +
+        (b - background[2]) ** 2,
+    ),
+  );
+  const inlierRatio =
+    deviations.filter((distance) => distance <= 24).length / samples.length;
 
-  // Only remove a genuinely bright, uniform catalogue background. White
-  // laboratory products are common, so ambiguous sources stay untouched.
-  return luminance(...background) >= 238 && p90 <= 20
+  // A catalogue product may touch one or more image edges. Requiring nearly
+  // every border sample to match the background makes those perfectly valid
+  // photos fall back to the raw white rectangle. Instead, trust the dominant
+  // bright border cluster while still requiring a clear majority.
+  return luminance(...background) >= 235 && inlierRatio >= 0.58
     ? background
     : null;
 }
