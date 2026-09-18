@@ -52,6 +52,36 @@ function luminance(r: number, g: number, b: number): number {
   return 0.299 * r + 0.587 * g + 0.114 * b;
 }
 
+function localGradientMagnitude(
+  data: Uint8ClampedArray,
+  index: number,
+  width: number,
+  height: number,
+): number {
+  const x = index % width;
+  const y = Math.floor(index / width);
+  const offset = index * 4;
+  const current = luminance(data[offset], data[offset + 1], data[offset + 2]);
+
+  let maxDelta = 0;
+  const compare = (next: number) => {
+    const nextOffset = next * 4;
+    const nextLuminance = luminance(
+      data[nextOffset],
+      data[nextOffset + 1],
+      data[nextOffset + 2],
+    );
+    maxDelta = Math.max(maxDelta, Math.abs(current - nextLuminance));
+  };
+
+  if (x > 0) compare(index - 1);
+  if (x + 1 < width) compare(index + 1);
+  if (y > 0) compare(index - width);
+  if (y + 1 < height) compare(index + width);
+
+  return maxDelta;
+}
+
 function median(values: number[]): number {
   const sorted = [...values].sort((a, b) => a - b);
   const middle = Math.floor(sorted.length / 2);
@@ -173,25 +203,20 @@ function refineCutoutEdge(
   width: number,
   height: number,
   background: Rgb,
-): { edgePixels: number; riskyPixels: number } {
+): void {
   const total = width * height;
-  let edgePixels = 0;
-  let riskyPixels = 0;
 
   for (let index = 0; index < total; index += 1) {
     const offset = index * 4;
     if (removed[index] || data[offset + 3] <= 32) continue;
     if (!touchesRemovedPixel(removed, index, width, height)) continue;
 
-    edgePixels += 1;
     const lightness = luminance(
       data[offset],
       data[offset + 1],
       data[offset + 2],
     );
     const distance = pixelDistance(data, offset, background);
-
-    if (lightness > 232 && distance < 36) riskyPixels += 1;
 
     // Feather only the one-pixel antialiasing fringe. Never reduce alpha
     // enough to create the visibly "eaten" white-plastic edges.
@@ -235,7 +260,6 @@ function refineCutoutEdge(
     }
   }
 
-  return { edgePixels, riskyPixels };
 }
 
 function cropTransparentMargins(
@@ -330,9 +354,11 @@ async function cleanupProductImage(src: string): Promise<string> {
       const offset = index * 4;
       if (data[offset + 3] === 0) return true;
       const lightness = luminance(data[offset], data[offset + 1], data[offset + 2]);
+      const gradient = localGradientMagnitude(data, index, width, height);
       return (
-        lightness >= Math.max(222, backgroundLuminance - 24) &&
-        pixelDistance(data, offset, background) <= 24
+        lightness >= Math.max(216, backgroundLuminance - 30) &&
+        pixelDistance(data, offset, background) <= 30 &&
+        gradient <= 26
       );
     };
 
