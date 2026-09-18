@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
+import { segmentProductImage } from "@/lib/productSegment";
+
 import { DraggableImage } from "./DraggableImage";
 
 interface ProductImagePosition {
@@ -16,6 +18,8 @@ interface Props {
 }
 
 type Rgb = [number, number, number];
+const segmentedImageCache = new Map<string, string>();
+const segmentationFailureCache = new Set<string>();
 const cleanedImageCache = new Map<string, string>();
 const cleanupFailureCache = new Set<string>();
 const MAX_PROCESSING_SIDE = 1800;
@@ -449,20 +453,49 @@ export function PremiumProductImage({
 
   useEffect(() => {
     let active = true;
-    const existing = cleanedImageCache.get(src);
-    if (existing) {
-      setDisplaySrc(existing);
+    const controller = new AbortController();
+
+    const segmented = segmentedImageCache.get(src);
+    if (segmented) {
+      setDisplaySrc(segmented);
       return () => {
         active = false;
+        controller.abort();
       };
     }
 
-    void cleanupProductImage(src).then((nextSrc) => {
+    const local = cleanedImageCache.get(src);
+    if (local) {
+      setDisplaySrc(local);
+    }
+
+    const applyLocalFallback = async () => {
+      const nextSrc = await cleanupProductImage(src);
       if (active) setDisplaySrc(nextSrc);
-    });
+    };
+
+    if (segmentationFailureCache.has(src)) {
+      void applyLocalFallback();
+    } else {
+      void segmentProductImage(src, controller.signal)
+        .then(({ url }) => {
+          segmentedImageCache.set(src, url);
+          if (active) setDisplaySrc(url);
+        })
+        .catch((error) => {
+          if (controller.signal.aborted) return;
+          segmentationFailureCache.add(src);
+          console.warn(
+            "Segmentação Cloudflare indisponível; usando recorte local.",
+            error,
+          );
+          void applyLocalFallback();
+        });
+    }
 
     return () => {
       active = false;
+      controller.abort();
     };
   }, [src]);
 
