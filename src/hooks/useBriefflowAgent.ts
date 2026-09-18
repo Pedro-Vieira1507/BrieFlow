@@ -30,6 +30,10 @@ import type {
 } from "@/types/builder";
 import { analyzeImageWithVisionFn } from "@/lib/vision-api";
 import { mergeDetectedBriefContext } from "@/lib/discoveryContext";
+import {
+  asksForProductImage,
+  withAttachedProductImage,
+} from "@/lib/productImageContext";
 
 type CampaignChannel = MaterialType;
 
@@ -817,10 +821,26 @@ Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo terri
       setLoading(true);
 
       try {
+        const liveBeforeRequest = useBriefflowStore.getState();
+        const liveUploadedImage = liveBeforeRequest.uploadedImage;
+        const liveBuilderPlan = liveBeforeRequest.builder.discoveryPlan;
+        const mergedPlanForRequest =
+          discoveryPlanRef.current && liveBuilderPlan
+            ? { ...discoveryPlanRef.current, ...liveBuilderPlan }
+            : (liveBuilderPlan ?? discoveryPlanRef.current);
+        const requestPlan = withAttachedProductImage(
+          mergedPlanForRequest,
+          liveUploadedImage,
+        );
+
+        if (requestPlan) {
+          discoveryPlanRef.current = requestPlan;
+        }
+
         const response = await sendToOllama(
           history,
           brandContextRef.current,
-          discoveryPlanRef.current ?? builderRef.current.discoveryPlan,
+          requestPlan,
           {
             intent: "discovery",
             provider,
@@ -834,8 +854,15 @@ Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo terri
 
         useCreditsStore.getState().refresh();
 
+        const liveImageAfterResponse =
+          useBriefflowStore.getState().uploadedImage;
+        const responseChat =
+          liveImageAfterResponse && asksForProductImage(response.chat)
+            ? "Imagem real recebida e vinculada ao produto. Vou seguir usando essa foto como referência principal."
+            : response.chat;
+
         if (!isHiddenAction) {
-          updateMessage(assistantId, { content: response.chat });
+          updateMessage(assistantId, { content: responseChat });
         }
 
         const currentPhase = builderRef.current.type;
@@ -846,13 +873,16 @@ Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo terri
           response.builder.discoveryPlan
         ) {
           const discoveryPlan = response.builder.discoveryPlan;
-          discoveryPlanRef.current = mergeDetectedBriefContext(
-            {
-              ...discoveryPlanRef.current,
-              ...builderRef.current.discoveryPlan,
-              ...discoveryPlan,
-            },
-            response.detectedContext,
+          discoveryPlanRef.current = withAttachedProductImage(
+            mergeDetectedBriefContext(
+              {
+                ...discoveryPlanRef.current,
+                ...builderRef.current.discoveryPlan,
+                ...discoveryPlan,
+              },
+              response.detectedContext,
+            ),
+            liveImageAfterResponse,
           );
           if (!inCampaignPhase) {
             setBuilder({
@@ -861,9 +891,12 @@ Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo terri
             });
           }
         } else {
-          discoveryPlanRef.current = mergeDetectedBriefContext(
-            discoveryPlanRef.current ?? builderRef.current.discoveryPlan,
-            response.detectedContext,
+          discoveryPlanRef.current = withAttachedProductImage(
+            mergeDetectedBriefContext(
+              discoveryPlanRef.current ?? builderRef.current.discoveryPlan,
+              response.detectedContext,
+            ),
+            liveImageAfterResponse,
           );
         }
 
