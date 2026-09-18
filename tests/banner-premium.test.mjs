@@ -35,7 +35,22 @@ test("visual regeneration explicitly rejects collage-style backgrounds", () => {
 
 test("product integration removes only edge-connected light backgrounds", () => {
   assert.match(productSource, /estimateEdgeBackground/);
-  assert.match(productSource, /removed \/ total < 0\.12/);
+  assert.match(productSource, /removedRatio < 0\.08/);
+  assert.match(productSource, /pixelDistance\(data, offset, background\) <= 24/);
   assert.match(productSource, /data\[index \* 4 \+ 3\] = 0/);
+  assert.match(productSource, /refineCutoutEdge/);
+  assert.match(productSource, /alpha = Math\.round\(210/);
   assert.match(productSource, /cleanedImageCache/);
+});
+
+test("product cleanup preserves every photographed product view", () => {
+  assert.doesNotMatch(productSource, /isolatePrimaryObject/);
+  assert.doesNotMatch(productSource, /dominant object/);
+  assert.match(productSource, /preserves every object that was actually/);
+});
+
+test("ambiguous white-product masks fall back instead of damaging the product", () => {
+  assert.match(productSource, /riskyPixels \/ edgePixels > 0\.72/);
+  assert.match(productSource, /cleanedImageCache\.set\(src, src\)/);
+  assert.match(productSource, /imageSmoothingQuality = "high"/);
 });
