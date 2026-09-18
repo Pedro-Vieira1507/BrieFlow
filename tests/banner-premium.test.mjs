@@ -55,3 +55,10 @@ test("white-product cutouts use a gradient barrier instead of a raw-image fallba
   assert.match(productSource, /imageSmoothingQuality = "high"/);
   assert.doesNotMatch(productSource, /riskyPixels \/ edgePixels > 0\.72/);
 });
+
+test("white-background detection tolerates products touching image edges", () => {
+  assert.match(productSource, /inlierRatio/);
+  assert.match(productSource, /inlierRatio >= 0\.58/);
+  assert.match(productSource, /dominant bright border cluster/i);
+  assert.doesNotMatch(productSource, /p90 <= 20/);
+});
