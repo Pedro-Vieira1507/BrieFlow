@@ -42,7 +42,7 @@ export function DraggableImage({
       safeSrc.length > 100
         ? `${safeSrc.length}-${safeSrc.substring(safeSrc.length - 50)}`
         : safeSrc;
-    return `${type}-v11-${resolvedDefault.x}-${resolvedDefault.y}-${resolvedDefault.scale}-${resolvedWidth}-${hash}`;
+    return `${type}-v12-${resolvedDefault.x}-${resolvedDefault.y}-${resolvedDefault.scale}-${resolvedWidth}-${hash}`;
   }, [
     resolvedDefault.scale,
     resolvedDefault.x,
@@ -66,9 +66,13 @@ export function DraggableImage({
   const initialScale = useRef(1);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  const isSupabaseStorageAsset =
+    safeSrc.includes(".supabase.co/storage/v1/object/");
+
   const isExternal =
     !!safeSrc &&
     safeSrc.startsWith("http") &&
+    !isSupabaseStorageAsset &&
     !safeSrc.includes("wsrv.nl") &&
     !safeSrc.includes("picsum.photos");
 
