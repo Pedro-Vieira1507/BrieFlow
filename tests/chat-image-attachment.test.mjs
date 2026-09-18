@@ -60,12 +60,14 @@ test("discovery model cannot reopen an already satisfied image requirement", () 
   assert.match(ollama, /withAttachedProductImage/);
 });
 
-test("campaign generation prioritizes the image attached in chat", () => {
+test("campaign generation prioritizes the live image attached in chat", () => {
   const agent = source("../src/hooks/useBriefflowAgent.ts");
-  const uploaded = agent.indexOf("...(uploadedImage ? [uploadedImage] : [])");
+  const live = agent.indexOf("const liveUploadedImageForGeneration");
+  const uploaded = agent.indexOf("[liveUploadedImageForGeneration]");
   const scraped = agent.indexOf("...scrapedProductsRef.current");
 
-  assert.ok(uploaded >= 0, "uploadedImage must be part of the campaign image list");
+  assert.ok(live >= 0, "generation must read uploadedImage from live store state");
+  assert.ok(uploaded >= 0, "live uploaded image must enter the campaign image list");
   assert.ok(scraped >= 0, "scraped images must remain available as references");
   assert.ok(
     uploaded < scraped,
