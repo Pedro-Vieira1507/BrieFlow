@@ -192,6 +192,8 @@ export function useBriefflowAgent() {
 
       setLoading(true);
 
+      const liveUploadedImageForGeneration =
+        useBriefflowStore.getState().uploadedImage;
       const savedCampaignImages =
         builderRef.current.type === "campaign"
           ? (builderRef.current.campaignAssets ?? []).flatMap((asset) => [
@@ -200,7 +202,9 @@ export function useBriefflowAgent() {
             ])
           : [];
       const allImages = [
-        ...(uploadedImage ? [uploadedImage] : []),
+        ...(liveUploadedImageForGeneration
+          ? [liveUploadedImageForGeneration]
+          : []),
         ...scrapedProductsRef.current.map((p) => p.imageUrl).filter(Boolean),
         ...savedCampaignImages,
       ].filter(
@@ -640,7 +644,6 @@ Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo terri
       generateMaterial,
       updateCampaignAsset,
       updateMessage,
-      uploadedImage,
     ],
   );
 
@@ -888,6 +891,13 @@ Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo terri
             setBuilder({
               type: "discovery_plan",
               discoveryPlan: discoveryPlanRef.current,
+              productImageUrl:
+                liveImageAfterResponse ??
+                builderRef.current.productImageUrl ??
+                null,
+              productImages: liveImageAfterResponse
+                ? [liveImageAfterResponse]
+                : builderRef.current.productImages,
             });
           }
         } else {
