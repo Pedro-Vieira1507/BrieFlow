@@ -33,6 +33,7 @@ test("image render globally hardens background-only prompts", () => {
 test("premium product cleanup preserves photographed objects and blocks white-background bleed", () => {
   const product = source("../src/components/briefflow/PremiumProductImage.tsx");
   assert.match(product, /estimateEdgeBackground/);
+  assert.match(product, /inlierRatio >= 0\.58/);
   assert.match(product, /localGradientMagnitude/);
   assert.match(product, /gradient <= 26/);
   assert.doesNotMatch(product, /isolatePrimaryObject/);
