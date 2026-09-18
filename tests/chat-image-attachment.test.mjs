@@ -15,23 +15,49 @@ test("chat composer exposes a real product image attachment control", () => {
   assert.match(input, /Use a imagem anexada como foto real principal do produto/);
 });
 
-test("chat uploads become the primary campaign product image", () => {
+test("chat uploads become the authoritative campaign product image", () => {
   const panel = source("../src/components/briefflow/ChatPanel.tsx");
 
   assert.match(panel, /uploadCampaignAsset\(file, "products"\)/);
   assert.match(panel, /setUploadedImage\(url\)/);
   assert.match(panel, /productImageUrl: url/);
-  assert.match(panel, /new Set\(\[\s*url,/);
+  assert.match(panel, /productImages: \[url\]/);
+  assert.match(panel, /withAttachedProductImage/);
 });
 
-test("product image upload resolves image-related discovery gaps and continues automatically", () => {
+test("attached product image resolves broad image-request wording", () => {
+  const context = source("../src/lib/productImageContext.ts");
+
+  assert.match(context, /PRODUCT_IMAGE_REQUEST_PATTERN/);
+  assert.match(context, /microcentr/);
+  assert.match(context, /receber/);
+  assert.match(context, /missingInfo: asksForProductImage/);
+  assert.match(context, /Foto real do produto anexada pelo usuário/);
+});
+
+test("product image upload continues automatically when assistant requested it", () => {
   const panel = source("../src/components/briefflow/ChatPanel.tsx");
 
-  assert.match(panel, /PRODUCT_IMAGE_REQUEST_PATTERN/);
-  assert.match(panel, /missingInfo = PRODUCT_IMAGE_REQUEST_PATTERN\.test/);
-  assert.match(panel, /IMAGE_CONTEXT_MARKER/);
+  assert.match(panel, /asksForProductImage\(lastAssistantMessage\.content\)/);
   assert.match(panel, /Considere esse requisito atendido/);
   assert.match(panel, /onSend\(IMAGE_ATTACHED_CONTINUE_MESSAGE\)/);
+});
+
+test("discovery agent reads live uploaded image instead of a stale render closure", () => {
+  const agent = source("../src/hooks/useBriefflowAgent.ts");
+
+  assert.match(agent, /const liveBeforeRequest = useBriefflowStore\.getState\(\)/);
+  assert.match(agent, /const liveUploadedImage = liveBeforeRequest\.uploadedImage/);
+  assert.match(agent, /withAttachedProductImage\([\s\S]*mergedPlanForRequest/);
+  assert.match(agent, /liveImageAfterResponse/);
+});
+
+test("discovery model cannot reopen an already satisfied image requirement", () => {
+  const ollama = source("../src/lib/ollama.ts");
+
+  assert.match(ollama, /A FOTO REAL JÁ FOI RECEBIDA/);
+  assert.match(ollama, /NÃO peça foto, imagem, anexo ou reenvio/);
+  assert.match(ollama, /withAttachedProductImage/);
 });
 
 test("campaign generation prioritizes the image attached in chat", () => {
