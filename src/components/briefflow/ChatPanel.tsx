@@ -1,7 +1,10 @@
 // src/components/briefflow/ChatPanel.tsx
+import {
+  asksForProductImage,
+  withAttachedProductImage,
+} from "@/lib/productImageContext";
 import { uploadCampaignAsset } from "@/lib/supabase";
 import { useBriefflowStore } from "@/store/briefflow";
-import type { DiscoveryPlan } from "@/types/builder";
 import { ChatHeader } from "./chat/ChatHeader";
 import { ChatMessages } from "./chat/ChatMessages";
 import { ChatInput } from "./chat/ChatInput";
@@ -11,36 +14,8 @@ interface Props {
   onSend: (text: string) => void;
 }
 
-const PRODUCT_IMAGE_REQUEST_PATTERN =
-  /(?:(?:foto|imagem)(?:\s+real|\s+oficial)?(?:\s+do)?\s+(?:produto|equipamento)|(?:produto|equipamento).{0,80}(?:foto|imagem)|(?:envie|enviar|anexe|anexar|mande|mandar).{0,100}(?:foto|imagem))/i;
-
-const IMAGE_CONTEXT_MARKER =
-  "Foto real do produto anexada pelo usuário e disponível como imagem principal no BrieFlow.";
-
 const IMAGE_ATTACHED_CONTINUE_MESSAGE =
   "A foto real do produto já foi anexada e está disponível como imagem principal no BrieFlow. Considere esse requisito atendido e continue agora com a solicitação anterior, sem pedir a imagem novamente.";
-
-function markProductImageAvailable(
-  plan: DiscoveryPlan | undefined,
-  imageUrl: string,
-): DiscoveryPlan | undefined {
-  if (!plan) return plan;
-
-  const detectedContext = plan.detectedContext?.includes(IMAGE_CONTEXT_MARKER)
-    ? plan.detectedContext
-    : [plan.detectedContext, IMAGE_CONTEXT_MARKER].filter(Boolean).join("\n");
-
-  const missingInfo = PRODUCT_IMAGE_REQUEST_PATTERN.test(plan.missingInfo ?? "")
-    ? ""
-    : plan.missingInfo;
-
-  return {
-    ...plan,
-    productImageUrl: imageUrl,
-    detectedContext,
-    missingInfo,
-  };
-}
 
 export function ChatPanel({ onSend }: Props) {
   const {
@@ -78,7 +53,7 @@ export function ChatPanel({ onSend }: Props) {
     setUploadedImage(url);
 
     setBuilder((current) => {
-      const discoveryPlan = markProductImageAvailable(
+      const discoveryPlan = withAttachedProductImage(
         current.discoveryPlan,
         url,
       );
@@ -115,7 +90,7 @@ export function ChatPanel({ onSend }: Props) {
 
     if (
       lastAssistantMessage &&
-      PRODUCT_IMAGE_REQUEST_PATTERN.test(lastAssistantMessage.content)
+      asksForProductImage(lastAssistantMessage.content)
     ) {
       // The upload itself answers the assistant's pending question. Continue
       // automatically so users never get stuck in an "attach, then explain
