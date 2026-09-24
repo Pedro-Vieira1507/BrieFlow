@@ -237,10 +237,20 @@ async function exportSlides(
     }
   }
 
-  await pptx.writeFile({
-    fileName: `${exportBaseName(document, brandName)}.pptx`,
+  const raw = await pptx.write({
+    outputType: "arraybuffer",
     compression: true,
   });
+  if (!(raw instanceof ArrayBuffer))
+    throw new Error("Não foi possível preparar a apresentação.");
+  const { normalizePptxPackage } = await import("./pptxPackage");
+  const file = await normalizePptxPackage(raw);
+  downloadBlob(
+    new Blob([file], {
+      type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    }),
+    `${exportBaseName(document, brandName)}.pptx`,
+  );
 }
 
 async function exportTechnicalSheetPdf(

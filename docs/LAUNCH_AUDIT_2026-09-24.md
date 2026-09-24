@@ -18,7 +18,7 @@ Frontend da PR #20 integrado em `main` e implantado na Vercel, commit `f3d06f9`.
 
 ## Evidências
 
-- `npm run validate`: 112 testes aprovados; formatação, lint, TypeScript e build aprovados. CI e CodeQL da PR #20 aprovados.
+- `npm run validate`: 114 testes aprovados; formatação, lint, TypeScript e build aprovados. CI e CodeQL das PRs #20 e #21 aprovados.
 - Instalação limpa com npm 10.9.8 (mesma versão do CI) aprovada após completar o lockfile com o peer opcional `lru-cache` do Nitro. A validação completa passou novamente após a instalação.
 - `npm audit --audit-level=high`: zero vulnerabilidades.
 - Deno: verificação das nove Edge Functions com dependências locais.
@@ -30,6 +30,7 @@ Frontend da PR #20 integrado em `main` e implantado na Vercel, commit `f3d06f9`.
 - Verificação pública após o deploy: 10/10 itens aprovados. HTTPS, cabeçalhos de segurança, CORS permitido/rejeitado e rejeição de assinatura Stripe inválida passaram.
 - Stripe conectada em modo de teste; endpoint `we_1UJC3qPDxDpQuWa8mDTm8E8p` registrado. Evento sintético assinado foi aceito com HTTP 200 e a reentrega identificada como duplicada, sem alteração de assinatura ou saldo. Isso verifica HMAC e idempotência, não um pagamento real.
 - Inspeção do banner mobile encontrou recorte lateral que escondia o produto. Ajuste complementar centraliza o enquadramento e usa contraste vertical; o subtítulo distribui melhor as linhas. Revisão editorial passa a sinalizar repetição entre subtítulo e texto de apoio. Notificações ficam abaixo dos controles do cabeçalho.
+- PowerPoint: apresentação gerada e exportada com oito slides, renderizados para inspeção. O pacote do PptxGenJS 4.0.1 declarava sete masters inexistentes; a exportação agora remove apenas essas declarações inválidas. Teste preserva todos os demais arquivos internos byte a byte. Validador estrutural: zero problemas após a normalização.
 
 ## Pendências para liberação
 
