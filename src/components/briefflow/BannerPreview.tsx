@@ -503,11 +503,13 @@ export function BannerPreview({
   };
 
   const fallbackBackground = `linear-gradient(118deg, ${secondaryColor} 0%, ${themeColor} 64%, ${secondaryColor} 118%)`;
-  const textOverlay = effectiveCentered
-    ? "linear-gradient(90deg, rgba(3,7,18,.64) 0%, rgba(3,7,18,.42) 50%, rgba(3,7,18,.64) 100%)"
-    : effectiveReverse
-      ? "linear-gradient(270deg, rgba(3,7,18,.92) 0%, rgba(3,7,18,.76) 39%, rgba(3,7,18,.18) 67%, rgba(3,7,18,0) 100%)"
-      : "linear-gradient(90deg, rgba(3,7,18,.92) 0%, rgba(3,7,18,.76) 39%, rgba(3,7,18,.18) 67%, rgba(3,7,18,0) 100%)";
+  const textOverlay = isMobileLayout
+    ? "linear-gradient(180deg, rgba(3,7,18,.88) 0%, rgba(3,7,18,.68) 36%, rgba(3,7,18,.12) 62%, rgba(3,7,18,0) 100%)"
+    : effectiveCentered
+      ? "linear-gradient(90deg, rgba(3,7,18,.64) 0%, rgba(3,7,18,.42) 50%, rgba(3,7,18,.64) 100%)"
+      : effectiveReverse
+        ? "linear-gradient(270deg, rgba(3,7,18,.92) 0%, rgba(3,7,18,.76) 39%, rgba(3,7,18,.18) 67%, rgba(3,7,18,0) 100%)"
+        : "linear-gradient(90deg, rgba(3,7,18,.92) 0%, rgba(3,7,18,.76) 39%, rgba(3,7,18,.18) 67%, rgba(3,7,18,0) 100%)";
   const ctaBackground = themeColor;
   const ctaTextColor = contrastText(ctaBackground);
 
@@ -565,11 +567,12 @@ export function BannerPreview({
                   crossOrigin="anonymous"
                   className="absolute inset-0 z-0 h-full w-full object-cover"
                   style={{
-                    objectPosition: effectiveCentered
-                      ? "center"
-                      : effectiveReverse
-                        ? "left center"
-                        : "right center",
+                    objectPosition:
+                      isMobileLayout || effectiveCentered
+                        ? "center"
+                        : effectiveReverse
+                          ? "left center"
+                          : "right center",
                   }}
                 />
               )}
@@ -706,7 +709,7 @@ export function BannerPreview({
                       multiline
                       value={subtitle}
                       onChange={(value) => patchState({ subtitle: value })}
-                      className="banner-subtitle-text mt-5 max-w-[94%] font-semibold leading-[1.25]"
+                      className="banner-subtitle-text mt-5 max-w-[94%] text-balance font-semibold leading-[1.25]"
                       style={{
                         color: textColor,
                         fontSize: fontSizes.subtitle,

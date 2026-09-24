@@ -17,6 +17,22 @@ const codes = (value, input = brief) =>
   reviewEditorialContent("banner", value, input).map((issue) => issue.code);
 test("accepts a concrete headline without inventing a quality score", () =>
   assert.deepEqual(codes(content), []));
+test("flags repeated banner support without penalizing complementary facts", () => {
+  assert.ok(
+    codes({
+      ...content,
+      subtitle: "Café brasileiro em grãos, 250 g",
+      body: "café brasileiro em grãos, pacote de 250 g",
+    }).includes("repeated_supporting_copy"),
+  );
+  assert.ok(
+    !codes({
+      ...content,
+      subtitle: "Café brasileiro em grãos, 250 g",
+      body: "Conheça a origem e escolha seu preparo.",
+    }).includes("repeated_supporting_copy"),
+  );
+});
 test("requires quantity evidence with exact value and unit", () => {
   assert.ok(
     codes({ ...content, subtitle: "50% de desconto em 500 g" }).includes(

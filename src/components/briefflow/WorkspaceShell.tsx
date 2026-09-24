@@ -201,7 +201,13 @@ export function WorkspaceShell() {
           />
         ) : null}
       </Suspense>
-      <Toaster richColors position="top-right" theme="dark" />
+      <Toaster
+        richColors
+        position="top-right"
+        offset={{ top: 80 }}
+        mobileOffset={{ top: 80 }}
+        theme="dark"
+      />
     </main>
   );
 }
