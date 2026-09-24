@@ -21,6 +21,25 @@ const GENERIC_COPY =
 const PLACEHOLDER =
   /(?:\[(?:inserir|nome|produto|marca|link)[^\]]*\]|lorem ipsum|sua marca|nao informad[oa]|sem oferta definida)/;
 
+function repeatsSupportingCopy(subtitle: string, body: string): boolean {
+  const words = (value: string) =>
+    new Set(
+      normalize(value)
+        .replace(/[^a-z0-9\s]/g, " ")
+        .split(/\s+/)
+        .filter(
+          (word) =>
+            word.length > 2 &&
+            !["com", "para", "por", "uma", "seu", "sua"].includes(word),
+        ),
+    );
+  const first = words(subtitle);
+  const second = words(body);
+  if (Math.min(first.size, second.size) < 4) return false;
+  const shared = [...first].filter((word) => second.has(word)).length;
+  return shared / new Set([...first, ...second]).size >= 0.8;
+}
+
 /** Checks visible copy only. This is a review aid, never a quality score or factual certification. */
 export function reviewEditorialContent(
   material: MaterialType,
@@ -81,6 +100,16 @@ export function reviewEditorialContent(
       severity: "attention",
       message:
         "Troque a frase genérica por uma ideia ligada ao produto e ao público.",
+    });
+  if (
+    material === "banner" &&
+    repeatsSupportingCopy(content.subtitle || "", content.body || "")
+  )
+    issues.push({
+      code: "repeated_supporting_copy",
+      severity: "attention",
+      message:
+        "O subtítulo e o texto de apoio repetem a mesma informação. Enxugue ou acrescente um detalhe confirmado.",
     });
   if (findUnsupportedClaims(visibleText, brief).length)
     issues.push({
