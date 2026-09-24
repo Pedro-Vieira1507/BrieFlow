@@ -12,6 +12,7 @@ export type ServiceClient = SupabaseClient<Database>;
 export interface RequestContext {
   user: User;
   service: ServiceClient;
+  token: string;
 }
 
 function normalizeConfiguredOrigin(value: string): string | null {
@@ -143,7 +144,7 @@ export async function authenticate(
   const service = createServiceClient();
   const { data, error } = await service.auth.getUser(token);
   if (error || !data.user) return null;
-  return { user: data.user, service };
+  return { user: data.user, service, token };
 }
 
 export function createServiceClient(): ServiceClient {

@@ -23,7 +23,7 @@ test("plans unlock formats cumulatively without exposing premium formats for fre
 
 test("every plan and format has positive production limits", () => {
   for (const plan of Object.values(PLAN_CATALOG)) {
-    assert.ok(plan.monthlyCredits > 0);
+    assert.ok(plan.dailyCredits > 0);
     assert.ok(plan.maxMembers > 0);
     assert.ok(plan.maxSavedAssets > 0);
   }

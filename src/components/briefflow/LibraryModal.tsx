@@ -41,7 +41,13 @@ import { getBuilderCampaignBrandName } from "@/lib/campaignGeneration";
 import type { BuilderState, CampaignAsset } from "@/types/builder";
 
 export function LibraryModal() {
-  const { libraryOpen, setLibraryOpen, setBuilder, user } = useBriefflowStore();
+  const {
+    libraryOpen,
+    setLibraryOpen,
+    setBuilder,
+    user,
+    setActiveLibraryAssetId,
+  } = useBriefflowStore();
   const [items, setItems] = useState<SavedLibraryAsset[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -162,8 +168,9 @@ export function LibraryModal() {
     }
   };
 
-  const handleApplyToCanvas = (state: BuilderState) => {
-    setBuilder(state);
+  const handleApplyToCanvas = (item: SavedLibraryAsset) => {
+    setBuilder(item.content);
+    setActiveLibraryAssetId(item.id);
     toast.success("Campanha carregada no Canvas com sucesso!");
     setLibraryOpen(false);
   };
@@ -324,7 +331,7 @@ export function LibraryModal() {
                       </div>
                       <Button
                         size="sm"
-                        onClick={() => handleApplyToCanvas(selectedState)}
+                        onClick={() => handleApplyToCanvas(selectedItem)}
                         className="w-full rounded-xl bg-brand text-xs font-semibold text-brand-fg shadow-[var(--shadow-brand)] transition-all duration-200 hover:brightness-110 active:scale-[0.98] sm:w-auto"
                       >
                         Carregar no Canvas{" "}

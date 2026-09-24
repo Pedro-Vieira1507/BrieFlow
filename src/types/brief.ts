@@ -197,7 +197,7 @@ export function toMarketingBrief(input: {
       clean(brandContext.brandName) ??
       clean(brandContext.site?.brandName) ??
       "Sua Marca",
-    objective: clean(plan?.objective) ?? clean(plan?.proposedStrategy),
+    objective: clean(plan?.objective),
     context: clean(plan?.detectedContext),
     strategy: clean(plan?.proposedStrategy),
     missingInfo: clean(plan?.missingInfo),

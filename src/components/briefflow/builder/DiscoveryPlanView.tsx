@@ -44,8 +44,8 @@ export function DiscoveryPlanView({
           Revise a direção da campanha
         </h2>
         <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-fg-secondary">
-          Clique em qualquer texto para ajustar. A geração usa exatamente as
-          informações aprovadas aqui.
+          Clique nos textos para ajustar os fatos e a direção criativa. Quanto
+          mais específico o briefing, mais relevante a campanha.
         </p>
       </div>
 
@@ -65,19 +65,38 @@ export function DiscoveryPlanView({
               onChange={(v) => handleEdit("brandName", v)}
               className="text-xl font-bold text-fg-primary"
             />
-            {plan.product && (
+            {
               <Editable
                 as="p"
-                value={plan.product}
+                value={plan.product || "Descreva o produto ou serviço"}
                 onChange={(v) => handleEdit("product", v)}
                 className="text-sm text-fg-secondary mt-1"
               />
-            )}
+            }
           </div>
         </div>
 
         {/* Corpo do Card com Grid */}
         <div className="grid grid-cols-1 gap-5 p-5 sm:p-6 md:grid-cols-2 md:gap-6">
+          <div className="space-y-2 md:col-span-2">
+            <div className="flex items-center gap-2 text-fg-muted">
+              <Target className="size-4" />
+              <span className="text-[11px] font-bold uppercase tracking-widest">
+                Objetivo da campanha
+              </span>
+            </div>
+            <div className="rounded-xl border border-border-subtle bg-surface-2/45 p-3.5">
+              <Editable
+                as="p"
+                multiline
+                value={
+                  plan.objective || "Defina a ação que você quer do público"
+                }
+                onChange={(value) => handleEdit("objective", value)}
+                className="text-sm leading-relaxed text-fg-primary"
+              />
+            </div>
+          </div>
           <div className="space-y-2">
             <div className="flex items-center gap-2 text-fg-muted mb-1">
               <Users className="size-4" />
@@ -100,7 +119,7 @@ export function DiscoveryPlanView({
             <div className="flex items-center gap-2 text-fg-muted mb-1">
               <Tag className="size-4" />
               <span className="text-[11px] font-bold uppercase tracking-widest">
-                Oferta Especial
+                Oferta confirmada · opcional
               </span>
             </div>
             <div className="rounded-xl border border-brand/20 bg-brand/5 p-3.5 transition hover:border-brand/35">

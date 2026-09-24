@@ -28,7 +28,7 @@ export function CreditsBar({ className }: Props) {
             isLow ? "text-rose-400 animate-pulse" : "text-fg-primary",
           )}
         >
-          {plan.creditsRemaining} / {plan.creditsMonthly}
+          {plan.creditsRemaining} / {plan.creditsDaily}
         </span>
       </div>
       <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-surface-3 shadow-inner">
@@ -36,7 +36,7 @@ export function CreditsBar({ className }: Props) {
           role="progressbar"
           aria-label="Créditos disponíveis"
           aria-valuemin={0}
-          aria-valuemax={plan.creditsMonthly}
+          aria-valuemax={plan.creditsDaily}
           aria-valuenow={plan.creditsRemaining}
           className={cn(
             "h-full transition-all duration-1000 ease-out", // UX: Transição mais orgânica

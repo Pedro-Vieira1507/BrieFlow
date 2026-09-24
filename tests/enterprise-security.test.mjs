@@ -40,7 +40,7 @@ test("AI proxy authorizes atomically, falls back server-side and refunds failure
 test("database migration enforces personal library RLS and private media", async () => {
   const migration = await readFile(
     new URL(
-      "../supabase/migrations/202609010001_enterprise_foundation.sql",
+      "../supabase/migrations/20260903110835_enterprise_foundation.sql",
       import.meta.url,
     ),
     "utf8",
@@ -48,19 +48,19 @@ test("database migration enforces personal library RLS and private media", async
 
   assert.match(
     migration,
-    /create policy assets_select_own[\s\S]*user_id = auth\.uid\(\)/,
+    /create policy assets_select_own[\s\S]*user_id = \(select auth\.uid\(\)\)/,
   );
   assert.match(
     migration,
-    /create policy assets_delete_own[\s\S]*user_id = auth\.uid\(\)/,
+    /create policy assets_delete_own[\s\S]*user_id = \(select auth\.uid\(\)\)/,
   );
   assert.match(migration, /'campaign-assets', 'campaign-assets', false/);
   assert.match(
     migration,
-    /storage\.foldername\(name\)\)\[1\] = auth\.uid\(\)::text/,
+    /storage\.foldername\(name\)\)\[1\] = \(select auth\.uid\(\)\)::text/,
   );
   assert.match(migration, /campaign_assets_select_legacy_reference/);
-  assert.match(migration, /owner_id = auth\.uid\(\)::text/);
+  assert.match(migration, /owner_id = \(select auth\.uid\(\)\)::text/);
   assert.match(migration, /unique \(user_id, request_id, entry_type\)/);
   assert.match(migration, /false, 'duplicate_request'/);
   assert.match(migration, /false, 'membership_inactive'/);
@@ -143,7 +143,7 @@ test("image rendering is bound to one paid generation request", async () => {
     ),
     readFile(
       new URL(
-        "../supabase/migrations/20260918193144_authorize_visual_render.sql",
+        "../supabase/migrations/20260924111857_authorize_visual_render.sql",
         import.meta.url,
       ),
       "utf8",
@@ -201,7 +201,7 @@ test("billing webhooks are atomically claimed and ignore older signed events", a
     ),
     readFile(
       new URL(
-        "../supabase/migrations/202609010001_enterprise_foundation.sql",
+        "../supabase/migrations/20260903110835_enterprise_foundation.sql",
         import.meta.url,
       ),
       "utf8",

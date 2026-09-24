@@ -16,6 +16,39 @@ const baseBrief = {
   context: "Curadoria mensal, origem identificada e guia simples de preparo",
 };
 
+test("does not invent equipment requirements from a home-use audience", () => {
+  assert.ok(
+    findUnsupportedClaims("Não precisa de equipamento especial.", {
+      ...baseBrief,
+      product: "Café em grãos, pacote de 250 g",
+      offer: "",
+    }).includes("no_equipment_needed"),
+  );
+  assert.ok(
+    !findUnsupportedClaims("Não precisa de equipamento especial.", {
+      ...baseBrief,
+      productDescription: "Não precisa de equipamento especial.",
+    }).includes("no_equipment_needed"),
+  );
+});
+
+test("tone, audience and objectives do not substantiate factual claims", () => {
+  assert.ok(
+    findUnsupportedClaims("Produto certificado e exclusivo.", {
+      ...baseBrief,
+      tone: "Exclusivo",
+      audience: "Profissionais certificados",
+      objective: "Promover produto certificado",
+    }).includes("certified"),
+  );
+  assert.ok(
+    findUnsupportedClaims("Produto exclusivo.", {
+      ...baseBrief,
+      tone: "Exclusivo",
+    }).includes("exclusive"),
+  );
+});
+
 test("removes unsupported commercial mechanics from optional email fields", () => {
   const sanitized = sanitizeGeneratedCopy(
     "email",

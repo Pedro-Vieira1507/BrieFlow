@@ -7,8 +7,8 @@ import {
 import type { BuilderState } from "@/types/builder";
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as
-  string | undefined;
+const supabaseAnonKey = (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
+  import.meta.env.VITE_SUPABASE_ANON_KEY) as string | undefined;
 
 export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
 
@@ -110,7 +110,7 @@ export async function invokeEdgeFunction<T>(
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
       apikey: supabaseAnonKey,
-      "X-Client-Version": "brieflow-web/3",
+      "X-Client-Info": "brieflow-web/3",
     },
     body: JSON.stringify(body),
     signal,
@@ -151,9 +151,16 @@ function normalizeAssetName(name: string, state: BuilderState): string {
 export async function saveAssetToLibrary(
   name: string,
   state: BuilderState,
+  existingAssetId?: string | null,
+  expectedUserId?: string,
 ): Promise<SavedLibraryAsset> {
   if (!supabase) throw new Error("Supabase não configurado.");
   const user = await requireUser();
+  if (expectedUserId && user.id !== expectedUserId) {
+    throw new Error(
+      "A sessão mudou. Abra a campanha novamente antes de salvar.",
+    );
+  }
 
   const serialized = JSON.stringify(state);
   if (new TextEncoder().encode(serialized).byteLength > 2_000_000) {
@@ -162,17 +169,20 @@ export async function saveAssetToLibrary(
     );
   }
 
-  const { data, error } = await supabase
-    .from("assets")
-    .insert({
-      user_id: user.id,
-      name: normalizeAssetName(name, state),
-      type: state.type,
-      content: state,
-      status: "draft",
-    })
-    .select()
-    .single();
+  const payload = {
+    name: normalizeAssetName(name, state),
+    type: state.type,
+    content: state,
+    status: "draft",
+  };
+  const query = existingAssetId
+    ? supabase
+        .from("assets")
+        .update(payload)
+        .eq("id", existingAssetId)
+        .eq("user_id", user.id)
+    : supabase.from("assets").insert({ user_id: user.id, ...payload });
+  const { data, error } = await query.select().single();
 
   if (error) {
     if (error.message.includes("asset_limit_reached")) {
@@ -273,7 +283,7 @@ async function refreshPrivateUrls(
 
 const SAVED_ASSET_COLUMNS =
   "id,user_id,organization_id,name,type,content,status,created_at,updated_at";
-const DEFAULT_LIBRARY_PAGE_SIZE = 50;
+const DEFAULT_LIBRARY_PAGE_SIZE = 12;
 const MAX_LIBRARY_PAGE_SIZE = 100;
 
 function normalizeAssetsCursor(cursor: SavedAssetsCursor): SavedAssetsCursor {

@@ -28,6 +28,9 @@ interface BriefflowState {
   uploadedImage: string | null;
   authOpen: boolean;
   libraryOpen: boolean;
+  activeLibraryAssetId: string | null;
+  workspaceVersion: number;
+  setActiveLibraryAssetId: (id: string | null) => void;
   // actions
   setMessages: (
     updater: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[]),
@@ -78,6 +81,13 @@ export const useBriefflowStore = create<BriefflowState>((set) => ({
   uploadedImage: null,
   authOpen: false,
   libraryOpen: false,
+  activeLibraryAssetId: null,
+  workspaceVersion: 0,
+  setActiveLibraryAssetId: (activeLibraryAssetId) =>
+    set((state) => ({
+      activeLibraryAssetId,
+      workspaceVersion: state.workspaceVersion + 1,
+    })),
   setMessages: (updater) =>
     set((s) => ({
       messages: typeof updater === "function" ? updater(s.messages) : updater,
@@ -151,10 +161,16 @@ export const useBriefflowStore = create<BriefflowState>((set) => ({
       const mustClearPrivateWorkspace = Boolean(
         previousUserId && previousUserId !== nextUserId,
       );
-      if (!mustClearPrivateWorkspace) return { user };
+      if (!mustClearPrivateWorkspace)
+        return {
+          user,
+          workspaceVersion:
+            state.workspaceVersion + (previousUserId !== nextUserId ? 1 : 0),
+        };
 
       return {
         user,
+        workspaceVersion: state.workspaceVersion + 1,
         messages: [],
         builder: { type: "none" },
         brandContext: initialBrand,
@@ -165,13 +181,15 @@ export const useBriefflowStore = create<BriefflowState>((set) => ({
         uploadedImage: null,
         authOpen: false,
         libraryOpen: false,
+        activeLibraryAssetId: null,
       };
     }),
   setUploadedImage: (img) => set({ uploadedImage: img }),
   setAuthOpen: (authOpen) => set({ authOpen }),
   setLibraryOpen: (libraryOpen) => set({ libraryOpen }),
   reset: () =>
-    set({
+    set((state) => ({
+      workspaceVersion: state.workspaceVersion + 1,
       messages: [],
       builder: { type: "none" },
       brandContext: initialBrand,
@@ -182,5 +200,6 @@ export const useBriefflowStore = create<BriefflowState>((set) => ({
       uploadedImage: null,
       authOpen: false,
       libraryOpen: false,
-    }),
+      activeLibraryAssetId: null,
+    })),
 }));

@@ -247,7 +247,7 @@ export function describeAiError(error: unknown): string {
       case "UNAUTHORIZED":
         return "Sua sessão expirou. Entre novamente para continuar.";
       default:
-        return "Não consegui falar com a IA agora (nuvem e modelo local indisponíveis).";
+        return "A geração está temporariamente indisponível. Aguarde um momento e tente novamente apenas esta peça.";
     }
   }
   return error instanceof Error ? error.message : "Erro inesperado na geração.";
@@ -277,7 +277,10 @@ export function useGenerateMaterials(): UseGenerateMaterialsResult {
       images,
       provider = "omniroute",
     }: GenerateMaterialParams<T>): Promise<GeneratedMaterial<T>> => {
-      const controller = controllerRef.current ?? new AbortController();
+      const controller =
+        controllerRef.current && !controllerRef.current.signal.aborted
+          ? controllerRef.current
+          : new AbortController();
       controllerRef.current = controller;
 
       setIsGenerating(true);
@@ -363,11 +366,13 @@ export function useGenerateMaterials(): UseGenerateMaterialsResult {
               imageSize: "1K",
               signal: controller.signal,
             });
+            controller.signal.throwIfAborted();
             content = {
               ...content,
               backgroundImageUrl: rendered.url,
             };
           } catch (imageError) {
+            controller.signal.throwIfAborted();
             if (material !== "banner" || renderContext.productImages?.length) {
               console.warn(
                 "Falha ao gerar key visual; usando a composição local segura.",
@@ -381,6 +386,7 @@ export function useGenerateMaterials(): UseGenerateMaterialsResult {
           }
         }
 
+        controller.signal.throwIfAborted();
         useCreditsStore.getState().refresh();
 
         return {
@@ -408,9 +414,11 @@ export function useGenerateMaterials(): UseGenerateMaterialsResult {
     async (materials, params, onEach) => {
       const results: GeneratedMaterial[] = [];
       const errors: { material: MaterialType; error: Error }[] = [];
-      controllerRef.current = new AbortController();
+      const batchController = new AbortController();
+      controllerRef.current = batchController;
 
       for (const material of materials) {
+        if (batchController.signal.aborted) break;
         try {
           const result = await generateMaterial({ ...params, material });
           results.push(result);

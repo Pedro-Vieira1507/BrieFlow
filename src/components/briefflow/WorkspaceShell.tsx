@@ -2,7 +2,13 @@ import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { MessageSquareText, Sparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import {
+  Sheet,
+  SheetContent,
+  SheetTrigger,
+  SheetTitle,
+  SheetDescription,
+} from "@/components/ui/sheet";
 import { Toaster } from "@/components/ui/sonner";
 import { useBriefflowAgent } from "@/hooks/useBriefflowAgent";
 import { cn } from "@/lib/utils";
@@ -44,6 +50,24 @@ export function WorkspaceShell() {
   const [mobileChatOpen, setMobileChatOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [catalogOpen, setCatalogOpen] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState<number | undefined>();
+
+  useEffect(() => {
+    if (!mobileChatOpen || !window.visualViewport) return;
+    const viewport = window.visualViewport;
+    const resize = () => setKeyboardHeight(viewport.height);
+    resize();
+    viewport.addEventListener("resize", resize);
+    return () => viewport.removeEventListener("resize", resize);
+  }, [mobileChatOpen]);
+
+  const openAssistant = () => {
+    if (window.matchMedia("(min-width: 1024px)").matches) {
+      document.querySelector<HTMLTextAreaElement>("aside textarea")?.focus();
+    } else {
+      setMobileChatOpen(true);
+    }
+  };
   const [pendingMaterial, setPendingMaterial] = useState<MaterialType | null>(
     null,
   );
@@ -114,7 +138,7 @@ export function WorkspaceShell() {
           onGenerateCampaign={generateCampaign}
           onRetry={regenerateChannel}
           onOpenSettings={() => setSettingsOpen(true)}
-          onOpenChat={() => setMobileChatOpen(true)}
+          onOpenChat={openAssistant}
           onOpenContentCatalog={() => setCatalogOpen(true)}
         />
 
@@ -139,8 +163,17 @@ export function WorkspaceShell() {
             </SheetTrigger>
             <SheetContent
               side="bottom"
+              style={
+                keyboardHeight ? { maxHeight: keyboardHeight - 8 } : undefined
+              }
               className="flex h-[94dvh] flex-col rounded-t-[28px] border-t border-border-strong bg-surface-1 p-0 shadow-[0_-24px_80px_rgba(0,0,0,0.55)]"
             >
+              <SheetTitle className="sr-only">
+                Assistente criativo BrieFlow
+              </SheetTitle>
+              <SheetDescription className="sr-only">
+                Converse sobre o briefing e refine as peças da campanha.
+              </SheetDescription>
               <div className="mx-auto mt-2.5 h-1 w-10 rounded-full bg-white/15" />
               {brandContext.site?.colors && (
                 <BrandPalette colors={brandContext.site.colors} />

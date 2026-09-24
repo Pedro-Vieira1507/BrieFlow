@@ -121,7 +121,6 @@ async function syncSubscription(
   service: ServiceClient,
   subscription: StripeSubscription,
   options: {
-    resetCredits?: boolean;
     organizationId?: string;
     planId?: string;
     eventCreated: number;
@@ -180,7 +179,6 @@ async function syncSubscription(
     p_stripe_price_id: priceId,
     p_cancel_at_period_end: Boolean(subscription.cancel_at_period_end),
     p_event_created: options.eventCreated,
-    p_reset_credits: Boolean(options.resetCredits),
   });
   if (error) throw new Error("subscription_sync_failed");
 }
@@ -241,7 +239,6 @@ Deno.serve(async (req: Request) => {
         if (!subscriptionId) throw new Error("subscription_missing");
         const subscription = await fetchSubscription(subscriptionId);
         await syncSubscription(service, subscription, {
-          resetCredits: true,
           eventCreated: event.created,
           organizationId: (
             object.metadata as Record<string, string> | undefined
@@ -265,7 +262,6 @@ Deno.serve(async (req: Request) => {
         if (subscriptionId) {
           const subscription = await fetchSubscription(subscriptionId);
           await syncSubscription(service, subscription, {
-            resetCredits: true,
             eventCreated: event.created,
           });
         }
@@ -321,8 +317,13 @@ Deno.serve(async (req: Request) => {
       "invalid_signature",
       "signature_expired",
     ].includes(code);
-    return json(req, unauthorized ? 401 : 400, {
-      error: unauthorized ? "invalid_signature" : "webhook_processing_failed",
+    const unavailable = code === "webhook_not_configured";
+    return json(req, unavailable ? 503 : unauthorized ? 401 : 400, {
+      error: unavailable
+        ? "webhook_unavailable"
+        : unauthorized
+          ? "invalid_signature"
+          : "webhook_processing_failed",
     });
   }
 });

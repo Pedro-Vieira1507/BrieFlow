@@ -41,7 +41,7 @@ export function ChatInput({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       handleSubmit();
     }
@@ -175,7 +175,7 @@ export function ChatInput({
                 : "Digite o site ou o que deseja criar..."
             }
             aria-label="Mensagem para o BrieFlow"
-            className="max-h-[150px] min-h-[44px] w-full resize-none bg-transparent px-2 py-3 text-sm leading-5 text-fg-primary placeholder:text-fg-muted focus:outline-none disabled:opacity-50"
+            className="max-h-[150px] min-h-[44px] w-full resize-none bg-transparent px-2 py-3 text-base sm:text-sm leading-5 text-fg-primary placeholder:text-fg-muted focus:outline-none disabled:opacity-50"
             rows={1}
           />
           <button

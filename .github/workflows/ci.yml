@@ -42,4 +42,4 @@ jobs:
         working-directory: /tmp
         run: >-
           deno check --no-config --node-modules-dir=none
-          "$GITHUB_WORKSPACE"/supabase/functions/{ai-proxy,image-render,product-segment,scrape-proxy,image-search,billing,stripe-webhook}/index.ts
+          "$GITHUB_WORKSPACE"/supabase/functions/{ai-proxy,image-render,product-segment,scrape-proxy,image-search,billing,stripe-webhook,media-render,multimodal}/index.ts

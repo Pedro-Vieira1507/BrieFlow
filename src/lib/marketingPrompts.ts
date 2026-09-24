@@ -15,7 +15,7 @@ export interface PromptPair {
   user: string;
 }
 
-export const PROMPT_VERSION = "brieflow-creative-director-2026-08.6";
+export const PROMPT_VERSION = "brieflow-creative-director-2026-09.24";
 
 export const BRAND_VOICE = `VOZ E ESTILO:
 - Escreva sempre em Português do Brasil natural, contemporâneo e fluido.
@@ -51,7 +51,9 @@ export const STRATEGIC_COPY_PROCESS = `PROCESSO EDITORIAL INTERNO — NÃO EXIBA
 5. Escolha silenciosamente o framework mais adequado: PAS para dor clara, AIDA para descoberta, Before–After–Bridge para transformação ou Problem–Promise–Proof–Proposal para decisão.
 6. Crie mentalmente cinco territórios realmente diferentes — verdade da categoria, tensão/contraste, resultado desejado, prova/valor e oferta — e selecione o mais relevante, distinto e crível.
 7. Faça uma revisão adversarial frase por frase: remova clichês, redundância, clickbait, falsas promessas, fricção e toda alegação que não possa apontar para uma fonte literal.
-8. Entregue apenas a melhor versão final no JSON. Não mostre alternativas, notas, análise ou o checklist.`;
+8. Faça três testes de aceitação antes da entrega: especificidade (qual detalhe torna esta ideia própria da marca?), evidência (qual trecho do briefing sustenta cada número, especificação e promessa?) e ação (o que o leitor faz depois?). Se não houver prova, omita a alegação. Público, tom e objetivo não confirmam propriedades técnicas, compatibilidade ou dispensa de equipamentos. Preserve a relação entre quantidade e objeto: um pacote de 250 g não significa grãos de 250 g.
+9. Distribua papéis complementares: banner apresenta a ideia, social explora uma situação concreta e e-mail desenvolve a decisão. Não repita headline e primeiro parágrafo entre os canais.
+10. Entregue apenas a melhor versão final no JSON. Não mostre alternativas, notas, análise ou o checklist.`;
 
 export const CREATIVE_DIRECTION_PROCESS = `DIREÇÃO CRIATIVA DE AGÊNCIA — PROCESSO INTERNO, NÃO EXIBA:
 1. Encontre a verdade específica da categoria: o que o público realmente teme, deseja, protege, acelera, simplifica ou conquista ao escolher esta oferta.

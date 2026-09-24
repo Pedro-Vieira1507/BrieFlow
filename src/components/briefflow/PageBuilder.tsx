@@ -7,12 +7,14 @@ import { isSupabaseConfigured, saveAssetToLibrary } from "@/lib/supabase";
 import { getBuilderCampaignBrandName } from "@/lib/campaignGeneration";
 import { exportStructuredDocument } from "@/lib/structuredDocumentExport";
 import { CORE_MATERIAL_TYPES } from "@/types/brief";
+import { captureWorkspaceScope } from "@/lib/workspaceScope";
 
 import { BuilderHeader } from "./builder/BuilderHeader";
 import { GeneratingBanner } from "./builder/GeneratingBanner";
 import { DiscoveryPlanView } from "./builder/DiscoveryPlanView";
 import { BuilderEmptyState } from "./builder/BuilderEmptyState";
 import { CampaignTabs } from "./builder/CampaignTabs";
+import { EditorialReview } from "./builder/EditorialReview";
 
 import type { BuilderState, CampaignAsset } from "@/types/builder";
 
@@ -45,6 +47,8 @@ export function PageBuilder({
     patchBuilder,
     setAuthOpen,
     setBuilder,
+    activeLibraryAssetId,
+    setActiveLibraryAssetId,
   } = useBriefflowStore();
 
   const [activeTab, setActiveTab] = useState<CampaignAsset["type"]>("banner");
@@ -76,17 +80,27 @@ export function PageBuilder({
 
     isSavingRef.current = true;
     setIsSaving(true);
-    await new Promise((resolve) => setTimeout(resolve, 150));
-
+    const isCurrent = captureWorkspaceScope(useBriefflowStore.getState);
     const toastId = toast.loading("Salvando campanha na biblioteca...");
     try {
       const brandName = getBuilderCampaignBrandName(builder);
-      await saveAssetToLibrary(
+      const saved = await saveAssetToLibrary(
         brandName ? `Campanha ${brandName}` : "Campanha AI",
         builder,
+        activeLibraryAssetId,
+        user.id,
       );
+      if (!isCurrent()) {
+        toast.dismiss(toastId);
+        return;
+      }
+      setActiveLibraryAssetId(saved.id);
       toast.success("Salvo na biblioteca com sucesso!", { id: toastId });
     } catch (error) {
+      if (!isCurrent()) {
+        toast.dismiss(toastId);
+        return;
+      }
       toast.error(
         error instanceof Error ? error.message : "Erro ao salvar a campanha",
         { id: toastId },
@@ -169,6 +183,15 @@ export function PageBuilder({
 
           {builder.type === "campaign" && builder.campaignAssets && (
             <div className="fade-in-up">
+              {builder.campaignAssets
+                .filter((asset) => asset.type === activeTab)
+                .map((asset) => (
+                  <EditorialReview
+                    key={asset.id}
+                    asset={asset}
+                    onOpenChat={onOpenChat}
+                  />
+                ))}
               <CampaignTabs
                 assets={builder.campaignAssets}
                 onAssetChange={handleAssetPatch}

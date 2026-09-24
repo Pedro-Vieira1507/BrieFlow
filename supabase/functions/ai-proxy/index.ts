@@ -7,6 +7,7 @@ import {
   requirePost,
   runInBackground,
 } from "../_shared/http.ts";
+import { boundedRetryDelay, readAiCompletion } from "../_shared/aiResponse.ts";
 
 type ChatRole = "system" | "user" | "assistant";
 type ProviderName = "omniroute" | "groq" | "gemini" | "cloudflare" | "ollama";
@@ -219,15 +220,11 @@ async function openAiRequest(options: {
     }
 
     if (response.status === 429) {
-      const retryAfter = Number(response.headers.get("retry-after") ?? "0");
-      const delayMs =
-        Number.isFinite(retryAfter) && retryAfter > 0
-          ? Math.min(4_000, Math.max(750, retryAfter * 1_000))
-          : 1_500;
+      const delayMs = boundedRetryDelay(response.headers.get("retry-after"));
+      if (delayMs === null) throw new Error(`${options.provider}_http_429`);
       await sleep(delayMs);
       response = await performOpenAiRequest({
         ...options,
-        maxTokens: Math.min(options.maxTokens, 1536),
         signal: controller.signal,
       });
     }
@@ -238,12 +235,11 @@ async function openAiRequest(options: {
     const raw = await response.text();
     if (raw.length > 2_000_000) throw new Error("provider_response_too_large");
 
-    const payload = JSON.parse(raw) as {
-      model?: string;
-      choices?: Array<{ message?: { content?: string } }>;
-      usage?: { prompt_tokens?: number; completion_tokens?: number };
-    };
-    const received = payload.choices?.[0]?.message?.content?.trim() ?? "";
+    const payload = JSON.parse(raw);
+    const completion = readAiCompletion(payload);
+    if (completion.finishReason === "length")
+      throw new Error(`${options.provider}_output_truncated`);
+    const received = completion.content;
     if (!received) throw new Error(`${options.provider}_empty_response`);
 
     const content = options.jsonMode
@@ -255,7 +251,7 @@ async function openAiRequest(options: {
       provider: options.provider,
       model: payload.model ?? options.model,
       content,
-      usage: payload.usage ?? {},
+      usage: completion.usage,
     };
   } finally {
     clearTimeout(timeout);
@@ -309,41 +305,30 @@ async function cloudflareRequest(options: {
           messages: cloudflareJsonMessages(options.messages, options.jsonMode),
           temperature: options.temperature,
           max_tokens: options.maxTokens,
+          ...(options.model === "@cf/zai-org/glm-4.7-flash"
+            ? { reasoning_effort: "low" }
+            : {}),
         }),
       });
 
     let response = await request();
     if (response.status === 429) {
-      const retryAfter = Number(response.headers.get("retry-after") ?? "0");
-      const delayMs =
-        Number.isFinite(retryAfter) && retryAfter > 0
-          ? Math.min(4_000, Math.max(750, retryAfter * 1_000))
-          : 1_250;
+      const delayMs = boundedRetryDelay(response.headers.get("retry-after"));
+      if (delayMs === null) throw new Error("cloudflare_http_429");
       await sleep(delayMs);
       response = await request();
     }
 
     if (!response.ok) throw new Error(`cloudflare_http_${response.status}`);
 
-    const payload = (await response.json()) as {
-      success?: boolean;
-      result?:
-        | string
-        | {
-            response?: string;
-            choices?: Array<{ message?: { content?: string } }>;
-            usage?: { prompt_tokens?: number; completion_tokens?: number };
-          };
-      usage?: { prompt_tokens?: number; completion_tokens?: number };
-    };
-
-    const result = payload.result;
-    const received =
-      typeof result === "string"
-        ? result.trim()
-        : (result?.response?.trim() ??
-          result?.choices?.[0]?.message?.content?.trim() ??
-          "");
+    const raw = await response.text();
+    if (raw.length > 2_000_000) throw new Error("provider_response_too_large");
+    const payload = JSON.parse(raw);
+    if (payload.success === false) throw new Error("cloudflare_api_error");
+    const completion = readAiCompletion(payload);
+    if (completion.finishReason === "length")
+      throw new Error("cloudflare_output_truncated");
+    const received = completion.content;
     if (!received) throw new Error("cloudflare_empty_response");
 
     const content = options.jsonMode
@@ -355,10 +340,7 @@ async function cloudflareRequest(options: {
       provider: "cloudflare",
       model: options.model,
       content,
-      usage:
-        typeof result === "object" && result?.usage
-          ? result.usage
-          : (payload.usage ?? {}),
+      usage: completion.usage,
     };
   } finally {
     clearTimeout(timeout);
@@ -472,6 +454,7 @@ function buildAttempts(options: {
         ? [discoveryModel]
         : [
             env("GROQ_PRIMARY_MODEL"),
+            env("GROQ_FIRST_FALLBACK_MODEL"),
             env("GROQ_SECOND_FALLBACK_MODEL"),
             discoveryModel,
           ];

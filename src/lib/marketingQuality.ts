@@ -9,6 +9,13 @@ interface ClaimRule {
 
 const CLAIM_RULES: ClaimRule[] = [
   {
+    id: "no_equipment_needed",
+    claim:
+      /\b(?:n[aã]o (?:precisa|necessita|requer)(?: de)?|dispensa|sem necessidade de)\s+equipamentos?(?:\s+especiais|\s+especial)?\b/i,
+    evidence:
+      /\b(?:n[aã]o (?:precisa|necessita|requer)(?: de)?|dispensa|sem necessidade de)\s+equipamentos?(?:\s+especiais|\s+especial)?\b/i,
+  },
+  {
     id: "automatic",
     claim: /\bautom[aá]tic(?:o|a|os|as|amente)\b/i,
     evidence: /\bautom[aá]tic(?:o|a|os|as|amente)\b/i,
@@ -172,10 +179,7 @@ function collectConfirmedEvidence(brief: MarketingBrief): string {
   return [
     brief.brandName,
     brief.product,
-    brief.audience,
-    brief.objective,
     brief.offer,
-    brief.tone,
     brief.context,
     brief.productTitle,
     brief.productDescription,
