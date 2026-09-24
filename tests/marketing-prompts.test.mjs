@@ -7,7 +7,7 @@ import {
   extractMaterialBriefing,
   selectFallbackPalette,
 } from "../src/lib/marketingPromptCore.ts";
-import { buildFallbackUrl } from "../src/lib/pollinations.ts";
+import { buildFallbackUrl } from "../src/lib/visualFallback.ts";
 import {
   LandingCopySchema,
   EmailCopySchema,

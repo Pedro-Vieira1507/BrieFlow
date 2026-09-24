@@ -42,7 +42,12 @@ export function ChatHeader({ currentStep, showStepper }: Props) {
       {showStepper && (
         <div
           className="flex flex-col items-end gap-1.5"
+          role="progressbar"
           aria-label={`Etapa ${currentStep} de 5: ${STEPS[currentStep - 1]}`}
+          aria-valuemin={1}
+          aria-valuemax={5}
+          aria-valuenow={currentStep}
+          aria-valuetext={STEPS[currentStep - 1]}
         >
           <span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-fg-tertiary">
             {currentStep}/5 ·{" "}

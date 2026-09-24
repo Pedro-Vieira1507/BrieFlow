@@ -1,4 +1,5 @@
 import type { DiscoveryPlan } from "@/types/builder";
+import { cleanOffer } from "./sanitize.ts";
 
 export type DetectedBriefContext = Record<string, string | null | undefined>;
 
@@ -19,6 +20,16 @@ const DERIVED_CLAIM_RULES = [
   /\bgarantid(?:o|a|os|as)\b/i,
 ];
 
+const UNSUPPORTED_FACT_RULES = [
+  /\bartesana(?:l|is|lmente|lidade|lidades)\b/i,
+  /\bprodutor(?:es)?\s+loca(?:l|is)\b/i,
+  /\b(?:cultivad|colhid|torrad)(?:o|a|os|as)?\b/i,
+  /\bquem\s+(?:cultivou|colheu|torrou)\b/i,
+  /\bpontos?\s+de\s+venda\b/i,
+  /\bescolha\s+consciente\b/i,
+  /\bembalage(?:m|ns)\b/i,
+];
+
 export function sanitizeDiscoveryStrategy(
   strategy: string,
   confirmedFacts: string,
@@ -26,6 +37,12 @@ export function sanitizeDiscoveryStrategy(
   const evidence = confirmedFacts.trim();
   const safeClauses = strategy
     .split(/\s*;\s*/)
+    .filter(
+      (clause) =>
+        !UNSUPPORTED_FACT_RULES.some(
+          (rule) => rule.test(clause) && !rule.test(evidence),
+        ),
+    )
     .map((clause) => {
       let cleaned = clause;
       for (const rule of DERIVED_CLAIM_RULES) {
@@ -69,7 +86,7 @@ export function mergeDetectedBriefContext(
     clean(base.product);
   const productSku = clean(detected?.productSku) ?? clean(base.productSku);
   const productUrl = clean(detected?.productUrl) ?? clean(base.productUrl);
-  const offer = clean(detected?.offer) ?? clean(base.offer);
+  const offer = cleanOffer(detected?.offer) ?? cleanOffer(base.offer);
   const audience = clean(detected?.audience) ?? clean(base.audience);
   const tone = clean(detected?.tone) ?? clean(base.tone);
   const objective = clean(detected?.objective) ?? clean(base.objective);
@@ -87,11 +104,11 @@ export function mergeDetectedBriefContext(
 
   return {
     ...base,
+    offer: offer ?? undefined,
     ...(brandName ? { brandName } : {}),
     ...(product ? { product } : {}),
     ...(productSku ? { productSku } : {}),
     ...(productUrl ? { productUrl } : {}),
-    ...(offer ? { offer } : {}),
     ...(audience ? { audience } : {}),
     ...(tone ? { tone } : {}),
     ...(objective ? { objective } : {}),

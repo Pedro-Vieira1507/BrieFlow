@@ -1,4 +1,5 @@
 // src/components/briefflow/ChatPanel.tsx
+import { useEffect, useRef } from "react";
 import {
   asksForProductImage,
   withAttachedProductImage,
@@ -29,14 +30,23 @@ export function ChatPanel({ onSend }: Props) {
     setUploadedImage,
     setBuilder,
   } = useBriefflowStore();
+  const pendingMessageRef = useRef<string | null>(null);
 
   const userTurns = messages.filter((m) => m.role === "user").length;
   const hasCampaign = builder.type === "campaign";
   const currentStep = hasCampaign ? 5 : Math.min(5, userTurns + 1);
   const busy = loading || scraping;
 
+  useEffect(() => {
+    if (!user || !pendingMessageRef.current) return;
+    const pendingMessage = pendingMessageRef.current;
+    pendingMessageRef.current = null;
+    onSend(pendingMessage);
+  }, [onSend, user]);
+
   const handleProtectedSend = (text: string) => {
     if (!user) {
+      pendingMessageRef.current = text;
       setAuthOpen(true);
       return;
     }
@@ -86,7 +96,9 @@ export function ChatPanel({ onSend }: Props) {
 
     const lastAssistantMessage = [...messages]
       .reverse()
-      .find((message) => message.role === "assistant" && message.content.trim());
+      .find(
+        (message) => message.role === "assistant" && message.content.trim(),
+      );
 
     if (
       lastAssistantMessage &&
@@ -114,9 +126,9 @@ export function ChatPanel({ onSend }: Props) {
         current.type === "campaign" && current.campaignAssets
           ? current.campaignAssets.map((asset) => {
               if (asset.type !== "banner") return asset;
-              const remainingImages = (asset.content.productImages ?? []).filter(
-                (image) => image !== removedUrl,
-              );
+              const remainingImages = (
+                asset.content.productImages ?? []
+              ).filter((image) => image !== removedUrl);
               return {
                 ...asset,
                 content: {

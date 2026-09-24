@@ -27,7 +27,8 @@ export function ChatInput({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const canSend = Boolean(text.trim() || attachedImage) && !disabled && !uploading;
+  const canSend =
+    Boolean(text.trim() || attachedImage) && !disabled && !uploading;
 
   const handleSubmit = (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -54,7 +55,9 @@ export function ChatInput({
     }
   };
 
-  const handleImageChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageChange = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) => {
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file || !onAttachImage) return;
@@ -135,8 +138,16 @@ export function ChatInput({
             type="button"
             disabled={disabled || uploading || !onAttachImage}
             onClick={() => fileInputRef.current?.click()}
-            aria-label={attachedImage ? "Trocar foto do produto" : "Anexar foto do produto"}
-            title={attachedImage ? "Trocar foto do produto" : "Anexar foto do produto"}
+            aria-label={
+              attachedImage
+                ? "Trocar foto do produto"
+                : "Anexar foto do produto"
+            }
+            title={
+              attachedImage
+                ? "Trocar foto do produto"
+                : "Anexar foto do produto"
+            }
             className={cn(
               "mb-0.5 flex size-10 shrink-0 items-center justify-center rounded-full transition-all",
               attachedImage

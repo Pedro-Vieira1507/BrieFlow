@@ -15,7 +15,10 @@ test("manual chat upload is authoritative for the rendered banner hero", () => {
 
 test("real-product banners generate an empty environmental background plate", () => {
   const generator = source("../src/hooks/useGenerateMaterials.ts");
-  assert.match(generator, /BACKGROUND PLATE ONLY for a premium commercial banner/);
+  assert.match(
+    generator,
+    /BACKGROUND PLATE ONLY for a premium commercial banner/,
+  );
   assert.match(generator, /absolutely no advertised product/);
   assert.match(generator, /reserved product zone/);
   assert.match(generator, /productSafeBackgroundPrompt/);
@@ -41,7 +44,6 @@ test("premium product cleanup preserves photographed objects and blocks white-ba
   assert.match(product, /cropTransparentMargins/);
 });
 
-
 test("premium product rendering prefers Cloudflare BiRefNet segmentation", () => {
   const product = source("../src/components/briefflow/PremiumProductImage.tsx");
   const segmentClient = source("../src/lib/productSegment.ts");
@@ -53,7 +55,30 @@ test("premium product rendering prefers Cloudflare BiRefNet segmentation", () =>
   assert.match(product, /applyLocalFallback/);
   assert.match(segmentClient, /"product-segment"/);
   assert.match(supabase, /"product-segment"/);
-  assert.match(draggable, /isSupabaseStorageAsset/);
+  assert.doesNotMatch(draggable, /wsrv\.nl/);
+});
+
+test("private and customer image URLs are never sent to a public image proxy", () => {
+  const optimized = source("../src/components/briefflow/OptimizedImage.tsx");
+  const draggable = source("../src/components/briefflow/DraggableImage.tsx");
+  const product = source("../src/components/briefflow/PremiumProductImage.tsx");
+
+  for (const component of [optimized, draggable, product]) {
+    assert.doesNotMatch(component, /wsrv\.nl/);
+    assert.doesNotMatch(component, /encodeURIComponent\(src/);
+  }
+});
+
+test("all visual campaign formats use the authenticated renderer", () => {
+  const generator = source("../src/hooks/useGenerateMaterials.ts");
+  const email = source("../src/components/briefflow/EmailPreview.tsx");
+  const social = source("../src/components/briefflow/SocialPreview.tsx");
+
+  assert.match(generator, /\["banner", "email", "social"\]/);
+  assert.match(generator, /material === "social" \? "4:5" : "16:9"/);
+  assert.match(email, /state\.backgroundImageUrl/);
+  assert.match(social, /state\.backgroundImageUrl/);
+  assert.doesNotMatch(`${generator}\n${email}\n${social}`, /pollinations/i);
 });
 
 test("Cloudflare segmentation worker uses foreground subject isolation", () => {

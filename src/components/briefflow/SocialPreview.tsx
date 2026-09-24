@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState, useRef } from "react";
 import { Editable } from "./Editable";
 import { DraggableImage } from "./DraggableImage";
 import type { BuilderState } from "@/types/builder";
-import { buildPollinationsUrl, buildFallbackUrl } from "@/lib/pollinations";
+import { buildFallbackUrl } from "@/lib/visualFallback";
 import { Button } from "@/components/ui/button";
 import {
   Loader2,
@@ -29,7 +29,7 @@ import {
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { useBriefflowStore } from "@/store/briefflow";
-import { cleanText } from "@/lib/sanitize";
+import { cleanText, isEmptyLike } from "@/lib/sanitize";
 import { analyzeImageWithVisionFn } from "@/lib/vision-api";
 import { toast } from "sonner";
 import { uploadCampaignAsset } from "@/lib/supabase";
@@ -84,12 +84,7 @@ export function SocialPreview({
   const brandName = cleanText(state.brandName, "Sua Marca");
 
   const offerStr = builder.discoveryPlan?.offer;
-  const hasOffer = Boolean(
-    offerStr &&
-    offerStr !== "null" &&
-    offerStr.trim() !== "" &&
-    offerStr.toLowerCase() !== "nenhum",
-  );
+  const hasOffer = !isEmptyLike(offerStr);
 
   const draggableImages = Array.from(new Set(state.productImages || [])).filter(
     (src): src is string => typeof src === "string" && src.trim().length > 0,
@@ -97,18 +92,15 @@ export function SocialPreview({
 
   const url = useMemo(() => {
     if (!prompt) return null;
-    return useFallback
-      ? buildFallbackUrl(prompt, {
-          width: 1080,
-          height: 1350,
-          seed: state.imageSeed,
-        })
-      : buildPollinationsUrl(prompt, {
-          width: 1080,
-          height: 1350,
-          seed: state.imageSeed,
-        });
-  }, [prompt, state.imageSeed, useFallback]);
+    if (state.backgroundImageUrl && !useFallback) {
+      return state.backgroundImageUrl;
+    }
+    return buildFallbackUrl(prompt, {
+      width: 1080,
+      height: 1350,
+      seed: state.imageSeed,
+    });
+  }, [prompt, state.backgroundImageUrl, state.imageSeed, useFallback]);
 
   const activeHeroUrl = hasImportedImage ? state.productImageUrl : url;
 
@@ -121,7 +113,7 @@ export function SocialPreview({
     const timer = setTimeout(() => {
       setImageStatus((prev) => {
         if (prev === "loading") {
-          if (!useFallback && !isProductImage) {
+          if (!useFallback && !isProductImage && state.backgroundImageUrl) {
             setUseFallback(true);
             return "loading";
           }
@@ -131,10 +123,11 @@ export function SocialPreview({
       });
     }, 18000);
     return () => clearTimeout(timer);
-  }, [activeHeroUrl, useFallback, isProductImage]);
+  }, [activeHeroUrl, isProductImage, state.backgroundImageUrl, useFallback]);
 
   const handleImageError = () => {
-    if (!useFallback && !isProductImage) setUseFallback(true);
+    if (!useFallback && !isProductImage && state.backgroundImageUrl)
+      setUseFallback(true);
     else setImageStatus("error");
   };
 

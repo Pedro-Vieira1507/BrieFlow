@@ -105,13 +105,14 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         {
           name: "description",
           content:
-            "Agente conversacional que analisa seu site e gera banners, posts e e-mails marketing premium no painel lateral.",
+            "Estúdio de marketing com IA para criar campanhas, banners, e-mails, posts, apresentações e documentos em um fluxo editável.",
         },
-        { property: "og:title", content: "BrieFlow Creative" },
+        { name: "theme-color", content: "#07080c" },
+        { property: "og:title", content: "BrieFlow — Estúdio criativo com IA" },
         {
           property: "og:description",
           content:
-            "Agente conversacional que analisa seu site e gera banners, posts e e-mails marketing premium no painel lateral.",
+            "Transforme um briefing em uma campanha multiformato, editável e pronta para exportação.",
         },
         { property: "og:type", content: "website" },
         { name: "twitter:card", content: "summary_large_image" },

@@ -87,10 +87,12 @@ ${formatSiteContextForAgent(brandContext.site)}
 ${currentPlan ? JSON.stringify(currentPlan) : "Nenhum plano ainda."}
 
 === ESTADO DA FOTO REAL DO PRODUTO ===
-${currentPlan?.productImageUrl
-  ? `A FOTO REAL JÁ FOI RECEBIDA E ESTÁ DISPONÍVEL EM productImageUrl: ${currentPlan.productImageUrl}
+${
+  currentPlan?.productImageUrl
+    ? `A FOTO REAL JÁ FOI RECEBIDA E ESTÁ DISPONÍVEL EM productImageUrl: ${currentPlan.productImageUrl}
 NÃO peça foto, imagem, anexo ou reenvio do produto. Considere esse requisito totalmente atendido e prossiga com o próximo passo estratégico ou com a geração solicitada.`
-  : "Nenhuma foto real de produto está registrada no plano atual."}
+    : "Nenhuma foto real de produto está registrada no plano atual."
+}
 
 === FORMATO DE RESPOSTA ===
 Responda SEMPRE em JSON válido com esta estrutura:

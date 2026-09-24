@@ -109,7 +109,9 @@ function normalizeBriefing(value: string): string {
 function requiresRealProductImage(rawBriefing?: string): boolean {
   if (!rawBriefing?.trim()) return false;
   const text = normalizeBriefing(rawBriefing);
-  const mentionsRealImage = /(?:foto|imagem)\s+(?:real|original|oficial)/.test(text);
+  const mentionsRealImage = /(?:foto|imagem)\s+(?:real|original|oficial)/.test(
+    text,
+  );
   const isMandatory =
     /obrigatori|nao\s+gere\s+outro|nao\s+altere|use\s+(?:a|o)|utilize\s+(?:a|o)|produto\s+real/.test(
       text,
@@ -117,13 +119,16 @@ function requiresRealProductImage(rawBriefing?: string): boolean {
   return mentionsRealImage && isMandatory;
 }
 
-function hasUsableProductImage(brief: MarketingBrief, images?: string[]): boolean {
+function hasUsableProductImage(
+  brief: MarketingBrief,
+  images?: string[],
+): boolean {
   return Boolean(
     brief.productImageUrl ||
-      images?.some((value) => typeof value === "string" && value.trim()) ||
-      brief.availableImageUrls?.some(
-        (value) => typeof value === "string" && value.trim(),
-      ),
+    images?.some((value) => typeof value === "string" && value.trim()) ||
+    brief.availableImageUrls?.some(
+      (value) => typeof value === "string" && value.trim(),
+    ),
   );
 }
 
@@ -149,7 +154,11 @@ function normalizeSceneContext(brief: MarketingBrief): string {
 
 function backgroundSceneCue(brief: MarketingBrief): string {
   const context = normalizeSceneContext(brief);
-  if (/laborator|centrif|microscop|pipet|reagent|analise clin|cientific/.test(context)) {
+  if (
+    /laborator|centrif|microscop|pipet|reagent|analise clin|cientific/.test(
+      context,
+    )
+  ) {
     return "modern professional laboratory interior, clean empty benchtop, precise architectural lines, subtle depth of field, controlled cool-neutral studio daylight";
   }
   if (/cafe|coffee|grao|torref|bebida|cafeter/.test(context)) {
@@ -329,17 +338,28 @@ export function useGenerateMaterials(): UseGenerateMaterialsResult {
           } as PremiumBannerBuilderState;
         }
 
-        if (material === "banner" && safeData.imagePrompt?.trim()) {
+        const canRenderVisual = ["banner", "email", "social"].includes(
+          material,
+        );
+        const shouldRenderVisual =
+          canRenderVisual &&
+          Boolean(safeData.imagePrompt?.trim()) &&
+          (material === "banner" || !renderContext.productImageUrl);
+
+        if (shouldRenderVisual) {
           try {
-            const visualPrompt = renderContext.productImageUrl
-              ? productSafeBackgroundPrompt(
-                  brief,
-                  safeData as unknown as Record<string, unknown>,
-                )
-              : safeData.imagePrompt;
+            const visualPrompt =
+              material === "banner" && renderContext.productImageUrl
+                ? productSafeBackgroundPrompt(
+                    brief,
+                    safeData as unknown as Record<string, unknown>,
+                  )
+                : safeData.imagePrompt;
             const rendered = await renderCampaignImage({
               prompt: visualPrompt,
-              aspectRatio: "16:9",
+              requestId: meta.requestId,
+              action: material as "banner" | "email" | "social",
+              aspectRatio: material === "social" ? "4:5" : "16:9",
               imageSize: "1K",
               signal: controller.signal,
             });
@@ -348,9 +368,9 @@ export function useGenerateMaterials(): UseGenerateMaterialsResult {
               backgroundImageUrl: rendered.url,
             };
           } catch (imageError) {
-            if (renderContext.productImages?.length) {
+            if (material !== "banner" || renderContext.productImages?.length) {
               console.warn(
-                "Falha ao gerar key visual; preservando o produto real sobre a composição de marca.",
+                "Falha ao gerar key visual; usando a composição local segura.",
                 imageError,
               );
             } else {

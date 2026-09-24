@@ -9,7 +9,7 @@ supabase link --project-ref YOUR_PROJECT_REF
 supabase db push
 ```
 
-A migração provisiona contas existentes, associa assets ao workspace padrão, ativa RLS pessoal, torna `campaign-assets` privado e cria planos, ledger, limites, cache e eventos Stripe. Valide especialmente usuários antigos e URLs de imagens salvas.
+As migrações provisionam contas existentes, associam assets ao workspace padrão, ativam RLS pessoal, tornam `campaign-assets` privado e criam planos, ledger, limites, cache, eventos Stripe e claims de uso único para renderização visual. Valide especialmente usuários antigos, URLs de imagens salvas e a autorização vinculada ao `request_id`.
 
 A migração interrompe com `unsafe_storage_policy` se detectar uma política genérica `true` em `storage.objects`, pois políticas permissivas são combinadas com OR e anulariam o isolamento. Restrinja ou remova essa política no staging antes de repetir a migração.
 
@@ -27,13 +27,17 @@ Configure `APP_URL` e uma lista exata de origens HTTPS em `ALLOWED_ORIGINS`. Def
 
 ```bash
 supabase functions deploy ai-proxy
+supabase functions deploy image-render
+supabase functions deploy product-segment
 supabase functions deploy scrape-proxy
 supabase functions deploy image-search
 supabase functions deploy billing
 supabase functions deploy stripe-webhook --no-verify-jwt
 ```
 
-O `config.toml` exige JWT nas quatro funções chamadas pelo app. Somente o webhook é público e ele valida a assinatura Stripe no corpo bruto.
+O `config.toml` mantém a verificação JWT do gateway nas funções compatíveis. `ai-proxy`, `image-render` e `product-segment` validam o token dentro da própria função com `auth.getUser`; esse modo evita dependência do verificador JWT legado sem permitir chamadas anônimas. O webhook é o único endpoint realmente público e valida a assinatura Stripe no corpo bruto.
+
+Publique também o Worker de segmentação em `cloudflare/product-segment-worker`, configure o mesmo segredo forte nas duas pontas e mantenha a URL do Worker fora do bundle do navegador.
 
 ## 4. Configurar Stripe
 
@@ -72,6 +76,8 @@ Monitore taxa de erro e p95 de latência por função, falhas por provedor/model
 - um formato bloqueado retorna 403 mesmo com chamada manual;
 - retries com o mesmo `request_id` debitam uma única vez;
 - a repetição de um `request_id` já debitado retorna 409 sem chamar novamente o provedor;
+- `image-render` rejeita requests sem débito correspondente e não aceita reutilizar o mesmo claim;
+- regeneração visual manual debita um crédito e estorna esse crédito se o provedor falhar;
 - falha de todos os provedores estorna o saldo;
 - URLs privadas/localhost são rejeitadas pelo scraper;
 - CORS rejeita uma origem fora da lista;

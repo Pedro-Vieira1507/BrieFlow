@@ -8,6 +8,8 @@ import {
 
 interface ImageRenderBody {
   prompt?: unknown;
+  request_id?: unknown;
+  action?: unknown;
   aspect_ratio?: unknown;
   image_size?: unknown;
 }
@@ -36,6 +38,8 @@ const IMAGE_RENDERS_PER_MINUTE = 8;
 const CLOUDFLARE_PRIMARY_MODEL = "@cf/black-forest-labs/flux-2-klein-4b";
 const CLOUDFLARE_FALLBACK_MODEL = "@cf/black-forest-labs/flux-1-schnell";
 const SCHNELL_MAX_PROMPT = 2_048;
+const LINKED_ACTIONS = new Set(["banner", "email", "social"]);
+const MANUAL_ACTION = "banner_visual";
 
 function decodeBase64(value: string): Uint8Array {
   const binary = atob(value.replace(/^data:[^;]+;base64,/, ""));
@@ -128,7 +132,8 @@ async function providerFailure(
       model,
       status: response.status,
       code: "provider_error",
-      message: safeProviderMessage(raw) || "Cloudflare Workers AI request failed.",
+      message:
+        safeProviderMessage(raw) || "Cloudflare Workers AI request failed.",
     };
   }
 }
@@ -161,7 +166,7 @@ function extractCloudflareImage(payload: unknown): GeneratedImage | null {
 
 function compactPrompt(rawPrompt: string): string {
   const suffix =
-    "\n\nCommercial advertising key visual only. No words, letters, numbers, logos, watermarks, UI, captions or labels. Clean premium composition, one clear focal idea, realistic materials and lighting, usable negative space for external typography. The application adds final typography and any real product cutout separately.";
+    "\n\nCommercial advertising key visual only. No words, letters, numbers, logos, watermarks, UI, captions or labels. All visible products and packaging must be completely blank and unbranded; never invent a brand mark or label. Clean premium composition, one clear focal idea, realistic materials and lighting, usable negative space for external typography. The application adds final typography and any real product cutout separately.";
   const available = Math.max(400, SCHNELL_MAX_PROMPT - suffix.length - 1);
   const normalized = rawPrompt.replace(/\s+/g, " ").trim();
   return `${normalized.slice(0, available)}${suffix}`;
@@ -192,7 +197,9 @@ async function tryFlux2Klein(input: {
   );
 
   if (!response.ok) {
-    return { failure: await providerFailure(response, CLOUDFLARE_PRIMARY_MODEL) };
+    return {
+      failure: await providerFailure(response, CLOUDFLARE_PRIMARY_MODEL),
+    };
   }
 
   const payload = (await response.json()) as unknown;
@@ -200,11 +207,7 @@ async function tryFlux2Klein(input: {
   if (image) return { image };
 
   return {
-    failure: providerFailureFromPayload(
-      payload,
-      CLOUDFLARE_PRIMARY_MODEL,
-      502,
-    ),
+    failure: providerFailureFromPayload(payload, CLOUDFLARE_PRIMARY_MODEL, 502),
   };
 }
 
@@ -229,7 +232,9 @@ async function tryFlux1Schnell(input: {
   );
 
   if (!response.ok) {
-    return { failure: await providerFailure(response, CLOUDFLARE_FALLBACK_MODEL) };
+    return {
+      failure: await providerFailure(response, CLOUDFLARE_FALLBACK_MODEL),
+    };
   }
 
   const payload = (await response.json()) as unknown;
@@ -309,10 +314,47 @@ Deno.serve(async (req: Request) => {
       return json(req, 400, { error: "invalid_prompt" });
     }
 
+    const requestId =
+      typeof body.request_id === "string" ? body.request_id.trim() : "";
+    const action = typeof body.action === "string" ? body.action.trim() : "";
+    if (!/^[a-zA-Z0-9_-]{8,128}$/.test(requestId)) {
+      return json(req, 400, { error: "invalid_request_id" });
+    }
+    if (!LINKED_ACTIONS.has(action) && action !== MANUAL_ACTION) {
+      return json(req, 400, { error: "invalid_image_action" });
+    }
+
     const accountId = Deno.env.get("CLOUDFLARE_ACCOUNT_ID")?.trim();
     const apiToken = Deno.env.get("CLOUDFLARE_API_TOKEN")?.trim();
     if (!accountId || !apiToken) {
       return json(req, 503, { error: "image_provider_not_configured" });
+    }
+
+    const { data: authorizationRows, error: authorizationError } =
+      await context.service.rpc("authorize_visual_render", {
+        p_user_id: context.user.id,
+        p_request_id: requestId,
+        p_action: action,
+      });
+    if (authorizationError) {
+      return json(req, 500, { error: "image_authorization_failed" });
+    }
+    const authorization = Array.isArray(authorizationRows)
+      ? authorizationRows[0]
+      : undefined;
+    if (!authorization?.ok) {
+      const code = authorization?.code ?? "image_render_not_authorized";
+      const status =
+        code === "insufficient_credits"
+          ? 402
+          : code === "rate_limit_exceeded"
+            ? 429
+            : code === "duplicate_request"
+              ? 409
+              : code === "invalid_request"
+                ? 400
+                : 403;
+      return json(req, status, { error: code });
     }
 
     const requestedAspect =
@@ -322,54 +364,29 @@ Deno.serve(async (req: Request) => {
       : "16:9";
     const providerPrompt = compactPrompt(rawPrompt);
 
-    const failures: ProviderFailure[] = [];
-    let generated: GeneratedImage | undefined;
-    let selectedModel = "";
-
+    let completed = false;
+    let storagePath: string | undefined;
     try {
-      const primary = await tryFlux2Klein({
-        accountId,
-        apiToken,
-        prompt: providerPrompt,
-        aspectRatio,
-      });
-      if (primary.image) {
-        generated = primary.image;
-        selectedModel = CLOUDFLARE_PRIMARY_MODEL;
-      } else if (primary.failure) {
-        failures.push(primary.failure);
-      }
-    } catch (error) {
-      failures.push({
-        model: CLOUDFLARE_PRIMARY_MODEL,
-        status: 504,
-        code:
-          error instanceof DOMException && error.name === "AbortError"
-            ? "TIMEOUT"
-            : "NETWORK_ERROR",
-        message:
-          error instanceof Error
-            ? error.message.slice(0, 500)
-            : "Cloudflare primary model request failed.",
-      });
-    }
+      const failures: ProviderFailure[] = [];
+      let generated: GeneratedImage | undefined;
+      let selectedModel = "";
 
-    if (!generated) {
       try {
-        const fallback = await tryFlux1Schnell({
+        const primary = await tryFlux2Klein({
           accountId,
           apiToken,
           prompt: providerPrompt,
+          aspectRatio,
         });
-        if (fallback.image) {
-          generated = fallback.image;
-          selectedModel = CLOUDFLARE_FALLBACK_MODEL;
-        } else if (fallback.failure) {
-          failures.push(fallback.failure);
+        if (primary.image) {
+          generated = primary.image;
+          selectedModel = CLOUDFLARE_PRIMARY_MODEL;
+        } else if (primary.failure) {
+          failures.push(primary.failure);
         }
       } catch (error) {
         failures.push({
-          model: CLOUDFLARE_FALLBACK_MODEL,
+          model: CLOUDFLARE_PRIMARY_MODEL,
           status: 504,
           code:
             error instanceof DOMException && error.name === "AbortError"
@@ -378,73 +395,125 @@ Deno.serve(async (req: Request) => {
           message:
             error instanceof Error
               ? error.message.slice(0, 500)
-              : "Cloudflare fallback model request failed.",
+              : "Cloudflare primary model request failed.",
         });
       }
-    }
 
-    if (!generated) {
-      const lastFailure = failures.at(-1);
-      const error = quotaFailure(failures)
-        ? "image_provider_quota_unavailable"
-        : authFailure(failures)
-          ? "image_provider_auth_failed"
-          : "image_provider_failed";
-      console.warn(
-        JSON.stringify({
-          event: error,
-          provider: "cloudflare-workers-ai",
-          failures,
-        }),
-      );
-      return json(req, 502, {
-        error,
-        provider_status: lastFailure?.status ?? 502,
-        provider_code: lastFailure?.code ?? "provider_error",
-        provider_message:
-          lastFailure?.message ?? "Cloudflare Workers AI image generation failed.",
-        models_tried: failures.map((failure) => failure.model),
+      if (!generated) {
+        try {
+          const fallback = await tryFlux1Schnell({
+            accountId,
+            apiToken,
+            prompt: providerPrompt,
+          });
+          if (fallback.image) {
+            generated = fallback.image;
+            selectedModel = CLOUDFLARE_FALLBACK_MODEL;
+          } else if (fallback.failure) {
+            failures.push(fallback.failure);
+          }
+        } catch (error) {
+          failures.push({
+            model: CLOUDFLARE_FALLBACK_MODEL,
+            status: 504,
+            code:
+              error instanceof DOMException && error.name === "AbortError"
+                ? "TIMEOUT"
+                : "NETWORK_ERROR",
+            message:
+              error instanceof Error
+                ? error.message.slice(0, 500)
+                : "Cloudflare fallback model request failed.",
+          });
+        }
+      }
+
+      if (!generated) {
+        const lastFailure = failures.at(-1);
+        const error = quotaFailure(failures)
+          ? "image_provider_quota_unavailable"
+          : authFailure(failures)
+            ? "image_provider_auth_failed"
+            : "image_provider_failed";
+        console.warn(
+          JSON.stringify({
+            event: error,
+            provider: "cloudflare-workers-ai",
+            failures,
+          }),
+        );
+        return json(req, 502, {
+          error,
+          provider_status: lastFailure?.status ?? 502,
+          provider_code: lastFailure?.code ?? "provider_error",
+          provider_message:
+            lastFailure?.message ??
+            "Cloudflare Workers AI image generation failed.",
+          models_tried: failures.map((failure) => failure.model),
+        });
+      }
+
+      const bytes = decodeBase64(generated.data);
+      if (bytes.byteLength > 12 * 1024 * 1024) {
+        return json(req, 502, { error: "image_too_large" });
+      }
+
+      const extension = extensionForMime(generated.mimeType);
+      storagePath = `${context.user.id}/generated/${crypto.randomUUID()}.${extension}`;
+      const { error: uploadError } = await context.service.storage
+        .from("campaign-assets")
+        .upload(storagePath, bytes, {
+          cacheControl: "31536000",
+          contentType: generated.mimeType,
+          upsert: false,
+        });
+      if (uploadError) {
+        console.error(
+          JSON.stringify({
+            event: "generated_image_upload_failed",
+            code: uploadError.message,
+          }),
+        );
+        return json(req, 500, { error: "image_upload_failed" });
+      }
+
+      const { data: signed, error: signedError } = await context.service.storage
+        .from("campaign-assets")
+        .createSignedUrl(storagePath, 60 * 60 * 24);
+      if (signedError || !signed?.signedUrl) {
+        return json(req, 500, { error: "image_sign_failed" });
+      }
+
+      completed = true;
+      return json(req, 200, {
+        url: signed.signedUrl,
+        path: storagePath,
+        model: selectedModel,
+        provider: "cloudflare-workers-ai",
+        aspect_ratio: aspectRatio,
       });
+    } finally {
+      if (!completed) {
+        if (storagePath) {
+          await context.service.storage
+            .from("campaign-assets")
+            .remove([storagePath]);
+        }
+        await context.service
+          .from("visual_render_claims")
+          .delete()
+          .eq("user_id", context.user.id)
+          .eq("request_id", requestId)
+          .eq("action", action);
+        if (action === MANUAL_ACTION) {
+          await context.service.rpc("refund_generation", {
+            p_user_id: context.user.id,
+            p_request_id: requestId,
+            p_reason: "image_render_failed",
+          });
+        }
+      }
     }
-
-    const bytes = decodeBase64(generated.data);
-    if (bytes.byteLength > 12 * 1024 * 1024) {
-      return json(req, 502, { error: "image_too_large" });
-    }
-
-    const extension = extensionForMime(generated.mimeType);
-    const storagePath = `${context.user.id}/generated/${crypto.randomUUID()}.${extension}`;
-    const { error: uploadError } = await context.service.storage
-      .from("campaign-assets")
-      .upload(storagePath, bytes, {
-        cacheControl: "31536000",
-        contentType: generated.mimeType,
-        upsert: false,
-      });
-    if (uploadError) {
-      console.error(
-        JSON.stringify({
-          event: "generated_image_upload_failed",
-          code: uploadError.message,
-        }),
-      );
-      return json(req, 500, { error: "image_upload_failed" });
-    }
-
-    const { data: signed, error: signedError } = await context.service.storage
-      .from("campaign-assets")
-      .createSignedUrl(storagePath, 60 * 60 * 24);
-    if (signedError || !signed?.signedUrl) {
-      return json(req, 500, { error: "image_sign_failed" });
-    }
-
-    return json(req, 200, {
-      url: signed.signedUrl,
-      path: storagePath,
-      model: selectedModel,
-      provider: "cloudflare-workers-ai",
-      aspect_ratio: aspectRatio,
-    });
   } catch (error) {
     const code = error instanceof Error ? error.message : "internal_error";
     const status =

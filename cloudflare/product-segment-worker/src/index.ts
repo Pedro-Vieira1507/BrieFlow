@@ -2,13 +2,8 @@ interface Env {
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: { segment?: "foreground" }): {
-        output(options: {
-          format: "image/webp";
-          quality?: number;
-        }): Promise<{
-          response(options?: {
-            headers?: Record<string, string>;
-          }): Response;
+        output(options: { format: "image/webp"; quality?: number }): Promise<{
+          response(options?: { headers?: Record<string, string> }): Response;
         }>;
       };
     };
@@ -40,8 +35,7 @@ export default {
     }
 
     try {
-      const transformed = await env.IMAGES
-        .input(request.body)
+      const transformed = await env.IMAGES.input(request.body)
         .transform({ segment: "foreground" })
         .output({ format: "image/webp", quality: 96 });
 

@@ -96,11 +96,11 @@ export function json(
 }
 
 export function preflight(req: Request): Response | null {
-  if (req.method !== "OPTIONS") return null;
   const origin = req.headers.get("Origin");
   if (origin && !allowedOrigin(req)) {
     return json(req, 403, { error: "origin_not_allowed" });
   }
+  if (req.method !== "OPTIONS") return null;
   return new Response(null, { status: 204, headers: responseHeaders(req) });
 }
 

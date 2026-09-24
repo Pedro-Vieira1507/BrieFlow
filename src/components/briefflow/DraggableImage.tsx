@@ -66,24 +66,10 @@ export function DraggableImage({
   const initialScale = useRef(1);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const isSupabaseStorageAsset =
-    safeSrc.includes(".supabase.co/storage/v1/object/");
-
-  const isExternal =
-    !!safeSrc &&
-    safeSrc.startsWith("http") &&
-    !isSupabaseStorageAsset &&
-    !safeSrc.includes("wsrv.nl") &&
-    !safeSrc.includes("picsum.photos");
-
-  const proxy1 = isExternal
-    ? `https://wsrv.nl/?url=${encodeURIComponent(safeSrc)}&output=webp&w=1200&q=95`
-    : safeSrc;
   const [imgSrc, setImgSrc] = useState<string | undefined>(() => {
-    return safeSrc.startsWith("blob:") ? undefined : proxy1;
+    return safeSrc.startsWith("blob:") ? undefined : safeSrc;
   });
 
-  const [proxyLevel, setProxyLevel] = useState(0);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
@@ -100,17 +86,16 @@ export function DraggableImage({
         })
         .catch((err) => {
           console.error("Failed to convert blob to base64", err);
-          if (isMounted) setImgSrc(proxy1);
+          if (isMounted) setImgSrc(safeSrc);
         });
     } else {
-      if (isMounted) setImgSrc(proxy1);
+      if (isMounted) setImgSrc(safeSrc);
     }
-    setProxyLevel(0);
     setFailed(false);
     return () => {
       isMounted = false;
     };
-  }, [safeSrc, proxy1]);
+  }, [safeSrc]);
 
   useEffect(() => {
     const currentCache = positionCache.get(cacheKey);
@@ -233,16 +218,8 @@ export function DraggableImage({
   };
 
   const handleImgError = () => {
-    if (isExternal && proxyLevel === 0) {
-      setProxyLevel(1);
-      setImgSrc(safeSrc);
-    } else {
-      setFailed(true);
-    }
+    setFailed(true);
   };
-
-  const isSafeOrigin =
-    imgSrc?.startsWith("data:") || imgSrc?.startsWith("blob:");
 
   if (failed && !isExport) {
     return (
@@ -301,7 +278,6 @@ export function DraggableImage({
         <img
           src={imgSrc}
           alt="Produto"
-          crossOrigin={isSafeOrigin ? undefined : "anonymous"}
           loading="lazy"
           decoding="async"
           className="pointer-events-none w-full h-auto select-none bg-transparent object-contain"

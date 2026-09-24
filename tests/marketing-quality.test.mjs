@@ -266,3 +266,115 @@ test("social fallback omits CORS mode for local data images", () => {
   assert.match(source, /url\.startsWith\("data:"\)/);
   assert.doesNotMatch(source, /src=\{url\}\s+crossOrigin="anonymous"/);
 });
+
+test("replaces a wholly unsupported production story with confirmed product context", () => {
+  const sanitized = sanitizeGeneratedCopy(
+    "email",
+    {
+      subject: "Conheça o Café Aurora",
+      preheader: "",
+      headline: "Qualidade e origem",
+      subtitle: "",
+      body: "Cada xícara carrega a história de quem cultivou, colheu e torrou com dedicação.",
+      ctaText: "Conhecer",
+      ctaVariant: "primary",
+      keyBenefits: [],
+      objectionsHandled: [],
+      heroBadge: "",
+      benefitTitle: "",
+      secondaryCta: "",
+      urgencyText: "",
+      testimonials: [],
+      footerInfo: "",
+      imagePrompt: "coffee cup, no text",
+      layoutStyle: "centered",
+      backgroundShape: "square",
+    },
+    {
+      ...baseBrief,
+      product: "Café especial brasileiro",
+      context: "Qualidade e origem",
+      offer: "",
+    },
+  );
+
+  assert.equal(sanitized.body, "Café especial brasileiro");
+});
+
+test("removes unsupported packaging and conscious-choice claims from slides", () => {
+  const sanitized = sanitizeGeneratedCopy(
+    "slides",
+    {
+      title: "Café Aurora",
+      subtitle: "",
+      summary: "Apresentação da marca.",
+      duration: "",
+      sections: [
+        {
+          title: "Produto",
+          body: "Conheça o Café Aurora. Uma escolha consciente em cada xícara.",
+          items: ["Café especial brasileiro", "Torrefação artesanal"],
+          timing: "",
+          visualDirection: "Mostrar a embalagem do Café Aurora.",
+          speakerNotes: "",
+        },
+      ],
+      cta: "Conhecer",
+      keywords: [],
+      disclaimer: "",
+      imagePrompt: "coffee campaign, no text",
+      themeColor: "#0f172a",
+      secondaryColor: "#475569",
+    },
+    {
+      ...baseBrief,
+      product: "Café especial brasileiro",
+      context: "Qualidade e origem",
+      offer: "",
+    },
+  );
+
+  assert.equal(sanitized.sections[0].body, "Conheça o Café Aurora.");
+  assert.deepEqual(sanitized.sections[0].items, ["Café especial brasileiro"]);
+  assert.equal(sanitized.sections[0].visualDirection, "");
+});
+
+test("unbranded visual guardrail forbids invented labels without a product image", () => {
+  const sanitized = sanitizeGeneratedCopy(
+    "banner",
+    {
+      headline: "Conheça o Café Aurora",
+      subheadline: "",
+      body: "Café especial brasileiro.",
+      ctaText: "Conhecer",
+      ctaVariant: "primary",
+      keyBenefits: [],
+      objectionsHandled: [],
+      layoutStyle: "split",
+      backgroundShape: "minimalist",
+      imagePrompt:
+        "coffee cup on a table, premium commercial advertising key visual, no text",
+    },
+    {
+      ...baseBrief,
+      product: "Café especial brasileiro",
+      productImageUrl: undefined,
+      offer: "",
+    },
+  );
+
+  assert.match(
+    sanitized.imagePrompt,
+    /unbranded with completely blank surfaces/i,
+  );
+  assert.match(sanitized.imagePrompt, /never invent a brand mark or label/i);
+});
+
+test("social offer visibility uses the shared semantic-empty guard", () => {
+  const source = readFileSync(
+    new URL("../src/components/briefflow/SocialPreview.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(source, /const hasOffer = !isEmptyLike\(offerStr\)/);
+});

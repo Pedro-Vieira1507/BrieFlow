@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { MessageSquareText, Sparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -8,24 +8,45 @@ import { useBriefflowAgent } from "@/hooks/useBriefflowAgent";
 import { cn } from "@/lib/utils";
 import { useBriefflowStore } from "@/store/briefflow";
 
-import { AuthModal } from "./AuthModal";
 import { BrandPalette } from "./BrandPalette";
 import { ChatPanel } from "./ChatPanel";
-import { LibraryModal } from "./LibraryModal";
 import { PageBuilder } from "./PageBuilder";
-import { ProfileSettingsModal } from "./ProfileSettingsModal";
-import { ContentCatalogModal } from "./ContentCatalogModal";
 import { CONTENT_FORMATS } from "@/lib/plans";
 import type { MaterialType } from "@/types/brief";
+import { AuthModal } from "./AuthModal";
+
+const LibraryModal = lazy(() =>
+  import("./LibraryModal").then((module) => ({ default: module.LibraryModal })),
+);
+const ProfileSettingsModal = lazy(() =>
+  import("./ProfileSettingsModal").then((module) => ({
+    default: module.ProfileSettingsModal,
+  })),
+);
+const ContentCatalogModal = lazy(() =>
+  import("./ContentCatalogModal").then((module) => ({
+    default: module.ContentCatalogModal,
+  })),
+);
 
 export function WorkspaceShell() {
-  const { brandContext, authOpen, builder, messages, setAuthOpen, user } =
-    useBriefflowStore();
+  const {
+    brandContext,
+    authOpen,
+    builder,
+    libraryOpen,
+    messages,
+    setAuthOpen,
+    user,
+  } = useBriefflowStore();
   const { handleSend, generateCampaign, regenerateChannel } =
     useBriefflowAgent();
   const [mobileChatOpen, setMobileChatOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [catalogOpen, setCatalogOpen] = useState(false);
+  const [pendingMaterial, setPendingMaterial] = useState<MaterialType | null>(
+    null,
+  );
 
   useEffect(() => {
     document.documentElement.classList.add("dark");
@@ -35,23 +56,38 @@ export function WorkspaceShell() {
     handleSend(text, false);
   };
 
+  const openFormat = useCallback(
+    (material: MaterialType) => {
+      const hasBriefing =
+        messages.some((message) => message.role === "user") ||
+        Boolean(builder.discoveryPlan);
+      if (!hasBriefing) {
+        void handleSend(
+          `Quero criar ${CONTENT_FORMATS[material].label}. Antes de gerar, conduza um briefing objetivo comigo.`,
+          false,
+        );
+        setMobileChatOpen(true);
+        return;
+      }
+      void regenerateChannel(material);
+    },
+    [builder.discoveryPlan, handleSend, messages, regenerateChannel],
+  );
+
+  useEffect(() => {
+    if (!user || !pendingMaterial) return;
+    const material = pendingMaterial;
+    setPendingMaterial(null);
+    openFormat(material);
+  }, [openFormat, pendingMaterial, user]);
+
   const handleSelectFormat = (material: MaterialType) => {
     if (!user) {
+      setPendingMaterial(material);
       setAuthOpen(true);
       return;
     }
-    const hasBriefing =
-      messages.some((message) => message.role === "user") ||
-      Boolean(builder.discoveryPlan);
-    if (!hasBriefing) {
-      void handleSend(
-        `Quero criar ${CONTENT_FORMATS[material].label}. Antes de gerar, conduza um briefing objetivo comigo.`,
-        false,
-      );
-      setMobileChatOpen(true);
-      return;
-    }
-    void regenerateChannel(material);
+    openFormat(material);
   };
 
   return (
@@ -116,16 +152,22 @@ export function WorkspaceShell() {
       </section>
 
       <AuthModal open={authOpen} onOpenChange={setAuthOpen} />
-      <ProfileSettingsModal
-        open={settingsOpen}
-        onOpenChange={setSettingsOpen}
-      />
-      <LibraryModal />
-      <ContentCatalogModal
-        open={catalogOpen}
-        onOpenChange={setCatalogOpen}
-        onSelect={handleSelectFormat}
-      />
+      <Suspense fallback={null}>
+        {settingsOpen ? (
+          <ProfileSettingsModal
+            open={settingsOpen}
+            onOpenChange={setSettingsOpen}
+          />
+        ) : null}
+        {libraryOpen ? <LibraryModal /> : null}
+        {catalogOpen ? (
+          <ContentCatalogModal
+            open={catalogOpen}
+            onOpenChange={setCatalogOpen}
+            onSelect={handleSelectFormat}
+          />
+        ) : null}
+      </Suspense>
       <Toaster richColors position="top-right" theme="dark" />
     </main>
   );

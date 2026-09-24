@@ -47,7 +47,6 @@ export function useBriefflowAgent() {
     messages,
     builder,
     brandContext,
-    uploadedImage,
     setMessages,
     appendMessage,
     updateMessage,

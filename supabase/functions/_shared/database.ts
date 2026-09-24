@@ -89,6 +89,12 @@ export type Database = {
         processed_at: string | null;
       }>;
       subscriptions: Table<SubscriptionRow>;
+      visual_render_claims: Table<{
+        user_id: string;
+        request_id: string;
+        action: string;
+        claimed_at: string;
+      }>;
     };
     Views: Record<string, never>;
     Functions: {
@@ -112,6 +118,18 @@ export type Database = {
       check_rate_limit: {
         Args: { p_user_id: string; p_scope: string; p_limit: number };
         Returns: boolean;
+      };
+      authorize_visual_render: {
+        Args: {
+          p_user_id: string;
+          p_request_id: string;
+          p_action: string;
+        };
+        Returns: Array<{
+          ok: boolean;
+          code: string;
+          credits_remaining: number | null;
+        }>;
       };
       claim_stripe_webhook: {
         Args: { p_event_id: string; p_event_type: string };

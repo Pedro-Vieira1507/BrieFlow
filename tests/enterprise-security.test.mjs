@@ -123,6 +123,58 @@ test("scraping validates DNS and every redirect before downloading", async () =>
   assert.doesNotMatch(scrape, /redirect: "follow"/);
 });
 
+test("product segmentation reuses the SSRF-safe bounded downloader", async () => {
+  const segment = await readFile(
+    new URL("../supabase/functions/product-segment/index.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(segment, /fetchPublicResource/);
+  assert.match(segment, /maxBytes: MAX_SOURCE_BYTES/);
+  assert.match(segment, /maxRedirects: 3/);
+  assert.doesNotMatch(segment, /redirect: "follow"/);
+});
+
+test("image rendering is bound to one paid generation request", async () => {
+  const [renderer, migration] = await Promise.all([
+    readFile(
+      new URL("../supabase/functions/image-render/index.ts", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL(
+        "../supabase/migrations/20260918193144_authorize_visual_render.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+  ]);
+
+  assert.match(renderer, /authorize_visual_render/);
+  assert.match(renderer, /image_render_not_authorized/);
+  assert.match(renderer, /duplicate_request/);
+  assert.match(migration, /primary key \(user_id, request_id, action\)/);
+  assert.match(migration, /from public\.authorize_generation/);
+  assert.match(migration, /debit\.action = p_action/);
+  assert.match(migration, /not exists \([\s\S]*entry_type = 'refund'/);
+  assert.match(
+    migration,
+    /revoke all on function public\.authorize_visual_render[\s\S]*from public, anon, authenticated/,
+  );
+});
+
+test("CORS rejects disallowed origins before processing non-preflight requests", async () => {
+  const http = await readFile(
+    new URL("../supabase/functions/_shared/http.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(
+    http,
+    /const origin = req\.headers\.get\("Origin"\)[\s\S]*origin_not_allowed[\s\S]*req\.method !== "OPTIONS"/,
+  );
+});
+
 test("SSRF guard blocks private and transition addresses across IP families", () => {
   for (const address of [
     "127.0.0.1",

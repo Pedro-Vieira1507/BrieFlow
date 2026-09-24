@@ -15,8 +15,17 @@ const EMPTY_TOKENS = new Set([
   "none",
   "nao informado",
   "não informado",
+  "nao informada",
+  "não informada",
+  "nao informados",
+  "não informados",
+  "nao informadas",
+  "não informadas",
   "sem informacao",
   "sem informação",
+  "sem oferta definida",
+  "oferta nao informada",
+  "oferta não informada",
 ]);
 
 /**

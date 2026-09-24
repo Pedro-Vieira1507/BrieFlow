@@ -25,6 +25,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
+import { useCreditsStore } from "@/hooks/useCredits";
 import { cleanText, isEmptyLike } from "@/lib/sanitize";
 import { uploadCampaignAsset } from "@/lib/supabase";
 import { analyzeImageWithVisionFn } from "@/lib/vision-api";
@@ -126,7 +127,8 @@ function rankProductImages(
       if (/original|large|zoom|1200|1400|1500|1600|2000|2048/i.test(url)) {
         score += 90;
       }
-      if (/thumb|thumbnail|small|mini|icon|sprite/i.test(normalized)) score -= 300;
+      if (/thumb|thumbnail|small|mini|icon|sprite/i.test(normalized))
+        score -= 300;
       if (url.startsWith("data:") || url.startsWith("blob:")) score += 700;
       return { url, score };
     })
@@ -278,9 +280,13 @@ export function BannerPreview({
   const imagePrompt = cleanText(state.imagePrompt);
 
   const requestedLayout = state.layoutStyle ?? "split";
-  const layoutStyle = ["split", "reverse", "centered", "minimalist", "diagonal"].includes(
-    requestedLayout,
-  )
+  const layoutStyle = [
+    "split",
+    "reverse",
+    "centered",
+    "minimalist",
+    "diagonal",
+  ].includes(requestedLayout)
     ? requestedLayout
     : "split";
   const isReverse = layoutStyle === "reverse";
@@ -394,7 +400,9 @@ export function BannerPreview({
   ) => {
     const files = Array.from(event.target.files ?? []);
     if (!files.length) return;
-    const toastId = toast.loading(`Enviando ${files.length} imagem(ns) de produto...`);
+    const toastId = toast.loading(
+      `Enviando ${files.length} imagem(ns) de produto...`,
+    );
     try {
       const urls: string[] = [];
       for (const file of files) {
@@ -414,7 +422,9 @@ export function BannerPreview({
       );
     } catch (error) {
       console.error(error);
-      toast.error("Não foi possível enviar a imagem do produto.", { id: toastId });
+      toast.error("Não foi possível enviar a imagem do produto.", {
+        id: toastId,
+      });
     }
     event.target.value = "";
   };
@@ -432,7 +442,9 @@ export function BannerPreview({
 
       setAnalyzingColors(true);
       try {
-        const vision = await analyzeImageWithVisionFn({ data: { imageUrl: url } });
+        const vision = await analyzeImageWithVisionFn({
+          data: { imageUrl: url },
+        });
         if (vision.primaryBrandColor) {
           patchState({
             themeColor: vision.primaryBrandColor,
@@ -440,7 +452,10 @@ export function BannerPreview({
           });
         }
       } catch (visionError) {
-        console.warn("Fundo aplicado sem leitura automática de paleta.", visionError);
+        console.warn(
+          "Fundo aplicado sem leitura automática de paleta.",
+          visionError,
+        );
       }
     } catch (error) {
       console.error(error);
@@ -453,7 +468,9 @@ export function BannerPreview({
 
   const handleRegenerateVisual = async () => {
     if (!imagePrompt) {
-      toast.error("Este banner ainda não possui direção visual para regenerar.");
+      toast.error(
+        "Este banner ainda não possui direção visual para regenerar.",
+      );
       return;
     }
     setIsRenderingVisual(true);
@@ -464,6 +481,8 @@ export function BannerPreview({
         : `${imagePrompt}, create one coherent advertising scene, no collage, no thumbnail grid`;
       const rendered = await renderCampaignImage({
         prompt: productAwarePrompt,
+        requestId: crypto.randomUUID(),
+        action: "banner_visual",
         aspectRatio: "16:9",
         imageSize: "1K",
       });
@@ -472,9 +491,12 @@ export function BannerPreview({
         imageSeed: Math.floor(Math.random() * 1_000_000),
       });
       toast.success("Novo visual aplicado ao banner.", { id: toastId });
+      void useCreditsStore.getState().refresh();
     } catch (error) {
       console.error(error);
-      toast.error("Não foi possível gerar um novo visual agora.", { id: toastId });
+      toast.error("Não foi possível gerar um novo visual agora.", {
+        id: toastId,
+      });
     } finally {
       setIsRenderingVisual(false);
     }
@@ -490,7 +512,10 @@ export function BannerPreview({
   const ctaTextColor = contrastText(ctaBackground);
 
   return (
-    <div className="mx-auto flex w-full flex-col space-y-4" data-testid="banner-preview">
+    <div
+      className="mx-auto flex w-full flex-col space-y-4"
+      data-testid="banner-preview"
+    >
       <div
         ref={previewFrameRef}
         className="relative flex w-full justify-center overflow-hidden"
@@ -790,7 +815,9 @@ export function BannerPreview({
                       <Editable
                         as="span"
                         value={badgePrimary}
-                        onChange={(value) => patchState({ badgePrimary: value })}
+                        onChange={(value) =>
+                          patchState({ badgePrimary: value })
+                        }
                         style={{ color: contrastText(themeColor) }}
                       />
                     </div>
@@ -808,7 +835,9 @@ export function BannerPreview({
                       <Editable
                         as="span"
                         value={badgeSecondary}
-                        onChange={(value) => patchState({ badgeSecondary: value })}
+                        onChange={(value) =>
+                          patchState({ badgeSecondary: value })
+                        }
                         style={{ color: textColor }}
                       />
                     </div>
@@ -823,12 +852,20 @@ export function BannerPreview({
       {!isExportClone && (
         <div className="editor-toolbar mt-3 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-border-subtle bg-surface-1/85 p-3 shadow-[var(--shadow-soft)] backdrop-blur-xl">
           <div className="flex min-w-0 items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-fg-muted">
-            <span className="rounded bg-brand/10 px-2 py-1 text-brand">BANNER</span>
+            <span className="rounded bg-brand/10 px-2 py-1 text-brand">
+              BANNER
+            </span>
             {hasProduct && (
-              <span>{productDisplayMode === "hero" ? "Produto hero" : "Vitrine"}</span>
+              <span>
+                {productDisplayMode === "hero" ? "Produto hero" : "Vitrine"}
+              </span>
             )}
-            {isRenderingVisual && <span className="animate-pulse">Gerando visual…</span>}
-            {analyzingColors && <span className="animate-pulse">Lendo paleta…</span>}
+            {isRenderingVisual && (
+              <span className="animate-pulse">Gerando visual…</span>
+            )}
+            {analyzingColors && (
+              <span className="animate-pulse">Lendo paleta…</span>
+            )}
           </div>
 
           <div className="flex flex-wrap items-center justify-end gap-2">
@@ -856,7 +893,10 @@ export function BannerPreview({
               onClick={handleRegenerateVisual}
             >
               <RefreshCw
-                className={cn("mr-1.5 size-3.5", isRenderingVisual && "animate-spin")}
+                className={cn(
+                  "mr-1.5 size-3.5",
+                  isRenderingVisual && "animate-spin",
+                )}
               />
               Gerar visual
             </Button>
@@ -893,23 +933,36 @@ export function BannerPreview({
                       <div className="grid grid-cols-2 gap-2">
                         <Button
                           size="sm"
-                          variant={productDisplayMode === "hero" ? "default" : "outline"}
+                          variant={
+                            productDisplayMode === "hero"
+                              ? "default"
+                              : "outline"
+                          }
                           className="h-7 text-[11px]"
-                          onClick={() => patchState({ productDisplayMode: "hero" })}
+                          onClick={() =>
+                            patchState({ productDisplayMode: "hero" })
+                          }
                         >
                           Hero único
                         </Button>
                         <Button
                           size="sm"
-                          variant={productDisplayMode === "gallery" ? "default" : "outline"}
+                          variant={
+                            productDisplayMode === "gallery"
+                              ? "default"
+                              : "outline"
+                          }
                           className="h-7 text-[11px]"
-                          onClick={() => patchState({ productDisplayMode: "gallery" })}
+                          onClick={() =>
+                            patchState({ productDisplayMode: "gallery" })
+                          }
                         >
                           Vitrine
                         </Button>
                       </div>
                       <p className="text-[10px] leading-4 text-fg-muted">
-                        Use vitrine apenas quando a campanha realmente precisar mostrar vários produtos ou ângulos.
+                        Use vitrine apenas quando a campanha realmente precisar
+                        mostrar vários produtos ou ângulos.
                       </p>
                     </div>
                   )}
@@ -919,15 +972,19 @@ export function BannerPreview({
                       <LayoutTemplate className="mr-1.5 size-3" /> Composição
                     </h4>
                     <div className="grid grid-cols-3 gap-2">
-                      {([
-                        ["split", "Esquerda"],
-                        ["reverse", "Direita"],
-                        ["centered", "Centro"],
-                      ] as const).map(([value, label]) => (
+                      {(
+                        [
+                          ["split", "Esquerda"],
+                          ["reverse", "Direita"],
+                          ["centered", "Centro"],
+                        ] as const
+                      ).map(([value, label]) => (
                         <Button
                           key={value}
                           size="sm"
-                          variant={layoutStyle === value ? "default" : "outline"}
+                          variant={
+                            layoutStyle === value ? "default" : "outline"
+                          }
                           className="h-7 text-[11px]"
                           onClick={() => patchState({ layoutStyle: value })}
                         >
@@ -942,15 +999,19 @@ export function BannerPreview({
                       <Layers className="mr-1.5 size-3" /> Tratamento
                     </h4>
                     <div className="grid grid-cols-3 gap-2">
-                      {([
-                        ["minimalist", "Clean"],
-                        ["diagonal", "Diagonal"],
-                        ["frame", "Moldura"],
-                      ] as const).map(([value, label]) => (
+                      {(
+                        [
+                          ["minimalist", "Clean"],
+                          ["diagonal", "Diagonal"],
+                          ["frame", "Moldura"],
+                        ] as const
+                      ).map(([value, label]) => (
                         <Button
                           key={value}
                           size="sm"
-                          variant={backgroundShape === value ? "default" : "outline"}
+                          variant={
+                            backgroundShape === value ? "default" : "outline"
+                          }
                           className="h-7 px-2 text-[10px]"
                           onClick={() => patchState({ backgroundShape: value })}
                         >
@@ -965,19 +1026,26 @@ export function BannerPreview({
                       <Palette className="mr-1.5 size-3" /> Paleta
                     </h4>
                     <div className="grid grid-cols-3 gap-3">
-                      {([
-                        ["themeColor", "Marca", themeColor],
-                        ["secondaryColor", "Base", secondaryColor],
-                        ["textColor", "Texto", textColor],
-                      ] as const).map(([key, label, value]) => (
-                        <label key={key} className="space-y-1 text-[10px] text-fg-muted">
+                      {(
+                        [
+                          ["themeColor", "Marca", themeColor],
+                          ["secondaryColor", "Base", secondaryColor],
+                          ["textColor", "Texto", textColor],
+                        ] as const
+                      ).map(([key, label, value]) => (
+                        <label
+                          key={key}
+                          className="space-y-1 text-[10px] text-fg-muted"
+                        >
                           <span>{label}</span>
                           <input
                             type="color"
                             value={value}
                             className="h-9 w-full cursor-pointer rounded-lg border border-border-subtle bg-transparent p-1"
                             onChange={(event) =>
-                              patchState({ [key]: event.target.value } as PremiumBannerPatch)
+                              patchState({
+                                [key]: event.target.value,
+                              } as PremiumBannerPatch)
                             }
                           />
                         </label>
@@ -990,15 +1058,21 @@ export function BannerPreview({
                       <Type className="mr-1.5 size-3" /> Tipografia
                     </h4>
                     <div className="grid grid-cols-3 gap-2">
-                      {([
-                        ["sans", "Sans"],
-                        ["serif", "Serif"],
-                        ["mono", "Mono"],
-                      ] as const).map(([value, label]) => (
+                      {(
+                        [
+                          ["sans", "Sans"],
+                          ["serif", "Serif"],
+                          ["mono", "Mono"],
+                        ] as const
+                      ).map(([value, label]) => (
                         <Button
                           key={value}
                           size="sm"
-                          variant={(state.fontFamily ?? "sans") === value ? "default" : "outline"}
+                          variant={
+                            (state.fontFamily ?? "sans") === value
+                              ? "default"
+                              : "outline"
+                          }
                           className="h-7 text-[11px]"
                           onClick={() => patchState({ fontFamily: value })}
                         >
