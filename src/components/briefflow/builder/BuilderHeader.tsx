@@ -109,7 +109,7 @@ export function BuilderHeader({
             title="Criar outro formato"
             onClick={onOpenContentCatalog}
             disabled={loading}
-            className="size-9 rounded-xl border-border-strong bg-surface-1/50 p-0 text-fg-secondary transition hover:border-brand/30 hover:bg-surface-2 hover:text-fg-primary disabled:opacity-40 sm:h-9 sm:w-auto sm:px-3"
+            className="size-11 rounded-xl border-border-strong bg-surface-1/50 p-0 text-fg-secondary transition hover:border-brand/30 hover:bg-surface-2 hover:text-fg-primary disabled:opacity-40 sm:h-9 sm:w-auto sm:px-3"
           >
             <LayoutGrid className="size-3.5 sm:mr-2" />
             <span className="hidden sm:inline">Formatos</span>
@@ -122,7 +122,7 @@ export function BuilderHeader({
             title="Exportar campanha"
             onClick={onExport}
             disabled={!isSaveable || loading || isExporting}
-            className="size-9 rounded-xl border-border-strong bg-surface-1/50 p-0 text-fg-secondary transition hover:border-brand/30 hover:bg-surface-2 hover:text-fg-primary disabled:opacity-40 sm:h-9 sm:w-auto sm:px-3"
+            className="size-11 rounded-xl border-border-strong bg-surface-1/50 p-0 text-fg-secondary transition hover:border-brand/30 hover:bg-surface-2 hover:text-fg-primary disabled:opacity-40 sm:h-9 sm:w-auto sm:px-3"
           >
             {isExporting ? (
               <Loader2 className="size-3.5 animate-spin sm:mr-2" />
@@ -139,7 +139,7 @@ export function BuilderHeader({
             aria-label="Salvar na biblioteca"
             title="Salvar na biblioteca"
             className={cn(
-              "size-9 rounded-xl bg-brand p-0 text-xs font-semibold text-brand-fg transition hover:-translate-y-px hover:brightness-110 sm:h-9 sm:w-auto sm:px-3",
+              "size-11 rounded-xl bg-brand p-0 text-xs font-semibold text-brand-fg transition hover:-translate-y-px hover:brightness-110 sm:h-9 sm:w-auto sm:px-3",
               "shadow-[var(--shadow-brand)] disabled:translate-y-0 disabled:shadow-none disabled:opacity-40",
             )}
           >
@@ -157,7 +157,7 @@ export function BuilderHeader({
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
-                  className="ml-0.5 flex size-9 items-center justify-center rounded-xl border border-white/10 bg-gradient-to-br from-brand to-violet-500 text-xs font-bold text-white shadow-[var(--shadow-brand)] transition hover:brightness-110 sm:ml-1"
+                  className="ml-0.5 flex size-11 items-center justify-center rounded-xl border border-white/10 bg-gradient-to-br from-brand to-violet-500 text-xs font-bold text-white shadow-[var(--shadow-brand)] transition hover:brightness-110 sm:ml-1"
                   title={user.email ?? "Perfil"}
                   aria-label="Abrir menu do perfil"
                 >
@@ -217,7 +217,7 @@ export function BuilderHeader({
               variant="outline"
               onClick={() => setAuthOpen(true)}
               aria-label="Entrar no BrieFlow"
-              className="ml-0.5 size-9 rounded-xl border-border-strong bg-surface-2 p-0 text-fg-secondary hover:text-fg-primary sm:ml-1 sm:h-9 sm:w-auto sm:px-3"
+              className="ml-0.5 size-11 rounded-xl border-border-strong bg-surface-2 p-0 text-fg-secondary hover:text-fg-primary sm:ml-1 sm:h-9 sm:w-auto sm:px-3"
             >
               <LogIn className="size-3.5 sm:mr-1.5" />
               <span className="hidden sm:inline">Entrar</span>

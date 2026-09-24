@@ -2,11 +2,12 @@ import { getAuthToken } from "@/lib/supabase";
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as
-  | string
-  | undefined;
+  string | undefined;
 
 export interface RenderCampaignImageOptions {
   prompt: string;
+  requestId: string;
+  action: "banner" | "email" | "social" | "banner_visual";
   aspectRatio?: "16:9" | "21:9" | "4:3" | "1:1" | "4:5" | "9:16";
   imageSize?: "512" | "1K" | "2K";
   signal?: AbortSignal;
@@ -51,7 +52,9 @@ function readString(value: unknown): string | undefined {
 }
 
 function readNumber(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
 }
 
 function readStringArray(value: unknown): string[] {
@@ -74,7 +77,9 @@ function premiumImagePrompt(rawPrompt: string): string {
   const backgroundGuardrail = isBackgroundPlate
     ? "BACKGROUND PLATE ONLY, environment and supporting surfaces only, absolutely no advertised product, no replica, no similar foreground product, no machine hero, no device hero, no package hero, no merchandise hero, keep the reserved product zone free of standalone objects"
     : "";
-  const guardrail = [backgroundGuardrail, baseGuardrail].filter(Boolean).join(", ");
+  const guardrail = [backgroundGuardrail, baseGuardrail]
+    .filter(Boolean)
+    .join(", ");
 
   const alreadyProtected =
     /no collage/i.test(normalized) &&
@@ -107,6 +112,8 @@ export async function renderCampaignImage(
     },
     body: JSON.stringify({
       prompt: premiumImagePrompt(options.prompt),
+      request_id: options.requestId,
+      action: options.action,
       aspect_ratio: options.aspectRatio ?? "16:9",
       image_size: options.imageSize ?? "1K",
     }),

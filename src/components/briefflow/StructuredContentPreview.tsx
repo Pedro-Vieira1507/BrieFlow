@@ -6,6 +6,7 @@ import {
   Download,
   FileJson,
   ListChecks,
+  Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -15,6 +16,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { CONTENT_FORMATS } from "@/lib/plans";
 import { formatStructuredContentText } from "@/lib/structuredContent";
 import { downloadBlob, sanitizeFilenamePart } from "@/lib/export-utils";
+import {
+  exportStructuredDocument,
+  structuredExportLabel,
+} from "@/lib/structuredDocumentExport";
 import type { BuilderState, StructuredContentDocument } from "@/types/builder";
 
 interface Props {
@@ -30,6 +35,7 @@ export function StructuredContentPreview({
 }: Props) {
   const document = state.structuredContent;
   const [copied, setCopied] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const definition = document ? CONTENT_FORMATS[document.format] : null;
   const text = useMemo(
     () => (document ? formatStructuredContentText(document) : ""),
@@ -69,6 +75,22 @@ export function StructuredContentPreview({
   const filename = sanitizeFilenamePart(
     `${document.format}_${state.brandName || document.title}`,
   );
+  const exportLabel = structuredExportLabel(document);
+
+  const handlePrimaryExport = async () => {
+    if (exporting) return;
+    setExporting(true);
+    const toastId = toast.loading("Preparando arquivo final...");
+    try {
+      const format = await exportStructuredDocument(document, state.brandName);
+      toast.success(`Conteúdo exportado em ${format}.`, { id: toastId });
+    } catch (error) {
+      console.error("Falha ao exportar conteúdo estruturado:", error);
+      toast.error("Não foi possível gerar o arquivo final.", { id: toastId });
+    } finally {
+      setExporting(false);
+    }
+  };
 
   return (
     <article className="mx-auto w-full max-w-4xl overflow-hidden rounded-[28px] border border-border-strong bg-surface-1 shadow-[var(--shadow-elevated)]">
@@ -114,15 +136,16 @@ export function StructuredContentPreview({
               type="button"
               size="sm"
               variant="outline"
-              onClick={() =>
-                downloadBlob(
-                  new Blob([text], { type: "text/plain;charset=utf-8" }),
-                  `${filename}.txt`,
-                )
-              }
+              disabled={exporting}
+              onClick={() => void handlePrimaryExport()}
               className="rounded-xl border-border-strong bg-surface-2"
             >
-              <Download className="mr-2 size-4" /> TXT
+              {exporting ? (
+                <Loader2 className="mr-2 size-4 animate-spin" />
+              ) : (
+                <Download className="mr-2 size-4" />
+              )}
+              {exportLabel}
             </Button>
             <Button
               type="button"

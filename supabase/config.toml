@@ -4,6 +4,9 @@ verify_jwt = false
 [functions.image-render]
 verify_jwt = false
 
+[functions.product-segment]
+verify_jwt = false
+
 [functions.scrape-proxy]
 verify_jwt = true
 
@@ -15,3 +18,9 @@ verify_jwt = true
 
 [functions.stripe-webhook]
 verify_jwt = false
+
+[functions.media-render]
+verify_jwt = true
+
+[functions.multimodal]
+verify_jwt = true

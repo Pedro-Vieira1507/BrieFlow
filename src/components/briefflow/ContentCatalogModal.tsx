@@ -24,6 +24,7 @@ import {
 import { useCredits } from "@/hooks/useCredits";
 import { CONTENT_FORMATS, PLAN_CATALOG, canUseMaterial } from "@/lib/plans";
 import { MATERIAL_TYPES, type MaterialType } from "@/types/brief";
+import { useBriefflowStore } from "@/store/briefflow";
 
 const FORMAT_ICONS: Record<MaterialType, typeof Sparkles> = {
   banner: Image,
@@ -46,10 +47,16 @@ interface Props {
 
 export function ContentCatalogModal({ open, onOpenChange, onSelect }: Props) {
   const { loading, plan } = useCredits();
+  const user = useBriefflowStore((state) => state.user);
   const currentPlan = plan?.plan ?? "free";
 
   const selectFormat = (material: MaterialType) => {
     if (loading) return;
+    if (!user) {
+      onSelect(material);
+      onOpenChange(false);
+      return;
+    }
     const definition = CONTENT_FORMATS[material];
     const allowed = canUseMaterial(currentPlan, material, plan?.allowedFormats);
     if (!allowed) {

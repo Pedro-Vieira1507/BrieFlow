@@ -12,6 +12,7 @@ export async function stripeRequest<T>(
     method: options.method ?? "GET",
     headers: {
       Authorization: `Bearer ${secretKey}`,
+      "Stripe-Version": "2026-07-29.dahlia",
       ...(options.form
         ? { "Content-Type": "application/x-www-form-urlencoded" }
         : {}),
@@ -33,7 +34,7 @@ export async function stripeRequest<T>(
     console.error(
       JSON.stringify({
         event: "stripe_api_error",
-        path,
+        resource: path.split("/").filter(Boolean)[0] ?? "unknown",
         status: response.status,
         code,
       }),

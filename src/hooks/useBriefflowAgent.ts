@@ -30,6 +30,7 @@ import type {
 } from "@/types/builder";
 import { analyzeImageWithVisionFn } from "@/lib/vision-api";
 import { mergeDetectedBriefContext } from "@/lib/discoveryContext";
+import { captureWorkspaceScope } from "@/lib/workspaceScope";
 import {
   asksForProductImage,
   withAttachedProductImage,
@@ -47,7 +48,6 @@ export function useBriefflowAgent() {
     messages,
     builder,
     brandContext,
-    uploadedImage,
     setMessages,
     appendMessage,
     updateMessage,
@@ -60,7 +60,9 @@ export function useBriefflowAgent() {
     setGeneratingLabel,
   } = useBriefflowStore();
 
-  const { generateMaterial } = useGenerateMaterials();
+  const { generateMaterial, cancel } = useGenerateMaterials();
+  const workspaceVersion = useBriefflowStore((state) => state.workspaceVersion);
+  useEffect(() => () => cancel(), [cancel, workspaceVersion]);
 
   const discoveryPlanRef = useRef<DiscoveryPlan | undefined>(undefined);
   const scrapedProductsRef = useRef<ScrapedProductData[]>([]);
@@ -88,6 +90,7 @@ export function useBriefflowAgent() {
 
   const maybeScrapeUrls = useCallback(
     async (text: string): Promise<SiteBrandData | null> => {
+      const isCurrent = captureWorkspaceScope(useBriefflowStore.getState);
       const urls = extractUrlsFromText(text);
       if (urls.length === 0) return null;
 
@@ -98,6 +101,7 @@ export function useBriefflowAgent() {
       setScraping(true);
       try {
         const site = await scrapeWebsite(targetUrl);
+        if (!isCurrent()) return null;
         if (site) {
           mergeSiteIntoContext(site);
           return site;
@@ -105,7 +109,7 @@ export function useBriefflowAgent() {
       } catch {
         // silent
       } finally {
-        setScraping(false);
+        if (isCurrent()) setScraping(false);
       }
       return null;
     },
@@ -167,6 +171,8 @@ export function useBriefflowAgent() {
       targetKeys: string[] = ["all"],
       provider: "ollama" | "omniroute" = "omniroute",
     ) => {
+      const isCurrent = captureWorkspaceScope(useBriefflowStore.getState);
+      if (!isCurrent()) return;
       const plan = discoveryPlanRef.current ?? builderRef.current.discoveryPlan;
 
       const channels: CampaignChannel[] = only ? [only] : ALL_CHANNELS;
@@ -496,6 +502,7 @@ export function useBriefflowAgent() {
             images: uniqueImages,
             provider,
           });
+          if (!isCurrent()) return;
 
           if (!only && channel === "banner") {
             const semanticSpine = [
@@ -608,6 +615,7 @@ Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo terri
             };
           });
         } catch (err) {
+          if (!isCurrent()) return;
           const errorMessage = describeAiError(err);
           console.error(`Erro ao gerar ${channel}:`, errorMessage, err);
           hasErrors = true;
@@ -649,6 +657,8 @@ Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo terri
 
   const handleSend = useCallback(
     async (text: string, isHiddenAction = false) => {
+      const isCurrent = captureWorkspaceScope(useBriefflowStore.getState);
+      if (!isCurrent()) return;
       // O nome legado do provider é mantido por compatibilidade; a chamada de
       // nuvem é sempre roteada pela Edge Function autenticada.
       const provider: "ollama" | "omniroute" = "omniroute";
@@ -695,6 +705,7 @@ Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo terri
 
           if (isUrl) {
             const scraped = await scrapeProductByUrlFn(value).catch(() => null);
+            if (!isCurrent()) return;
             if (scraped) productData = { ...productData, ...scraped };
           }
 
@@ -705,6 +716,7 @@ Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo terri
               const visualResult = await visualSearchFn({
                 data: { query: value },
               });
+              if (!isCurrent()) return;
               if (visualResult.found && visualResult.imageUrl) {
                 productData.imageUrl = visualResult.imageUrl;
                 productData.found = true;
@@ -718,6 +730,7 @@ Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo terri
                 });
               }
             } catch (visualErr) {
+              if (!isCurrent()) return;
               console.error("Erro fatal na busca visual:", visualErr);
             }
             setGeneratingLabel(undefined);
@@ -737,6 +750,7 @@ Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo terri
               const visionResult = await analyzeImageWithVisionFn({
                 data: { imageUrl: productData.imageUrl },
               });
+              if (!isCurrent()) return;
 
               if (visionResult.primaryBrandColor) {
                 const themeColor = visionResult.primaryBrandColor;
@@ -772,6 +786,7 @@ Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo terri
                 }
               }
             } catch (visionErr) {
+              if (!isCurrent()) return;
               console.error(
                 "Falha ao analisar imagem com a Vision API:",
                 visionErr,
@@ -793,7 +808,7 @@ Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo terri
         } catch (e) {
           console.error("Scraping silenciado:", e);
         } finally {
-          setLoading(false);
+          if (isCurrent()) setLoading(false);
         }
       };
 
@@ -805,6 +820,7 @@ Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo terri
       if (!isHiddenAction) {
         setMessages(nextMessages);
         await maybeScrapeUrls(text);
+        if (!isCurrent()) return;
       }
 
       const assistantId = uid();
@@ -848,13 +864,13 @@ Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo terri
             intent: "discovery",
             provider,
             onStream: (partial) => {
-              if (!isHiddenAction) {
+              if (isCurrent() && !isHiddenAction) {
                 updateMessage(assistantId, { content: partial });
               }
             },
           },
         );
-
+        if (!isCurrent()) return;
         useCreditsStore.getState().refresh();
 
         const liveImageAfterResponse =
@@ -913,6 +929,7 @@ Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo terri
         const extractedSku = discoveryPlanRef.current?.productSku;
         if (extractedSku) {
           await tryScrapeProduct(extractedSku, isHiddenAction);
+          if (!isCurrent()) return;
         }
 
         const action = response.action || "discovery_continue";
@@ -937,6 +954,7 @@ Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo terri
           }
         }
       } catch (err) {
+        if (!isCurrent()) return;
         toast.error("Falha ao processar", { description: String(err) });
         if (!isHiddenAction) {
           updateMessage(assistantId, {
@@ -944,7 +962,7 @@ Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo terri
           });
         }
       } finally {
-        setLoading(false);
+        if (isCurrent()) setLoading(false);
       }
     },
     [

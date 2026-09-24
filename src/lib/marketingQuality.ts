@@ -9,6 +9,13 @@ interface ClaimRule {
 
 const CLAIM_RULES: ClaimRule[] = [
   {
+    id: "no_equipment_needed",
+    claim:
+      /\b(?:n[aã]o (?:precisa|necessita|requer)(?: de)?|dispensa|sem necessidade de)\s+equipamentos?(?:\s+especiais|\s+especial)?\b/i,
+    evidence:
+      /\b(?:n[aã]o (?:precisa|necessita|requer)(?: de)?|dispensa|sem necessidade de)\s+equipamentos?(?:\s+especiais|\s+especial)?\b/i,
+  },
+  {
     id: "automatic",
     claim: /\bautom[aá]tic(?:o|a|os|as|amente)\b/i,
     evidence: /\bautom[aá]tic(?:o|a|os|as|amente)\b/i,
@@ -95,6 +102,38 @@ const CLAIM_RULES: ClaimRule[] = [
     evidence:
       /\b(?:[uú]ltimas? unidades?|estoque limitado|por tempo limitado|s[oó] hoje)\b/i,
   },
+  {
+    id: "artisanal_process",
+    claim: /\bartesana(?:l|is|lmente|lidade|lidades)\b/i,
+    evidence: /\bartesana(?:l|is|lmente|lidade|lidades)\b/i,
+  },
+  {
+    id: "local_producers",
+    claim: /\bprodutor(?:es)?\s+loca(?:l|is)\b/i,
+    evidence: /\bprodutor(?:es)?\s+loca(?:l|is)\b/i,
+  },
+  {
+    id: "production_process",
+    claim:
+      /\b(?:cultivad|colhid|torrad)(?:o|a|os|as)?\b|\bquem\s+(?:cultivou|colheu|torrou)\b/i,
+    evidence:
+      /\b(?:cultivad|colhid|torrad)(?:o|a|os|as)?\b|\bquem\s+(?:cultivou|colheu|torrou)\b/i,
+  },
+  {
+    id: "point_of_sale",
+    claim: /\bpontos?\s+de\s+venda\b/i,
+    evidence: /\bpontos?\s+de\s+venda\b/i,
+  },
+  {
+    id: "conscious_choice",
+    claim: /\bescolha\s+consciente\b/i,
+    evidence: /\bescolha\s+consciente\b/i,
+  },
+  {
+    id: "physical_packaging",
+    claim: /\bembalage(?:m|ns)\b/i,
+    evidence: /\bembalage(?:m|ns)\b/i,
+  },
 ];
 
 const STOP_WORDS = new Set([
@@ -140,10 +179,7 @@ function collectConfirmedEvidence(brief: MarketingBrief): string {
   return [
     brief.brandName,
     brief.product,
-    brief.audience,
-    brief.objective,
     brief.offer,
-    brief.tone,
     brief.context,
     brief.productTitle,
     brief.productDescription,
@@ -173,6 +209,7 @@ export function findUnsupportedClaims(
 function removeUnsupportedSentences(
   value: string,
   brief: MarketingBrief,
+  useFactualFallback = false,
 ): string {
   const paragraphs = value.split(/\n{2,}/);
   const safeParagraphs = paragraphs
@@ -188,7 +225,14 @@ function removeUnsupportedSentences(
     .filter(Boolean);
 
   const cleaned = safeParagraphs.join("\n\n").trim();
-  return cleaned || value;
+  if (cleaned || !useFactualFallback) return cleaned;
+
+  return (
+    brief.productDescription?.trim() ||
+    brief.productTitle?.trim() ||
+    brief.product?.trim() ||
+    ""
+  );
 }
 
 function repairFragmentedHeadline(value: string): string {
@@ -296,15 +340,25 @@ function enforceBannerImageDirection(
   const productDirection = brief.productImageUrl
     ? "generate background and supporting scene only, preserve a clean 48 to 55 percent visual zone for the real product cutout, do not invent, duplicate, redraw or replace the real product"
     : brief.product || brief.productTitle
-      ? "show a concrete, recognizable category scene or product context tied directly to the campaign subject; use photorealistic commercial photography when the subject is physical"
+      ? "show a concrete, recognizable category scene or product context tied directly to the campaign subject; use photorealistic commercial photography when the subject is physical; all visible products and packaging must be unbranded with completely blank surfaces; never invent a brand mark or label"
       : "show one concrete campaign scene, environment, object or visual metaphor tied directly to the message; never solve the brief with color gradients alone";
 
   const alreadyCommercial = raw.includes(
     "premium commercial advertising key visual",
   );
-  if (alreadyCommercial) return raw;
+  const alreadyUnbranded = raw.includes(
+    "unbranded with completely blank surfaces",
+  );
+  if (alreadyCommercial && (brief.productImageUrl || alreadyUnbranded)) {
+    return raw;
+  }
 
-  return [raw, subjectDirection, productDirection, COMMERCIAL_BANNER_IMAGE_SUFFIX]
+  return [
+    raw,
+    subjectDirection,
+    productDirection,
+    COMMERCIAL_BANNER_IMAGE_SUFFIX,
+  ]
     .filter(Boolean)
     .join(", ");
 }
@@ -391,7 +445,7 @@ export function sanitizeGeneratedCopy<T extends MaterialType>(
   }
 
   if (typeof sanitized.body === "string") {
-    sanitized.body = removeUnsupportedSentences(sanitized.body, brief);
+    sanitized.body = removeUnsupportedSentences(sanitized.body, brief, true);
   }
   if (typeof sanitized.summary === "string") {
     sanitized.summary = removeUnsupportedSentences(sanitized.summary, brief);

@@ -28,23 +28,13 @@ export function OptimizedImage({
     "loading",
   );
 
-  const isExternal =
-    src &&
-    src.startsWith("http") &&
-    !src.includes("wsrv.nl") &&
-    !src.includes("picsum.photos");
-
-  const proxy1 = isExternal
-    ? `https://wsrv.nl/?url=${encodeURIComponent(src!)}&output=webp&w=400`
-    : src || "";
-  const [imgSrc, setImgSrc] = useState(proxy1);
-  const [proxyLevel, setProxyLevel] = useState(0);
+  const resolvedSrc = src || "";
+  const [imgSrc, setImgSrc] = useState(resolvedSrc);
 
   useEffect(() => {
-    setImgSrc(proxy1);
-    setProxyLevel(0);
+    setImgSrc(resolvedSrc);
     setStatus("loading");
-  }, [proxy1]);
+  }, [resolvedSrc]);
 
   return (
     <div
@@ -76,13 +66,8 @@ export function OptimizedImage({
             onLoad?.(e);
           }}
           onError={(e) => {
-            if (isExternal && proxyLevel === 0) {
-              setProxyLevel(1);
-              setImgSrc(src!);
-            } else {
-              setStatus("error");
-              onError?.(e);
-            }
+            setStatus("error");
+            onError?.(e);
           }}
           className={cn(
             "h-full w-full object-cover transition-opacity duration-500",

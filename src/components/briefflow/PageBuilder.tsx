@@ -1,22 +1,28 @@
 // src/components/briefflow/PageBuilder.tsx
-import { DesignExporter } from "./DesignExporter";
-import { useRef, useState } from "react";
+import { lazy, Suspense, useRef, useState } from "react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useBriefflowStore } from "@/store/briefflow";
 import { isSupabaseConfigured, saveAssetToLibrary } from "@/lib/supabase";
 import { getBuilderCampaignBrandName } from "@/lib/campaignGeneration";
-import { downloadBlob, sanitizeFilenamePart } from "@/lib/export-utils";
-import { formatStructuredContentText } from "@/lib/structuredContent";
+import { exportStructuredDocument } from "@/lib/structuredDocumentExport";
 import { CORE_MATERIAL_TYPES } from "@/types/brief";
+import { captureWorkspaceScope } from "@/lib/workspaceScope";
 
 import { BuilderHeader } from "./builder/BuilderHeader";
 import { GeneratingBanner } from "./builder/GeneratingBanner";
 import { DiscoveryPlanView } from "./builder/DiscoveryPlanView";
 import { BuilderEmptyState } from "./builder/BuilderEmptyState";
 import { CampaignTabs } from "./builder/CampaignTabs";
+import { EditorialReview } from "./builder/EditorialReview";
 
 import type { BuilderState, CampaignAsset } from "@/types/builder";
+
+const DesignExporter = lazy(() =>
+  import("./DesignExporter").then((module) => ({
+    default: module.DesignExporter,
+  })),
+);
 
 interface Props {
   onGenerateCampaign: () => void | Promise<void>;
@@ -41,6 +47,8 @@ export function PageBuilder({
     patchBuilder,
     setAuthOpen,
     setBuilder,
+    activeLibraryAssetId,
+    setActiveLibraryAssetId,
   } = useBriefflowStore();
 
   const [activeTab, setActiveTab] = useState<CampaignAsset["type"]>("banner");
@@ -72,17 +80,27 @@ export function PageBuilder({
 
     isSavingRef.current = true;
     setIsSaving(true);
-    await new Promise((resolve) => setTimeout(resolve, 150));
-
+    const isCurrent = captureWorkspaceScope(useBriefflowStore.getState);
     const toastId = toast.loading("Salvando campanha na biblioteca...");
     try {
       const brandName = getBuilderCampaignBrandName(builder);
-      await saveAssetToLibrary(
+      const saved = await saveAssetToLibrary(
         brandName ? `Campanha ${brandName}` : "Campanha AI",
         builder,
+        activeLibraryAssetId,
+        user.id,
       );
+      if (!isCurrent()) {
+        toast.dismiss(toastId);
+        return;
+      }
+      setActiveLibraryAssetId(saved.id);
       toast.success("Salvo na biblioteca com sucesso!", { id: toastId });
     } catch (error) {
+      if (!isCurrent()) {
+        toast.dismiss(toastId);
+        return;
+      }
       toast.error(
         error instanceof Error ? error.message : "Erro ao salvar a campanha",
         { id: toastId },
@@ -93,7 +111,7 @@ export function PageBuilder({
     }
   };
 
-  const handleExportClick = () => {
+  const handleExportClick = async () => {
     if (!(CORE_MATERIAL_TYPES as readonly string[]).includes(activeTab)) {
       const asset =
         builder.type === "campaign"
@@ -105,13 +123,19 @@ export function PageBuilder({
         return;
       }
       const brand = asset.content.brandName || document.title;
-      downloadBlob(
-        new Blob([formatStructuredContentText(document)], {
-          type: "text/plain;charset=utf-8",
-        }),
-        `${activeTab}_${sanitizeFilenamePart(brand)}.txt`,
-      );
-      toast.success("Conteúdo exportado em TXT.");
+      setIsExporting(true);
+      const toastId = toast.loading("Preparando arquivo final...");
+      try {
+        const format = await exportStructuredDocument(document, brand);
+        toast.success(`Conteúdo exportado em ${format}.`, { id: toastId });
+      } catch (error) {
+        console.error("Falha ao exportar conteúdo estruturado:", error);
+        toast.error("Não foi possível gerar o arquivo final.", {
+          id: toastId,
+        });
+      } finally {
+        setIsExporting(false);
+      }
       return;
     }
     setDesignExporterOpen(true);
@@ -132,7 +156,7 @@ export function PageBuilder({
         isSaving={isSaving}
         isExporting={isExporting}
         loading={loading}
-        onExport={handleExportClick}
+        onExport={() => void handleExportClick()}
         onSave={handleSave}
         onOpenSettings={onOpenSettings}
         onOpenContentCatalog={onOpenContentCatalog}
@@ -159,6 +183,15 @@ export function PageBuilder({
 
           {builder.type === "campaign" && builder.campaignAssets && (
             <div className="fade-in-up">
+              {builder.campaignAssets
+                .filter((asset) => asset.type === activeTab)
+                .map((asset) => (
+                  <EditorialReview
+                    key={asset.id}
+                    asset={asset}
+                    onOpenChat={onOpenChat}
+                  />
+                ))}
               <CampaignTabs
                 assets={builder.campaignAssets}
                 onAssetChange={handleAssetPatch}
@@ -185,17 +218,21 @@ export function PageBuilder({
         </div>
       </div>
 
-      <DesignExporter
-        open={designExporterOpen}
-        onOpenChange={setDesignExporterOpen}
-        state={builder}
-        initialTab={
-          (CORE_MATERIAL_TYPES as readonly string[]).includes(activeTab)
-            ? (activeTab as (typeof CORE_MATERIAL_TYPES)[number])
-            : undefined
-        }
-        onExportingChange={setIsExporting}
-      />
+      <Suspense fallback={null}>
+        {designExporterOpen ? (
+          <DesignExporter
+            open={designExporterOpen}
+            onOpenChange={setDesignExporterOpen}
+            state={builder}
+            initialTab={
+              (CORE_MATERIAL_TYPES as readonly string[]).includes(activeTab)
+                ? (activeTab as (typeof CORE_MATERIAL_TYPES)[number])
+                : undefined
+            }
+            onExportingChange={setIsExporting}
+          />
+        ) : null}
+      </Suspense>
     </div>
   );
 }

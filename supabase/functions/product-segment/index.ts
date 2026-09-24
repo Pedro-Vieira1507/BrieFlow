@@ -5,6 +5,7 @@ import {
   readJson,
   requirePost,
 } from "../_shared/http.ts";
+import { fetchPublicResource } from "../_shared/urls.ts";
 
 interface ProductSegmentBody {
   image_url?: unknown;
@@ -13,20 +14,6 @@ interface ProductSegmentBody {
 const SEGMENTS_PER_MINUTE = 12;
 const MAX_SOURCE_BYTES = 12 * 1024 * 1024;
 const MAX_OUTPUT_BYTES = 12 * 1024 * 1024;
-
-async function fetchWithTimeout(
-  url: string,
-  init: RequestInit,
-  timeoutMs = 45_000,
-): Promise<Response> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, { ...init, signal: controller.signal });
-  } finally {
-    clearTimeout(timeout);
-  }
-}
 
 function isAllowedImageType(contentType: string): boolean {
   return /^image\/(?:jpeg|jpg|png|webp)$/i.test(contentType);
@@ -91,12 +78,13 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    const source = await fetchWithTimeout(imageUrl, {
-      headers: {
-        Accept: "image/avif,image/webp,image/png,image/jpeg,*/*",
-      },
-      redirect: "follow",
+    const sourceResource = await fetchPublicResource(imageUrl, {
+      accept: "image/avif,image/webp,image/png,image/jpeg",
+      maxBytes: MAX_SOURCE_BYTES,
+      timeoutMs: 20_000,
+      maxRedirects: 3,
     });
+    const source = sourceResource.response;
 
     if (!source.ok) {
       return json(req, 502, {
@@ -113,23 +101,16 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    const contentLength = Number(source.headers.get("content-length") ?? "0");
-    if (Number.isFinite(contentLength) && contentLength > MAX_SOURCE_BYTES) {
-      return json(req, 413, { error: "product_image_too_large" });
-    }
+    const sourceBytes = sourceResource.bytes;
 
-    const sourceBytes = new Uint8Array(await source.arrayBuffer());
-    if (sourceBytes.byteLength > MAX_SOURCE_BYTES) {
-      return json(req, 413, { error: "product_image_too_large" });
-    }
-
-    const segmented = await fetchWithTimeout(workerUrl, {
+    const segmented = await fetch(workerUrl, {
       method: "POST",
       headers: {
         "Content-Type": contentType,
         "X-BrieFlow-Segment-Secret": sharedSecret,
       },
-      body: sourceBytes,
+      body: sourceBytes.buffer as ArrayBuffer,
+      signal: AbortSignal.timeout(45_000),
     });
 
     if (!segmented.ok) {
@@ -160,8 +141,7 @@ Deno.serve(async (req: Request) => {
     }
 
     const extension = outputType.includes("png") ? "png" : "webp";
-    const storagePath =
-      `${context.user.id}/segmented/${crypto.randomUUID()}.${extension}`;
+    const storagePath = `${context.user.id}/segmented/${crypto.randomUUID()}.${extension}`;
 
     const { error: uploadError } = await context.service.storage
       .from("campaign-assets")
@@ -196,17 +176,35 @@ Deno.serve(async (req: Request) => {
     });
   } catch (error) {
     const code = error instanceof Error ? error.message : "internal_error";
-    const status =
-      code === "invalid_json"
+    const status = [
+      "invalid_url",
+      "invalid_protocol",
+      "url_credentials_not_allowed",
+      "port_not_allowed",
+      "private_address_blocked",
+      "dns_resolution_failed",
+    ].includes(code)
+      ? 400
+      : code === "invalid_json"
         ? 400
-        : code === "request_too_large"
+        : ["request_too_large", "resource_too_large"].includes(code)
           ? 413
           : code === "AbortError"
             ? 504
             : 500;
 
     return json(req, status, {
-      error: ["invalid_json", "request_too_large"].includes(code)
+      error: [
+        "invalid_url",
+        "invalid_protocol",
+        "url_credentials_not_allowed",
+        "port_not_allowed",
+        "private_address_blocked",
+        "dns_resolution_failed",
+        "invalid_json",
+        "request_too_large",
+        "resource_too_large",
+      ].includes(code)
         ? code
         : "product_segment_failed",
     });

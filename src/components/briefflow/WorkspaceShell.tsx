@@ -1,31 +1,76 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { MessageSquareText, Sparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import {
+  Sheet,
+  SheetContent,
+  SheetTrigger,
+  SheetTitle,
+  SheetDescription,
+} from "@/components/ui/sheet";
 import { Toaster } from "@/components/ui/sonner";
 import { useBriefflowAgent } from "@/hooks/useBriefflowAgent";
 import { cn } from "@/lib/utils";
 import { useBriefflowStore } from "@/store/briefflow";
 
-import { AuthModal } from "./AuthModal";
 import { BrandPalette } from "./BrandPalette";
 import { ChatPanel } from "./ChatPanel";
-import { LibraryModal } from "./LibraryModal";
 import { PageBuilder } from "./PageBuilder";
-import { ProfileSettingsModal } from "./ProfileSettingsModal";
-import { ContentCatalogModal } from "./ContentCatalogModal";
 import { CONTENT_FORMATS } from "@/lib/plans";
 import type { MaterialType } from "@/types/brief";
+import { AuthModal } from "./AuthModal";
+
+const LibraryModal = lazy(() =>
+  import("./LibraryModal").then((module) => ({ default: module.LibraryModal })),
+);
+const ProfileSettingsModal = lazy(() =>
+  import("./ProfileSettingsModal").then((module) => ({
+    default: module.ProfileSettingsModal,
+  })),
+);
+const ContentCatalogModal = lazy(() =>
+  import("./ContentCatalogModal").then((module) => ({
+    default: module.ContentCatalogModal,
+  })),
+);
 
 export function WorkspaceShell() {
-  const { brandContext, authOpen, builder, messages, setAuthOpen, user } =
-    useBriefflowStore();
+  const {
+    brandContext,
+    authOpen,
+    builder,
+    libraryOpen,
+    messages,
+    setAuthOpen,
+    user,
+  } = useBriefflowStore();
   const { handleSend, generateCampaign, regenerateChannel } =
     useBriefflowAgent();
   const [mobileChatOpen, setMobileChatOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [catalogOpen, setCatalogOpen] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState<number | undefined>();
+
+  useEffect(() => {
+    if (!mobileChatOpen || !window.visualViewport) return;
+    const viewport = window.visualViewport;
+    const resize = () => setKeyboardHeight(viewport.height);
+    resize();
+    viewport.addEventListener("resize", resize);
+    return () => viewport.removeEventListener("resize", resize);
+  }, [mobileChatOpen]);
+
+  const openAssistant = () => {
+    if (window.matchMedia("(min-width: 1024px)").matches) {
+      document.querySelector<HTMLTextAreaElement>("aside textarea")?.focus();
+    } else {
+      setMobileChatOpen(true);
+    }
+  };
+  const [pendingMaterial, setPendingMaterial] = useState<MaterialType | null>(
+    null,
+  );
 
   useEffect(() => {
     document.documentElement.classList.add("dark");
@@ -35,23 +80,38 @@ export function WorkspaceShell() {
     handleSend(text, false);
   };
 
+  const openFormat = useCallback(
+    (material: MaterialType) => {
+      const hasBriefing =
+        messages.some((message) => message.role === "user") ||
+        Boolean(builder.discoveryPlan);
+      if (!hasBriefing) {
+        void handleSend(
+          `Quero criar ${CONTENT_FORMATS[material].label}. Antes de gerar, conduza um briefing objetivo comigo.`,
+          false,
+        );
+        setMobileChatOpen(true);
+        return;
+      }
+      void regenerateChannel(material);
+    },
+    [builder.discoveryPlan, handleSend, messages, regenerateChannel],
+  );
+
+  useEffect(() => {
+    if (!user || !pendingMaterial) return;
+    const material = pendingMaterial;
+    setPendingMaterial(null);
+    openFormat(material);
+  }, [openFormat, pendingMaterial, user]);
+
   const handleSelectFormat = (material: MaterialType) => {
     if (!user) {
+      setPendingMaterial(material);
       setAuthOpen(true);
       return;
     }
-    const hasBriefing =
-      messages.some((message) => message.role === "user") ||
-      Boolean(builder.discoveryPlan);
-    if (!hasBriefing) {
-      void handleSend(
-        `Quero criar ${CONTENT_FORMATS[material].label}. Antes de gerar, conduza um briefing objetivo comigo.`,
-        false,
-      );
-      setMobileChatOpen(true);
-      return;
-    }
-    void regenerateChannel(material);
+    openFormat(material);
   };
 
   return (
@@ -78,7 +138,7 @@ export function WorkspaceShell() {
           onGenerateCampaign={generateCampaign}
           onRetry={regenerateChannel}
           onOpenSettings={() => setSettingsOpen(true)}
-          onOpenChat={() => setMobileChatOpen(true)}
+          onOpenChat={openAssistant}
           onOpenContentCatalog={() => setCatalogOpen(true)}
         />
 
@@ -103,8 +163,17 @@ export function WorkspaceShell() {
             </SheetTrigger>
             <SheetContent
               side="bottom"
+              style={
+                keyboardHeight ? { maxHeight: keyboardHeight - 8 } : undefined
+              }
               className="flex h-[94dvh] flex-col rounded-t-[28px] border-t border-border-strong bg-surface-1 p-0 shadow-[0_-24px_80px_rgba(0,0,0,0.55)]"
             >
+              <SheetTitle className="sr-only">
+                Assistente criativo BrieFlow
+              </SheetTitle>
+              <SheetDescription className="sr-only">
+                Converse sobre o briefing e refine as peças da campanha.
+              </SheetDescription>
               <div className="mx-auto mt-2.5 h-1 w-10 rounded-full bg-white/15" />
               {brandContext.site?.colors && (
                 <BrandPalette colors={brandContext.site.colors} />
@@ -116,16 +185,22 @@ export function WorkspaceShell() {
       </section>
 
       <AuthModal open={authOpen} onOpenChange={setAuthOpen} />
-      <ProfileSettingsModal
-        open={settingsOpen}
-        onOpenChange={setSettingsOpen}
-      />
-      <LibraryModal />
-      <ContentCatalogModal
-        open={catalogOpen}
-        onOpenChange={setCatalogOpen}
-        onSelect={handleSelectFormat}
-      />
+      <Suspense fallback={null}>
+        {settingsOpen ? (
+          <ProfileSettingsModal
+            open={settingsOpen}
+            onOpenChange={setSettingsOpen}
+          />
+        ) : null}
+        {libraryOpen ? <LibraryModal /> : null}
+        {catalogOpen ? (
+          <ContentCatalogModal
+            open={catalogOpen}
+            onOpenChange={setCatalogOpen}
+            onSelect={handleSelectFormat}
+          />
+        ) : null}
+      </Suspense>
       <Toaster richColors position="top-right" theme="dark" />
     </main>
   );

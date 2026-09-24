@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState, useRef } from "react";
 import { Editable } from "./Editable";
 import { DraggableImage } from "./DraggableImage";
 import type { BuilderState } from "@/types/builder";
-import { buildPollinationsUrl, buildFallbackUrl } from "@/lib/pollinations";
+import { buildFallbackUrl } from "@/lib/visualFallback";
 import { Button } from "@/components/ui/button";
 import {
   Upload,
@@ -102,18 +102,15 @@ export function EmailPreview({
 
   const heroUrl = useMemo(() => {
     if (!prompt) return null;
-    return useFallback
-      ? buildFallbackUrl(prompt, {
-          width: 1200,
-          height: 600,
-          seed: state.imageSeed,
-        })
-      : buildPollinationsUrl(prompt, {
-          width: 1200,
-          height: 600,
-          seed: state.imageSeed,
-        });
-  }, [prompt, state.imageSeed, useFallback]);
+    if (state.backgroundImageUrl && !useFallback) {
+      return state.backgroundImageUrl;
+    }
+    return buildFallbackUrl(prompt, {
+      width: 1200,
+      height: 600,
+      seed: state.imageSeed,
+    });
+  }, [prompt, state.backgroundImageUrl, state.imageSeed, useFallback]);
 
   const activeBgUrl = state.productImageUrl || heroUrl;
 
@@ -154,7 +151,7 @@ export function EmailPreview({
     const timer = setTimeout(() => {
       setImageStatus((prev) =>
         prev === "loading"
-          ? (useFallback || state.productImageUrl
+          ? (useFallback || state.productImageUrl || !state.backgroundImageUrl
               ? "error"
               : setUseFallback(true),
             "loading")
@@ -162,10 +159,11 @@ export function EmailPreview({
       );
     }, 5000);
     return () => clearTimeout(timer);
-  }, [heroUrl, useFallback, state.productImageUrl]);
+  }, [heroUrl, state.backgroundImageUrl, state.productImageUrl, useFallback]);
 
   const handleImageError = () => {
-    if (!useFallback && !state.productImageUrl) setUseFallback(true);
+    if (!useFallback && !state.productImageUrl && state.backgroundImageUrl)
+      setUseFallback(true);
     else setImageStatus("error");
   };
 

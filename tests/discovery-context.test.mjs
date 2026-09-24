@@ -75,3 +75,28 @@ test("preserva exclusividade quando ela é um fato confirmado", () => {
 
   assert.equal(merged.proposedStrategy, "Ângulo: acesso exclusivo");
 });
+
+test("trata oferta não informada como vazia e remove fatos operacionais inventados", () => {
+  const merged = mergeDetectedBriefContext(
+    {
+      detectedContext: "Café especial brasileiro.",
+      missingInfo: "",
+      proposedStrategy:
+        "Promessa central: qualidade e origem; Prova: histórias de produtores locais e torrefação artesanal; Ação: degustação em pontos de venda e eventos; CTA: conhecer o Café Aurora",
+      offer: "Não informada",
+    },
+    {
+      brandName: "Café Aurora",
+      productName: "Café especial brasileiro",
+      offer: "Sem oferta definida",
+      objective: "Apresentar a marca e incentivar experimentação",
+    },
+  );
+
+  assert.equal(merged.offer, undefined);
+  assert.equal(
+    merged.proposedStrategy,
+    "Promessa central: qualidade e origem; CTA: conhecer o Café Aurora",
+  );
+  assert.doesNotMatch(merged.detectedContext, /Oferta:/);
+});

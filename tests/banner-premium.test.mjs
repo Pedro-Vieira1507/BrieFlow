@@ -7,7 +7,10 @@ const bannerSource = readFileSync(
   "utf8",
 );
 const productSource = readFileSync(
-  new URL("../src/components/briefflow/PremiumProductImage.tsx", import.meta.url),
+  new URL(
+    "../src/components/briefflow/PremiumProductImage.tsx",
+    import.meta.url,
+  ),
   "utf8",
 );
 
@@ -36,7 +39,10 @@ test("visual regeneration explicitly rejects collage-style backgrounds", () => {
 test("product integration removes only edge-connected light backgrounds", () => {
   assert.match(productSource, /estimateEdgeBackground/);
   assert.match(productSource, /removedRatio < 0\.08/);
-  assert.match(productSource, /pixelDistance\(data, offset, background\) <= 30/);
+  assert.match(
+    productSource,
+    /pixelDistance\(data, offset, background\) <= 30/,
+  );
   assert.match(productSource, /data\[index \* 4 \+ 3\] = 0/);
   assert.match(productSource, /refineCutoutEdge/);
   assert.match(productSource, /alpha = Math\.round\(210/);

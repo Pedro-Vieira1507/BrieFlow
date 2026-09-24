@@ -12,7 +12,10 @@ test("chat composer exposes a real product image attachment control", () => {
   assert.match(input, /type="file"/);
   assert.match(input, /image\/png,image\/jpeg,image\/webp/);
   assert.match(input, /Foto real do produto anexada/);
-  assert.match(input, /Use a imagem anexada como foto real principal do produto/);
+  assert.match(
+    input,
+    /Use a imagem anexada como foto real principal do produto/,
+  );
 });
 
 test("chat uploads become the authoritative campaign product image", () => {
@@ -46,8 +49,14 @@ test("product image upload continues automatically when assistant requested it",
 test("discovery agent reads live uploaded image instead of a stale render closure", () => {
   const agent = source("../src/hooks/useBriefflowAgent.ts");
 
-  assert.match(agent, /const liveBeforeRequest = useBriefflowStore\.getState\(\)/);
-  assert.match(agent, /const liveUploadedImage = liveBeforeRequest\.uploadedImage/);
+  assert.match(
+    agent,
+    /const liveBeforeRequest = useBriefflowStore\.getState\(\)/,
+  );
+  assert.match(
+    agent,
+    /const liveUploadedImage = liveBeforeRequest\.uploadedImage/,
+  );
   assert.match(agent, /withAttachedProductImage\([\s\S]*mergedPlanForRequest/);
   assert.match(agent, /liveImageAfterResponse/);
 });
@@ -66,8 +75,14 @@ test("campaign generation prioritizes the live image attached in chat", () => {
   const uploaded = agent.indexOf("[liveUploadedImageForGeneration]");
   const scraped = agent.indexOf("...scrapedProductsRef.current");
 
-  assert.ok(live >= 0, "generation must read uploadedImage from live store state");
-  assert.ok(uploaded >= 0, "live uploaded image must enter the campaign image list");
+  assert.ok(
+    live >= 0,
+    "generation must read uploadedImage from live store state",
+  );
+  assert.ok(
+    uploaded >= 0,
+    "live uploaded image must enter the campaign image list",
+  );
   assert.ok(scraped >= 0, "scraped images must remain available as references");
   assert.ok(
     uploaded < scraped,

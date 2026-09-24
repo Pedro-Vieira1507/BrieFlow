@@ -101,10 +101,9 @@ function BannerRecoveryProductUpload({
         productImageUrl: uploaded[0] ?? productImages[0] ?? null,
       });
 
-      toast.success(
-        "Foto do produto anexada. Agora gere novamente o banner.",
-        { id: toastId },
-      );
+      toast.success("Foto do produto anexada. Agora gere novamente o banner.", {
+        id: toastId,
+      });
     } catch (error) {
       console.error("Falha ao anexar produto durante recuperação:", error);
       toast.error("Não foi possível enviar a foto do produto.", {

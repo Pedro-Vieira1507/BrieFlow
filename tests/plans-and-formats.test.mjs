@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
@@ -22,7 +23,7 @@ test("plans unlock formats cumulatively without exposing premium formats for fre
 
 test("every plan and format has positive production limits", () => {
   for (const plan of Object.values(PLAN_CATALOG)) {
-    assert.ok(plan.monthlyCredits > 0);
+    assert.ok(plan.dailyCredits > 0);
     assert.ok(plan.maxMembers > 0);
     assert.ok(plan.maxSavedAssets > 0);
   }
@@ -73,4 +74,18 @@ test("structured export preserves timing, direction and presenter notes", () => 
   assert.match(text, /Timing: 2 min/);
   assert.match(text, /Direção visual: Gráfico do cenário/);
   assert.match(text, /Notas: Conectar/);
+});
+
+test("premium document formats export to their promised production files", async () => {
+  const exporter = await readFile(
+    new URL("../src/lib/structuredDocumentExport.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(exporter, /document\.format === "slides"/);
+  assert.match(exporter, /\.pptx`/);
+  assert.match(exporter, /document\.format === "technical_sheet"/);
+  assert.match(exporter, /\.pdf`/);
+  assert.match(exporter, /addNotes/);
+  assert.match(exporter, /splitTextToSize/);
 });

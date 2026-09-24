@@ -24,12 +24,6 @@ const cleanedImageCache = new Map<string, string>();
 const cleanupFailureCache = new Set<string>();
 const MAX_PROCESSING_SIDE = 1800;
 
-function proxiedSource(src: string): string {
-  if (!/^https?:\/\//i.test(src)) return src;
-  if (src.includes("wsrv.nl")) return src;
-  return `https://wsrv.nl/?url=${encodeURIComponent(src)}&output=png&w=${MAX_PROCESSING_SIDE}&q=98`;
-}
-
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const image = new Image();
@@ -146,10 +140,8 @@ function estimateEdgeBackground(
   const inlierRatio =
     deviations.filter((distance) => distance <= 24).length / samples.length;
 
-  // A catalogue product may touch one or more image edges. Requiring nearly
-  // every border sample to match the background makes those perfectly valid
-  // photos fall back to the raw white rectangle. Instead, trust the dominant
-  // bright border cluster while still requiring a clear majority.
+  // A catalogue product may touch one or more image edges. Trust the dominant bright border cluster
+  // while still requiring a clear majority, so valid photos do not fall back to a white rectangle.
   return luminance(...background) >= 235 && inlierRatio >= 0.58
     ? background
     : null;
@@ -264,7 +256,6 @@ function refineCutoutEdge(
       }
     }
   }
-
 }
 
 function cropTransparentMargins(
@@ -292,7 +283,10 @@ function cropTransparentMargins(
   if (maxX < minX || maxY < minY) return null;
   const contentWidth = maxX - minX + 1;
   const contentHeight = maxY - minY + 1;
-  const padding = Math.max(8, Math.round(Math.max(contentWidth, contentHeight) * 0.035));
+  const padding = Math.max(
+    8,
+    Math.round(Math.max(contentWidth, contentHeight) * 0.035),
+  );
   const sx = Math.max(0, minX - padding);
   const sy = Math.max(0, minY - padding);
   const ex = Math.min(width, maxX + padding + 1);
@@ -305,7 +299,17 @@ function cropTransparentMargins(
   if (!outputContext) return null;
   outputContext.imageSmoothingEnabled = true;
   outputContext.imageSmoothingQuality = "high";
-  outputContext.drawImage(source, sx, sy, output.width, output.height, 0, 0, output.width, output.height);
+  outputContext.drawImage(
+    source,
+    sx,
+    sy,
+    output.width,
+    output.height,
+    0,
+    0,
+    output.width,
+    output.height,
+  );
   return output;
 }
 
@@ -321,7 +325,7 @@ async function cleanupProductImage(src: string): Promise<string> {
   if (cleanupFailureCache.has(src)) return src;
 
   try {
-    const image = await loadImage(proxiedSource(src));
+    const image = await loadImage(src);
     const naturalWidth = Math.max(1, image.naturalWidth || image.width);
     const naturalHeight = Math.max(1, image.naturalHeight || image.height);
     const ratio = Math.min(
@@ -358,7 +362,11 @@ async function cleanupProductImage(src: string): Promise<string> {
     const isBackgroundPixel = (index: number) => {
       const offset = index * 4;
       if (data[offset + 3] === 0) return true;
-      const lightness = luminance(data[offset], data[offset + 1], data[offset + 2]);
+      const lightness = luminance(
+        data[offset],
+        data[offset + 1],
+        data[offset + 2],
+      );
       const gradient = localGradientMagnitude(data, index, width, height);
       return (
         lightness >= Math.max(216, backgroundLuminance - 30) &&
@@ -402,21 +410,7 @@ async function cleanupProductImage(src: string): Promise<string> {
     for (let index = 0; index < total; index += 1) {
       if (removed[index]) data[index * 4 + 3] = 0;
     }
-const { edgePixels, riskyPixels } = refineCutoutEdge(
-      data,
-      removed,
-      width,
-      height,
-      background,
-    );
-
-    // If most surviving edge pixels remain practically indistinguishable from
-    // the white background, segmentation is too ambiguous to trust. Falling
-    // back to the untouched photo is preferable to a damaged product.
-    if (edgePixels > 24 && riskyPixels / edgePixels > 0.72) {
-      cleanedImageCache.set(src, src);
-      return src;
-    }
+    refineCutoutEdge(data, removed, width, height, background);
 
     context.putImageData(imageData, 0, 0);
     const cropped = cropTransparentMargins(canvas);

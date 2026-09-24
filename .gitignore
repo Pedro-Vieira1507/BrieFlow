@@ -32,3 +32,7 @@ npm-debug.log*
 coverage/
 repomix-output.xml
 *.tsbuildinfo
+
+# Supabase CLI and deployment artifacts
+supabase/.temp/
+.vercel/

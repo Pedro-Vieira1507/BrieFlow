@@ -9,6 +9,7 @@
 // funções de prompt em `src/lib/marketingPrompts.ts`.
 
 import type { BrandContext, DiscoveryPlan, SiteBrandData } from "./builder";
+import { cleanOffer } from "../lib/sanitize.ts";
 
 /** Canais suportados pelas variações de prompt. */
 export type MarketingChannel =
@@ -141,9 +142,9 @@ function productPageReference(input: {
     clean(input.product?.productUrl) ?? clean(input.plan?.productUrl);
   const hasProductSignal = Boolean(
     clean(input.product?.productTitle) ||
-      clean(input.plan?.productTitle) ||
-      clean(input.plan?.productSku) ||
-      clean(input.plan?.product),
+    clean(input.plan?.productTitle) ||
+    clean(input.plan?.productSku) ||
+    clean(input.plan?.product),
   );
 
   if (!isNonHomepage || (!hasProductSignal && !explicitProductUrl)) {
@@ -196,13 +197,13 @@ export function toMarketingBrief(input: {
       clean(brandContext.brandName) ??
       clean(brandContext.site?.brandName) ??
       "Sua Marca",
-    objective: clean(plan?.objective) ?? clean(plan?.proposedStrategy),
+    objective: clean(plan?.objective),
     context: clean(plan?.detectedContext),
     strategy: clean(plan?.proposedStrategy),
     missingInfo: clean(plan?.missingInfo),
     audience: clean(plan?.audience) ?? clean(brandContext.persona),
     product: clean(plan?.product) ?? clean(brandContext.product),
-    offer: clean(plan?.offer) ?? clean(brandContext.offer),
+    offer: cleanOffer(plan?.offer) ?? cleanOffer(brandContext.offer),
     tone: clean(plan?.tone) ?? clean(brandContext.tone),
     framework: clean(brandContext.framework),
     channels,

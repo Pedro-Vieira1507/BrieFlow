@@ -40,7 +40,7 @@ test("AI proxy authorizes atomically, falls back server-side and refunds failure
 test("database migration enforces personal library RLS and private media", async () => {
   const migration = await readFile(
     new URL(
-      "../supabase/migrations/202609010001_enterprise_foundation.sql",
+      "../supabase/migrations/20260903110835_enterprise_foundation.sql",
       import.meta.url,
     ),
     "utf8",
@@ -48,19 +48,19 @@ test("database migration enforces personal library RLS and private media", async
 
   assert.match(
     migration,
-    /create policy assets_select_own[\s\S]*user_id = auth\.uid\(\)/,
+    /create policy assets_select_own[\s\S]*user_id = \(select auth\.uid\(\)\)/,
   );
   assert.match(
     migration,
-    /create policy assets_delete_own[\s\S]*user_id = auth\.uid\(\)/,
+    /create policy assets_delete_own[\s\S]*user_id = \(select auth\.uid\(\)\)/,
   );
   assert.match(migration, /'campaign-assets', 'campaign-assets', false/);
   assert.match(
     migration,
-    /storage\.foldername\(name\)\)\[1\] = auth\.uid\(\)::text/,
+    /storage\.foldername\(name\)\)\[1\] = \(select auth\.uid\(\)\)::text/,
   );
   assert.match(migration, /campaign_assets_select_legacy_reference/);
-  assert.match(migration, /owner_id = auth\.uid\(\)::text/);
+  assert.match(migration, /owner_id = \(select auth\.uid\(\)\)::text/);
   assert.match(migration, /unique \(user_id, request_id, entry_type\)/);
   assert.match(migration, /false, 'duplicate_request'/);
   assert.match(migration, /false, 'membership_inactive'/);
@@ -123,6 +123,58 @@ test("scraping validates DNS and every redirect before downloading", async () =>
   assert.doesNotMatch(scrape, /redirect: "follow"/);
 });
 
+test("product segmentation reuses the SSRF-safe bounded downloader", async () => {
+  const segment = await readFile(
+    new URL("../supabase/functions/product-segment/index.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(segment, /fetchPublicResource/);
+  assert.match(segment, /maxBytes: MAX_SOURCE_BYTES/);
+  assert.match(segment, /maxRedirects: 3/);
+  assert.doesNotMatch(segment, /redirect: "follow"/);
+});
+
+test("image rendering is bound to one paid generation request", async () => {
+  const [renderer, migration] = await Promise.all([
+    readFile(
+      new URL("../supabase/functions/image-render/index.ts", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL(
+        "../supabase/migrations/20260924111857_authorize_visual_render.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+  ]);
+
+  assert.match(renderer, /authorize_visual_render/);
+  assert.match(renderer, /image_render_not_authorized/);
+  assert.match(renderer, /duplicate_request/);
+  assert.match(migration, /primary key \(user_id, request_id, action\)/);
+  assert.match(migration, /from public\.authorize_generation/);
+  assert.match(migration, /debit\.action = p_action/);
+  assert.match(migration, /not exists \([\s\S]*entry_type = 'refund'/);
+  assert.match(
+    migration,
+    /revoke all on function public\.authorize_visual_render[\s\S]*from public, anon, authenticated/,
+  );
+});
+
+test("CORS rejects disallowed origins before processing non-preflight requests", async () => {
+  const http = await readFile(
+    new URL("../supabase/functions/_shared/http.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(
+    http,
+    /const origin = req\.headers\.get\("Origin"\)[\s\S]*origin_not_allowed[\s\S]*req\.method !== "OPTIONS"/,
+  );
+});
+
 test("SSRF guard blocks private and transition addresses across IP families", () => {
   for (const address of [
     "127.0.0.1",
@@ -149,7 +201,7 @@ test("billing webhooks are atomically claimed and ignore older signed events", a
     ),
     readFile(
       new URL(
-        "../supabase/migrations/202609010001_enterprise_foundation.sql",
+        "../supabase/migrations/20260903110835_enterprise_foundation.sql",
         import.meta.url,
       ),
       "utf8",

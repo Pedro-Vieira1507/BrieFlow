@@ -48,9 +48,9 @@ export function ChatEmptyState({ onPick }: { onPick: (s: string) => void }) {
       <span className="mb-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-brand">
         Nova campanha
       </span>
-      <h3 className="font-display text-[24px] font-semibold tracking-[-0.035em] text-fg-primary">
+      <h2 className="font-display text-[24px] font-semibold tracking-[-0.035em] text-fg-primary">
         O que vamos criar hoje?
-      </h3>
+      </h2>
       <p className="mb-7 mt-3 max-w-[300px] text-[13px] leading-5 text-fg-tertiary">
         Envie um link ou descreva a ação. Eu organizo o briefing antes de gerar
         qualquer peça.

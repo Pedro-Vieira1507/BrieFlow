@@ -7,6 +7,7 @@ import {
   requirePost,
   runInBackground,
 } from "../_shared/http.ts";
+import { boundedRetryDelay, readAiCompletion } from "../_shared/aiResponse.ts";
 
 type ChatRole = "system" | "user" | "assistant";
 type ProviderName = "omniroute" | "groq" | "gemini" | "cloudflare" | "ollama";
@@ -83,10 +84,17 @@ function env(name: string): string | null {
 
 function safeEndpoint(raw: string): string {
   const url = new URL(raw);
-  if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) {
+  if (
+    !["http:", "https:"].includes(url.protocol) ||
+    url.username ||
+    url.password
+  ) {
     throw new Error("provider_endpoint_invalid");
   }
-  if (url.protocol !== "https:" && Deno.env.get("ENVIRONMENT") === "production") {
+  if (
+    url.protocol !== "https:" &&
+    Deno.env.get("ENVIRONMENT") === "production"
+  ) {
     throw new Error("provider_endpoint_insecure");
   }
   return url.toString();
@@ -128,14 +136,18 @@ function normalizeMessages(
   let totalCharacters = 0;
 
   for (const message of rawMessages) {
-    if (!message || !["system", "user", "assistant"].includes(String(message.role))) {
+    if (
+      !message ||
+      !["system", "user", "assistant"].includes(String(message.role))
+    ) {
       throw new Error("invalid_messages");
     }
 
     const role = message.role as ChatRole;
     const content = String(message.content ?? "").trim();
     if (!content && role === "assistant") continue;
-    if (!content || content.length > 32_000) throw new Error("invalid_messages");
+    if (!content || content.length > 32_000)
+      throw new Error("invalid_messages");
 
     totalCharacters += content.length;
     messages.push({ role, content });
@@ -194,7 +206,10 @@ async function openAiRequest(options: {
   const timeout = setTimeout(() => controller.abort(), 75_000);
 
   try {
-    let response = await performOpenAiRequest({ ...options, signal: controller.signal });
+    let response = await performOpenAiRequest({
+      ...options,
+      signal: controller.signal,
+    });
 
     if (response.status === 413 && options.maxTokens > 1024) {
       response = await performOpenAiRequest({
@@ -205,39 +220,38 @@ async function openAiRequest(options: {
     }
 
     if (response.status === 429) {
-      const retryAfter = Number(response.headers.get("retry-after") ?? "0");
-      const delayMs = Number.isFinite(retryAfter) && retryAfter > 0
-        ? Math.min(4_000, Math.max(750, retryAfter * 1_000))
-        : 1_500;
+      const delayMs = boundedRetryDelay(response.headers.get("retry-after"));
+      if (delayMs === null) throw new Error(`${options.provider}_http_429`);
       await sleep(delayMs);
       response = await performOpenAiRequest({
         ...options,
-        maxTokens: Math.min(options.maxTokens, 1536),
         signal: controller.signal,
       });
     }
 
-    if (!response.ok) throw new Error(`${options.provider}_http_${response.status}`);
+    if (!response.ok)
+      throw new Error(`${options.provider}_http_${response.status}`);
 
     const raw = await response.text();
     if (raw.length > 2_000_000) throw new Error("provider_response_too_large");
 
-    const payload = JSON.parse(raw) as {
-      model?: string;
-      choices?: Array<{ message?: { content?: string } }>;
-      usage?: { prompt_tokens?: number; completion_tokens?: number };
-    };
-    const received = payload.choices?.[0]?.message?.content?.trim() ?? "";
+    const payload = JSON.parse(raw);
+    const completion = readAiCompletion(payload);
+    if (completion.finishReason === "length")
+      throw new Error(`${options.provider}_output_truncated`);
+    const received = completion.content;
     if (!received) throw new Error(`${options.provider}_empty_response`);
 
-    const content = options.jsonMode ? normalizeJsonContent(received) : received;
+    const content = options.jsonMode
+      ? normalizeJsonContent(received)
+      : received;
     if (!content) throw new Error(`${options.provider}_invalid_json`);
 
     return {
       provider: options.provider,
       model: payload.model ?? options.model,
       content,
-      usage: payload.usage ?? {},
+      usage: completion.usage,
     };
   } finally {
     clearTimeout(timeout);
@@ -291,48 +305,42 @@ async function cloudflareRequest(options: {
           messages: cloudflareJsonMessages(options.messages, options.jsonMode),
           temperature: options.temperature,
           max_tokens: options.maxTokens,
+          ...(options.model === "@cf/zai-org/glm-4.7-flash"
+            ? { reasoning_effort: "low" }
+            : {}),
         }),
       });
 
     let response = await request();
     if (response.status === 429) {
-      const retryAfter = Number(response.headers.get("retry-after") ?? "0");
-      const delayMs = Number.isFinite(retryAfter) && retryAfter > 0
-        ? Math.min(4_000, Math.max(750, retryAfter * 1_000))
-        : 1_250;
+      const delayMs = boundedRetryDelay(response.headers.get("retry-after"));
+      if (delayMs === null) throw new Error("cloudflare_http_429");
       await sleep(delayMs);
       response = await request();
     }
 
     if (!response.ok) throw new Error(`cloudflare_http_${response.status}`);
 
-    const payload = await response.json() as {
-      success?: boolean;
-      result?:
-        | string
-        | {
-            response?: string;
-            choices?: Array<{ message?: { content?: string } }>;
-            usage?: { prompt_tokens?: number; completion_tokens?: number };
-          };
-      usage?: { prompt_tokens?: number; completion_tokens?: number };
-    };
-
-    const result = payload.result;
-    const received =
-      typeof result === "string"
-        ? result.trim()
-        : result?.response?.trim() ?? result?.choices?.[0]?.message?.content?.trim() ?? "";
+    const raw = await response.text();
+    if (raw.length > 2_000_000) throw new Error("provider_response_too_large");
+    const payload = JSON.parse(raw);
+    if (payload.success === false) throw new Error("cloudflare_api_error");
+    const completion = readAiCompletion(payload);
+    if (completion.finishReason === "length")
+      throw new Error("cloudflare_output_truncated");
+    const received = completion.content;
     if (!received) throw new Error("cloudflare_empty_response");
 
-    const content = options.jsonMode ? normalizeJsonContent(received) : received;
+    const content = options.jsonMode
+      ? normalizeJsonContent(received)
+      : received;
     if (!content) throw new Error("cloudflare_invalid_json");
 
     return {
       provider: "cloudflare",
       model: options.model,
       content,
-      usage: typeof result === "object" && result?.usage ? result.usage : payload.usage ?? {},
+      usage: completion.usage,
     };
   } finally {
     clearTimeout(timeout);
@@ -378,7 +386,9 @@ async function ollamaRequest(options: {
     const received = payload.message?.content?.trim() ?? "";
     if (!received) throw new Error("ollama_empty_response");
 
-    const content = options.jsonMode ? normalizeJsonContent(received) : received;
+    const content = options.jsonMode
+      ? normalizeJsonContent(received)
+      : received;
     if (!content) throw new Error("ollama_invalid_json");
 
     return {
@@ -415,19 +425,23 @@ function buildAttempts(options: {
   const omnirouteKey = env("OMNIROUTE_API_KEY");
   const omnirouteUrl = env("OMNIROUTE_API_URL");
   const omnirouteModel =
-    env(options.stage === "discovery" ? "OMNIROUTE_DISCOVERY_MODEL" : "OMNIROUTE_CONTENT_MODEL") ??
-    env("OMNIROUTE_MODEL");
+    env(
+      options.stage === "discovery"
+        ? "OMNIROUTE_DISCOVERY_MODEL"
+        : "OMNIROUTE_CONTENT_MODEL",
+    ) ?? env("OMNIROUTE_MODEL");
   if (omnirouteKey && omnirouteUrl && omnirouteModel) {
     attempts.push({
       name: "omniroute",
       model: omnirouteModel,
-      execute: () => openAiRequest({
-        ...shared,
-        provider: "omniroute",
-        endpoint: omnirouteUrl,
-        apiKey: omnirouteKey,
-        model: omnirouteModel,
-      }),
+      execute: () =>
+        openAiRequest({
+          ...shared,
+          provider: "omniroute",
+          endpoint: omnirouteUrl,
+          apiKey: omnirouteKey,
+          model: omnirouteModel,
+        }),
     });
   }
 
@@ -435,44 +449,53 @@ function buildAttempts(options: {
   const groqAttempts: ProviderAttempt[] = [];
   if (groqKey) {
     const discoveryModel = env("GROQ_DISCOVERY_MODEL");
-    const configuredModels = options.stage === "discovery"
-      ? [discoveryModel]
-      : [
-          env("GROQ_PRIMARY_MODEL"),
-          env("GROQ_SECOND_FALLBACK_MODEL"),
-          discoveryModel,
-        ];
-    const models = [...new Set(configuredModels.filter((value): value is string => Boolean(value)))];
+    const configuredModels =
+      options.stage === "discovery"
+        ? [discoveryModel]
+        : [
+            env("GROQ_PRIMARY_MODEL"),
+            env("GROQ_FIRST_FALLBACK_MODEL"),
+            env("GROQ_SECOND_FALLBACK_MODEL"),
+            discoveryModel,
+          ];
+    const models = [
+      ...new Set(
+        configuredModels.filter((value): value is string => Boolean(value)),
+      ),
+    ];
 
     for (const model of models) {
       groqAttempts.push({
         name: "groq",
         model,
-        execute: () => openAiRequest({
-          ...shared,
-          provider: "groq",
-          endpoint: "https://api.groq.com/openai/v1/chat/completions",
-          apiKey: groqKey,
-          model,
-        }),
+        execute: () =>
+          openAiRequest({
+            ...shared,
+            provider: "groq",
+            endpoint: "https://api.groq.com/openai/v1/chat/completions",
+            apiKey: groqKey,
+            model,
+          }),
       });
     }
   }
 
   const cloudflareAccountId = env("CLOUDFLARE_ACCOUNT_ID");
   const cloudflareToken = env("CLOUDFLARE_API_TOKEN");
-  const cloudflareModel = env("CLOUDFLARE_TEXT_MODEL") ?? "@cf/zai-org/glm-4.7-flash";
+  const cloudflareModel =
+    env("CLOUDFLARE_TEXT_MODEL") ?? "@cf/zai-org/glm-4.7-flash";
   const cloudflareAttempt: ProviderAttempt | null =
     cloudflareAccountId && cloudflareToken
       ? {
           name: "cloudflare",
           model: cloudflareModel,
-          execute: () => cloudflareRequest({
-            ...shared,
-            accountId: cloudflareAccountId,
-            apiToken: cloudflareToken,
-            model: cloudflareModel,
-          }),
+          execute: () =>
+            cloudflareRequest({
+              ...shared,
+              accountId: cloudflareAccountId,
+              apiToken: cloudflareToken,
+              model: cloudflareModel,
+            }),
         }
       : null;
 
@@ -490,38 +513,48 @@ function buildAttempts(options: {
 
   const geminiKey = env("GEMINI_API_KEY");
   const geminiModel = env(
-    options.stage === "discovery" ? "GEMINI_DISCOVERY_MODEL" : "GEMINI_CONTENT_MODEL",
+    options.stage === "discovery"
+      ? "GEMINI_DISCOVERY_MODEL"
+      : "GEMINI_CONTENT_MODEL",
   );
   if (geminiKey && geminiModel) {
     attempts.push({
       name: "gemini",
       model: geminiModel,
-      execute: () => openAiRequest({
-        ...shared,
-        provider: "gemini",
-        endpoint: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-        apiKey: geminiKey,
-        model: geminiModel,
-        extraHeaders: { "x-goog-api-key": geminiKey },
-      }),
+      execute: () =>
+        openAiRequest({
+          ...shared,
+          provider: "gemini",
+          endpoint:
+            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+          apiKey: geminiKey,
+          model: geminiModel,
+          extraHeaders: { "x-goog-api-key": geminiKey },
+        }),
     });
   }
 
   const ollamaUrl = env("OLLAMA_API_URL");
   const ollamaModel =
-    env(options.stage === "discovery" ? "OLLAMA_DISCOVERY_MODEL" : "OLLAMA_CONTENT_MODEL") ??
-    env("OLLAMA_MODEL");
+    env(
+      options.stage === "discovery"
+        ? "OLLAMA_DISCOVERY_MODEL"
+        : "OLLAMA_CONTENT_MODEL",
+    ) ?? env("OLLAMA_MODEL");
   if (ollamaUrl && ollamaModel) {
     attempts.push({
       name: "ollama",
       model: ollamaModel,
-      execute: () => ollamaRequest({ ...shared, endpoint: ollamaUrl, model: ollamaModel }),
+      execute: () =>
+        ollamaRequest({ ...shared, endpoint: ollamaUrl, model: ollamaModel }),
     });
   }
 
   if (options.preferred) {
     attempts.sort(
-      (a, b) => Number(b.name === options.preferred) - Number(a.name === options.preferred),
+      (a, b) =>
+        Number(b.name === options.preferred) -
+        Number(a.name === options.preferred),
     );
   }
   return attempts;
@@ -544,19 +577,27 @@ Deno.serve(async (req: Request) => {
   try {
     context = await authenticate(req);
     if (!context) {
-      return json(req, 401, { error: "unauthorized", message: "Sessão inválida." });
+      return json(req, 401, {
+        error: "unauthorized",
+        message: "Sessão inválida.",
+      });
     }
 
     const body = await readJson<ProxyBody>(req, 96_000);
     action = String(body.action ?? "chat").toLowerCase();
-    if (!ACTIONS.has(action)) return json(req, 400, { error: "invalid_action" });
+    if (!ACTIONS.has(action))
+      return json(req, 400, { error: "invalid_action" });
 
     requestId = body.request_id?.trim() || crypto.randomUUID();
     if (!/^[a-zA-Z0-9_-]{8,128}$/.test(requestId)) {
       return json(req, 400, { error: "invalid_request_id" });
     }
 
-    if (!Array.isArray(body.messages) || body.messages.length === 0 || body.messages.length > 32) {
+    if (
+      !Array.isArray(body.messages) ||
+      body.messages.length === 0 ||
+      body.messages.length > 32
+    ) {
       return json(req, 400, { error: "invalid_messages" });
     }
 
@@ -583,17 +624,25 @@ Deno.serve(async (req: Request) => {
     );
     if (authorizationError) throw new Error("authorization_failed");
 
-    const authorization = (Array.isArray(data) ? data[0] : data) as AuthorizationResult | null;
+    const authorization = (
+      Array.isArray(data) ? data[0] : data
+    ) as AuthorizationResult | null;
     if (!authorization?.ok) {
       const code = authorization?.code ?? "authorization_failed";
       const status =
         code === "rate_limit_exceeded"
           ? 429
-          : ["insufficient_credits", "monthly_credit_limit_exceeded"].includes(code)
+          : ["insufficient_credits", "monthly_credit_limit_exceeded"].includes(
+                code,
+              )
             ? 402
             : code === "duplicate_request"
               ? 409
-              : ["format_not_allowed", "subscription_inactive", "membership_inactive"].includes(code)
+              : [
+                    "format_not_allowed",
+                    "subscription_inactive",
+                    "membership_inactive",
+                  ].includes(code)
                 ? 403
                 : 500;
       return json(req, status, {
@@ -608,16 +657,25 @@ Deno.serve(async (req: Request) => {
     const requestedTemperature = Number(body.temperature ?? 0.3);
     const requestedMaxTokens = Number(body.max_tokens ?? 4096);
     const temperature = Math.min(
-      Math.max(Number.isFinite(requestedTemperature) ? requestedTemperature : 0.3, 0),
+      Math.max(
+        Number.isFinite(requestedTemperature) ? requestedTemperature : 0.3,
+        0,
+      ),
       1.2,
     );
-    const actionTokenCeiling = action === "banner"
-      ? 1536
-      : SHORT_STRUCTURED_ACTIONS.has(action)
-        ? 4096
-        : 8192;
+    const actionTokenCeiling =
+      action === "banner"
+        ? 1536
+        : SHORT_STRUCTURED_ACTIONS.has(action)
+          ? 4096
+          : 8192;
     const maxTokens = Math.min(
-      Math.max(Number.isFinite(requestedMaxTokens) ? Math.floor(requestedMaxTokens) : 4096, 256),
+      Math.max(
+        Number.isFinite(requestedMaxTokens)
+          ? Math.floor(requestedMaxTokens)
+          : 4096,
+        256,
+      ),
       actionTokenCeiling,
     );
     const jsonMode = body.response_format?.type === "json_object";
@@ -625,9 +683,13 @@ Deno.serve(async (req: Request) => {
     const attempts = buildAttempts({
       action,
       stage,
-      preferred: ["omniroute", "groq", "gemini", "cloudflare", "ollama"].includes(
-        String(body.preferred_provider),
-      )
+      preferred: [
+        "omniroute",
+        "groq",
+        "gemini",
+        "cloudflare",
+        "ollama",
+      ].includes(String(body.preferred_provider))
         ? body.preferred_provider
         : undefined,
       messages,
@@ -646,13 +708,19 @@ Deno.serve(async (req: Request) => {
         break;
       } catch (error) {
         const code = error instanceof Error ? error.message : "provider_failed";
-        providerFailures.push({ provider: attempt.name, model: attempt.model, code });
-        console.warn(JSON.stringify({
-          event: "ai_provider_failed",
+        providerFailures.push({
           provider: attempt.name,
           model: attempt.model,
           code,
-        }));
+        });
+        console.warn(
+          JSON.stringify({
+            event: "ai_provider_failed",
+            provider: attempt.name,
+            model: attempt.model,
+            code,
+          }),
+        );
       }
     }
     if (!result) throw new Error("all_providers_failed");
@@ -718,7 +786,11 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    const publicCode = ["invalid_json", "request_too_large", "invalid_messages"].includes(code)
+    const publicCode = [
+      "invalid_json",
+      "request_too_large",
+      "invalid_messages",
+    ].includes(code)
       ? code
       : code === "no_provider_configured"
         ? code
@@ -731,14 +803,22 @@ Deno.serve(async (req: Request) => {
           ? 503
           : 502;
 
+    const exposeProviderFailures = Deno.env.get("ENVIRONMENT") !== "production";
     return json(req, status, {
       error: publicCode,
       message: publicError(error),
-      provider_failures: providerFailures.map(({ provider, model, code: failureCode }) => ({
-        provider,
-        model,
-        code: failureCode,
-      })),
+      request_id: requestId || undefined,
+      ...(exposeProviderFailures
+        ? {
+            provider_failures: providerFailures.map(
+              ({ provider, model, code: failureCode }) => ({
+                provider,
+                model,
+                code: failureCode,
+              }),
+            ),
+          }
+        : {}),
     });
   }
 });

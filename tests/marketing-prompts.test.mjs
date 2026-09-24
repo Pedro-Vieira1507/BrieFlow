@@ -7,7 +7,7 @@ import {
   extractMaterialBriefing,
   selectFallbackPalette,
 } from "../src/lib/marketingPromptCore.ts";
-import { buildFallbackUrl } from "../src/lib/pollinations.ts";
+import { buildFallbackUrl } from "../src/lib/visualFallback.ts";
 import {
   LandingCopySchema,
   EmailCopySchema,
@@ -163,7 +163,7 @@ test("material prompt adapts the agency method without leaking the reference bra
     "utf8",
   );
 
-  assert.match(source, /brieflow-creative-director-2026-08\.6/);
+  assert.match(source, /brieflow-creative-director-2026-09\.24/);
   assert.match(source, /produto-herói/);
   assert.match(source, /Prefira omitir a preencher/);
   assert.match(source, /B2B técnico\/regulado/);
