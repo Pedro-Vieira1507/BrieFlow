@@ -101,18 +101,18 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       meta: [
         { charSet: "utf-8" },
         { name: "viewport", content: "width=device-width, initial-scale=1" },
-        { title: "BrieFlow - Agente de Peças de Marketing com IA" },
+        { title: "BrieFlow — Uma ideia, seis boas conversas" },
         {
           name: "description",
           content:
-            "Estúdio de marketing com IA para criar campanhas, banners, e-mails, posts, apresentações e documentos em um fluxo editável.",
+            "IA de texto para criar conteúdo específico por rede: briefing com anexos, revisão, publicação autorizada e métricas por campanha.",
         },
-        { name: "theme-color", content: "#07080c" },
-        { property: "og:title", content: "BrieFlow — Estúdio criativo com IA" },
+        { name: "theme-color", content: "#20261f" },
+        { property: "og:title", content: "BrieFlow — Conteúdo com contexto" },
         {
           property: "og:description",
           content:
-            "Transforme um briefing em uma campanha multiformato, editável e pronta para exportação.",
+            "Um briefing. Textos próprios para LinkedIn, Instagram, Facebook, X, TikTok e Reddit. Você tem a palavra final.",
         },
         { property: "og:type", content: "website" },
         { name: "twitter:card", content: "summary_large_image" },
