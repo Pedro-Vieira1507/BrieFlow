@@ -387,12 +387,15 @@ function WorkspaceContent({
   };
   const upload = (files: FileList) => {
     if (!requireAccount()) return;
+    // The input is reset after onUpload returns; preserve files before awaiting.
+    const selectedFiles = Array.from(files);
+    if (!selectedFiles.length) return;
     void run(async (signal) => {
-      if (files.length + attachments.length > 12)
+      if (selectedFiles.length + attachments.length > 12)
         throw new Error("O briefing aceita até 12 anexos.");
       const guard = scopeGuard();
       let saved = await saveBrief(signal);
-      for (const file of Array.from(files)) {
+      for (const file of selectedFiles) {
         setProgress(`Anexando ${file.name}…`);
         const media = await uploadBriefMedia(file, saved.id);
         guard();
