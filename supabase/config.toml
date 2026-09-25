@@ -24,3 +24,10 @@ verify_jwt = true
 
 [functions.multimodal]
 verify_jwt = true
+
+# Both handlers validate Auth internally. OAuth GET callbacks validate a one-use state.
+[functions.social-workspace]
+verify_jwt = false
+
+[functions.social-oauth]
+verify_jwt = false
