@@ -223,13 +223,27 @@ Deno.serve(async (req: Request) => {
       ]);
       must(campaigns.error);
       must(accounts.error);
-      const safeAccounts = (accounts.data ?? []).map((a: AccountRow) => ({
-        ...a,
-        status:
-          a.expires_at && Date.parse(a.expires_at) <= Date.now()
-            ? "expired"
-            : "connected",
-      }));
+      const accountIds = (accounts.data ?? []).map((a) => a.id);
+      const credentials = accountIds.length
+        ? await ctx.db
+            .from("social_credentials")
+            .select("account_id")
+            .in("account_id", accountIds)
+        : { data: [], error: null };
+      must(credentials.error);
+      const connectedIds = new Set(
+        (credentials.data ?? []).map((c) => c.account_id),
+      );
+      // An interrupted OAuth save must never appear as a working connection.
+      const safeAccounts = (accounts.data ?? [])
+        .filter((a) => connectedIds.has(a.id))
+        .map((a: AccountRow) => ({
+          ...a,
+          status:
+            a.expires_at && Date.parse(a.expires_at) <= Date.now()
+              ? "expired"
+              : "connected",
+        }));
       return json(req, 200, {
         campaigns: campaigns.data,
         accounts: safeAccounts,

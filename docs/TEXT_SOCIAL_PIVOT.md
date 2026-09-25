@@ -63,6 +63,16 @@ Nenhum serviço pago foi contratado. As redes podem exigir plano comercial, revi
 5. Consultar métricas reais e comparar com as definições da rede, distinguindo zero de ausência.
 6. Habilitar a flag da rede somente depois da homologação e acompanhar expiração/revogação.
 
+## Validação da entrega em 25/09/2026
+
+- `npm run validate`: formatação, lint, TypeScript, 128 testes e build aprovados.
+- CI do GitHub (incluindo Deno e auditoria de dependências) e CodeQL aprovados na branch de refatoração.
+- Teste SQL transacional aprovado: isolamento entre donos, FK composta, credenciais inacessíveis, escrita direta negada, claim restrito ao serviço, versão nula e tentativa duplicada recusadas. Todos os dados de teste foram revertidos.
+- As duas migrações estão aplicadas e as funções `social-workspace` e `social-oauth` estão ativas. A função `ai-proxy` recebeu somente a origem exata da prévia na configuração de CORS, sem troca de modelos.
+- Chamadas sem autenticação retornam 401; origem não autorizada recebe 403; preflight da prévia autorizada recebe 204 nas duas funções novas.
+- A prévia foi inspecionada no navegador, incluindo preenchimento do briefing e abertura de login. A inspeção identificou e corrigiu contraste de títulos herdado do tema anterior. Testes de salvamento, anexos e geração no navegador dependem de uma sessão autenticada.
+- Publicação, OAuth dos provedores e métricas reais ainda dependem da homologação descrita acima. Nenhum post real foi enviado.
+
 ## Referências oficiais consultadas em 24/09/2026
 
 - [LinkedIn Posts API](https://learn.microsoft.com/en-us/linkedin/marketing/community-management/shares/posts-api?view=li-lms-2026-07) e [Member Post Statistics](https://learn.microsoft.com/en-us/linkedin/marketing/community-management/members/post-statistics?view=li-lms-2026-06).
