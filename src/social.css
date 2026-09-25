@@ -14,6 +14,10 @@
   line-height: 1.5;
   color-scheme: light;
 }
+.social-app :is(h1, h2, h3, h4, h5, h6),
+.social-dialog :is(h1, h2, h3, h4, h5, h6) {
+  color: inherit;
+}
 .social-app button,
 .social-dialog button {
   cursor: pointer;
