@@ -570,7 +570,7 @@ function WorkspaceContent({
           ))}
         </nav>
         <button
-          className="social-learning-link"
+          className="social-button secondary"
           disabled={busy}
           onClick={() => window.location.assign("/intelligence")}
         >
