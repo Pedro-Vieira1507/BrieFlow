@@ -4,6 +4,7 @@ import {
   ArrowLeft,
   ArrowRight,
   BarChart3,
+  BrainCircuit,
   Check,
   ChevronRight,
   FileText,
@@ -568,6 +569,14 @@ function WorkspaceContent({
             </button>
           ))}
         </nav>
+        <button
+          className="social-learning-link"
+          disabled={busy}
+          onClick={() => window.location.assign("/intelligence")}
+        >
+          <BrainCircuit size={17} />
+          Learning Engine
+        </button>
         <button
           className="social-button sidebar-create"
           disabled={busy}
