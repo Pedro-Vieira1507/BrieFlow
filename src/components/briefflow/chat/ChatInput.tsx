@@ -209,7 +209,8 @@ export function ChatInput({
         id="brieflow-composer-help"
         className="mt-2.5 text-center text-xs font-medium leading-5 tracking-wide text-fg-muted"
       >
-        Enter envia · Shift+Enter quebra linha · revise textos, preços e condições antes de exportar.
+        Enter envia · Shift+Enter quebra linha · revise textos, preços e
+        condições antes de exportar.
       </p>
     </div>
   );

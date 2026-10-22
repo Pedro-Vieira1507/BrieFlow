@@ -167,7 +167,9 @@ export function OnboardingCoach({ onStartBriefing, onOpenFormats }: Props) {
                     Modelo para um briefing melhor
                   </p>
                   <p className="mt-1 text-sm leading-6 text-fg-tertiary">
-                    Marca + oferta + público + objetivo + fatos confirmados + tom. Isso reduz retrabalho e ajuda a IA a não inventar informações.
+                    Marca + oferta + público + objetivo + fatos confirmados +
+                    tom. Isso reduz retrabalho e ajuda a IA a não inventar
+                    informações.
                   </p>
                   <Button
                     type="button"
@@ -225,7 +227,8 @@ export function OnboardingCoach({ onStartBriefing, onOpenFormats }: Props) {
                 onClick={() => finish("briefing")}
                 className="min-h-11 rounded-xl bg-brand px-5 font-semibold text-brand-fg shadow-[var(--shadow-brand)]"
               >
-                <CheckCircle2 className="mr-2 size-4" aria-hidden /> Começar briefing
+                <CheckCircle2 className="mr-2 size-4" aria-hidden /> Começar
+                briefing
               </Button>
             ) : (
               <Button

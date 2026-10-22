@@ -4,7 +4,10 @@ import { expect, test } from "@playwright/test";
 test("produção real permanece utilizável e sem violações WCAG bloqueadoras", async ({
   page,
 }) => {
-  test.skip(!process.env.E2E_BASE_URL, "Requer o deployment real em E2E_BASE_URL.");
+  test.skip(
+    !process.env.E2E_BASE_URL,
+    "Requer o deployment real em E2E_BASE_URL.",
+  );
 
   await page.goto("/", { waitUntil: "networkidle" });
   await expect(
@@ -44,7 +47,9 @@ test("produção real preserva alvos de toque e composer legível no mobile", as
   );
 
   await page.goto("/", { waitUntil: "domcontentloaded" });
-  const assistant = page.getByRole("button", { name: "Abrir assistente BrieFlow" });
+  const assistant = page.getByRole("button", {
+    name: "Abrir assistente BrieFlow",
+  });
   await expect(assistant).toBeVisible();
 
   const box = await assistant.boundingBox();
