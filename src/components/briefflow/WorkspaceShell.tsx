@@ -44,6 +44,7 @@ export function WorkspaceShell() {
     messages,
     setAuthOpen,
     user,
+    workspaceDirty,
   } = useBriefflowStore();
   const { handleSend, generateCampaign, regenerateChannel } =
     useBriefflowAgent();
@@ -60,6 +61,16 @@ export function WorkspaceShell() {
     viewport.addEventListener("resize", resize);
     return () => viewport.removeEventListener("resize", resize);
   }, [mobileChatOpen]);
+
+  useEffect(() => {
+    if (!workspaceDirty) return;
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warnBeforeUnload);
+    return () => window.removeEventListener("beforeunload", warnBeforeUnload);
+  }, [workspaceDirty]);
 
   const openAssistant = () => {
     if (window.matchMedia("(min-width: 1024px)").matches) {
