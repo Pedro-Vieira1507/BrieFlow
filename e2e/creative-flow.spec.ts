@@ -19,9 +19,11 @@ test("briefing → direção → campanha → biblioteca → cópia", async ({
     "A marca Atlas vende um painel de gestão operacional para gestores B2B. Quero agendar demonstrações. Use tom claro, direto e confiante. Não invente preços, clientes ou resultados.",
     { delay: 1 },
   );
-  const sendButton = composer.locator("xpath=ancestor::form").getByRole("button", {
-    name: "Enviar mensagem",
-  });
+  const sendButton = composer
+    .locator("xpath=ancestor::form")
+    .getByRole("button", {
+      name: "Enviar mensagem",
+    });
   await expect(sendButton).toBeEnabled();
   await sendButton.click();
 
