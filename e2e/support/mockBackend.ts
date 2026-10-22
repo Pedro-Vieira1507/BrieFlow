@@ -3,6 +3,7 @@ import type { Page, Route } from "@playwright/test";
 const TEST_USER_ID = "11111111-1111-4111-8111-111111111111";
 const TEST_EMAIL = "qa@brieflow.local";
 const AUTH_STORAGE_KEY = "sb-test-auth-token";
+const ONBOARDING_STORAGE_KEY = "brieflow:onboarding:creative-studio:v3";
 
 const allowedFormats = [
   "banner",
@@ -156,23 +157,19 @@ export async function installMockBackend(
   const assets: Array<Record<string, unknown>> = [];
 
   await page.addInitScript(
-    ({ authKey, authSession, dismissOnboarding }) => {
+    ({ authKey, authSession, dismissOnboarding, onboardingKey }) => {
       window.localStorage.setItem(authKey, JSON.stringify(authSession));
       if (dismissOnboarding) {
-        window.localStorage.setItem(
-          "brieflow:onboarding:creative-studio:v2",
-          "done",
-        );
+        window.localStorage.setItem(onboardingKey, "done");
       } else {
-        window.localStorage.removeItem(
-          "brieflow:onboarding:creative-studio:v2",
-        );
+        window.localStorage.removeItem(onboardingKey);
       }
     },
     {
       authKey: AUTH_STORAGE_KEY,
       authSession: session,
       dismissOnboarding: options.dismissOnboarding ?? true,
+      onboardingKey: ONBOARDING_STORAGE_KEY,
     },
   );
 
