@@ -15,6 +15,7 @@ test("briefing → direção → campanha → biblioteca → cópia", async ({
   const main = page.getByRole("main", { name: "Estúdio criativo BrieFlow" });
   const composer = main.getByLabel("Mensagem para o BrieFlow");
   await expect(composer).toBeVisible();
+  await expect(composer).toBeEnabled();
   await composer.pressSequentially(
     "A marca Atlas vende um painel de gestão operacional para gestores B2B. Quero agendar demonstrações. Use tom claro, direto e confiante. Não invente preços, clientes ou resultados.",
     { delay: 1 },
