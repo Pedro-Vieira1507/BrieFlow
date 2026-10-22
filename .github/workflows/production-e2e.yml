@@ -37,7 +37,7 @@ jobs:
         run: npm install --global npm@11
       - run: npm ci --ignore-scripts
       - name: Install Chromium
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install chromium
       - name: Exercise the real production deployment
         run: >-
           npx playwright test
