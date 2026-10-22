@@ -22,7 +22,7 @@ jobs:
       (github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.head_branch == 'production/creative-studio')
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
       E2E_BASE_URL: https://brieflow-ai.vercel.app
     steps:
@@ -39,7 +39,12 @@ jobs:
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
       - name: Exercise the real production deployment
-        run: npx playwright test e2e/production-smoke.spec.ts --project=chromium
+        run: >-
+          npx playwright test
+          e2e/production-smoke.spec.ts
+          e2e/production-accessibility.spec.ts
+          --project=chromium
+          --project=mobile-chromium
       - name: Upload production Playwright report
         if: always()
         uses: actions/upload-artifact@v4
