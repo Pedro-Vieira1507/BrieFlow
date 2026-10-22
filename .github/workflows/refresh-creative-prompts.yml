@@ -25,7 +25,7 @@ jobs:
       - name: Use npm 11
         run: npm install --global npm@11
       - run: npm ci --ignore-scripts
-      - name: Refine creative direction and generation diversity
+      - name: Ensure creative direction and generation diversity
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -34,24 +34,28 @@ jobs:
           text = prompts.read_text()
           old_version = 'export const PROMPT_VERSION = "brieflow-creative-director-2026-09.24";'
           new_version = 'export const PROMPT_VERSION = "brieflow-creative-director-2026-10.22";'
-          if old_version not in text:
-              raise SystemExit('prompt version marker not found')
-          text = text.replace(old_version, new_version, 1)
+          if old_version in text:
+              text = text.replace(old_version, new_version, 1)
+          elif new_version not in text:
+              raise SystemExit('expected prompt version marker not found')
 
           old_rule = '13. Pontue conceito, distinção, clareza, hierarquia, adequação à marca, força visual e credibilidade. Reescreva silenciosamente até todos atingirem 8/10.`;'
           new_rule = '''13. Pontue conceito, distinção, clareza, hierarquia, adequação à marca, força visual e credibilidade. Reescreva silenciosamente até todos atingirem 8/10.\n14. Dê a cada canal uma função própria na campanha: banner fixa a ideia na memória; social dramatiza uma situação ou conversa; e-mail desenvolve argumento, contexto e decisão; WhatsApp reduz fricção para o próximo passo; formatos longos organizam narrativa, prova e aprofundamento. Preserve a promessa, não a redação.\n15. Faça um teste de diversidade entre peças: não repita a mesma abertura de quatro ou mais palavras, a mesma construção de headline ou o mesmo CTA por padrão. Repetição só é permitida quando o briefing exige uma assinatura literal ou quando ela é estrategicamente indispensável.`;'''
-          if old_rule not in text:
-              raise SystemExit('creative direction marker not found')
-          text = text.replace(old_rule, new_rule, 1)
+          if old_rule in text:
+              text = text.replace(old_rule, new_rule, 1)
+          elif 'Preserve a promessa, não a redação.' not in text:
+              raise SystemExit('creative diversity rules not found')
           prompts.write_text(text)
 
           generator = Path('src/hooks/useGenerateMaterials.ts')
           source = generator.read_text()
           old_call = '''          schema,\n          signal: controller.signal,\n          provider,\n          stage: "content",\n          action: material,\n'''
           new_call = '''          schema,\n          signal: controller.signal,\n          provider,\n          stage: "content",\n          action: material,\n          temperature: material === "banner" ? 0.28 : 0.24,\n'''
-          if old_call not in source:
-              raise SystemExit('generation call marker not found')
-          generator.write_text(source.replace(old_call, new_call, 1))
+          if 'temperature: material === "banner" ? 0.28 : 0.24,' not in source:
+              if old_call not in source:
+                  raise SystemExit('generation call marker not found')
+              source = source.replace(old_call, new_call, 1)
+          generator.write_text(source)
           PY
       - name: Format product and QA changes
         run: >-
@@ -77,8 +81,12 @@ jobs:
           npm test
           npm run build
           npm audit --audit-level=high
-      - name: Commit creative quality refresh
+      - name: Commit normalized product and QA changes
         run: |
+          if git diff --quiet; then
+            echo "Creative quality state already normalized"
+            exit 0
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add src/lib/marketingPrompts.ts src/hooks/useGenerateMaterials.ts src/components/briefflow/LibraryModal.tsx src/components/briefflow/OnboardingCoach.tsx src/components/briefflow/WorkspaceShell.tsx src/components/briefflow/builder/BuilderHeader.tsx src/components/briefflow/chat/ChatInput.tsx e2e tests/marketing-prompts.test.mjs public/site.webmanifest
