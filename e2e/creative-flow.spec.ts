@@ -49,8 +49,8 @@ test("briefing → direção → campanha → biblioteca → cópia", async ({
 
   await page.getByRole("tab", { name: "E-mail" }).click();
   await expect(
-    page.getByText("Quanto tempo sua operação perde procurando contexto?", {
-      exact: true,
+    page.getByRole("tabpanel", { name: "E-mail" }).getByRole("heading", {
+      name: "Decisão começa com contexto",
     }),
   ).toBeVisible();
 
