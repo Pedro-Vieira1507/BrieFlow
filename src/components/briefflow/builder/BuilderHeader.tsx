@@ -56,13 +56,8 @@ export function BuilderHeader({
   onOpenSettings,
   onOpenContentCatalog,
 }: Props) {
-  const {
-    user,
-    reset,
-    workspaceDirty,
-    setAuthOpen,
-    setLibraryOpen,
-  } = useBriefflowStore();
+  const { user, reset, workspaceDirty, setAuthOpen, setLibraryOpen } =
+    useBriefflowStore();
   const { plan } = useCredits();
   const [confirmResetOpen, setConfirmResetOpen] = useState(false);
 
