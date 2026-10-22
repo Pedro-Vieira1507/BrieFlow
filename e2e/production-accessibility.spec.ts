@@ -57,7 +57,12 @@ test("produção real preserva alvos de toque e composer legível no mobile", as
   expect(box?.width ?? 0).toBeGreaterThanOrEqual(44);
 
   await assistant.click();
-  const composer = page.getByLabel("Mensagem para o BrieFlow");
+  const mobileAssistant = page.getByRole("dialog", {
+    name: "Assistente criativo BrieFlow",
+  });
+  await expect(mobileAssistant).toBeVisible();
+
+  const composer = mobileAssistant.getByLabel("Mensagem para o BrieFlow");
   await expect(composer).toBeVisible();
 
   const fontSize = await composer.evaluate((element) =>
