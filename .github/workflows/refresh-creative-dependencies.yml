@@ -19,6 +19,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci --ignore-scripts
+      - name: Use current npm
+        run: npm install --global npm@11
       - name: Update vulnerable TanStack Start
         run: npm install @tanstack/react-start@1.169.3 --save-exact --ignore-scripts
       - name: Format changed files
