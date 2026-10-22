@@ -106,7 +106,7 @@ export function ChatInput({
               <p className="truncate text-xs font-semibold text-fg-primary">
                 Foto real do produto anexada
               </p>
-              <p className="truncate text-[11px] text-fg-muted">
+              <p className="truncate text-xs text-fg-muted">
                 Será priorizada como imagem principal
               </p>
             </div>
@@ -117,9 +117,9 @@ export function ChatInput({
                 disabled={disabled || uploading}
                 aria-label="Remover imagem anexada"
                 title="Remover imagem anexada"
-                className="grid size-8 shrink-0 place-items-center rounded-full text-fg-muted transition hover:bg-surface-3 hover:text-fg-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-40"
+                className="grid size-10 shrink-0 place-items-center rounded-full text-fg-muted transition hover:bg-surface-3 hover:text-fg-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-40"
               >
-                <X className="size-3.5" />
+                <X className="size-4" aria-hidden />
               </button>
             )}
           </div>
@@ -157,9 +157,9 @@ export function ChatInput({
             )}
           >
             {uploading ? (
-              <Loader2 className="size-4 animate-spin" />
+              <Loader2 className="size-4 animate-spin" aria-hidden />
             ) : (
-              <ImagePlus className="size-4" />
+              <ImagePlus className="size-4" aria-hidden />
             )}
           </button>
 
@@ -169,12 +169,18 @@ export function ChatInput({
             onChange={handleInput}
             onKeyDown={handleKeyDown}
             disabled={disabled || uploading}
+            maxLength={8000}
+            enterKeyHint="send"
+            autoCapitalize="sentences"
+            autoCorrect="on"
+            spellCheck
             placeholder={
               attachedImage
                 ? "Descreva como deseja usar esta foto..."
                 : "Digite o site ou o que deseja criar..."
             }
             aria-label="Mensagem para o BrieFlow"
+            aria-describedby="brieflow-composer-help"
             className="max-h-[150px] min-h-[44px] w-full resize-none bg-transparent px-2 py-3 text-base leading-5 text-fg-primary placeholder:text-fg-muted focus:outline-none disabled:opacity-50 sm:text-sm"
             rows={1}
           />
@@ -192,15 +198,18 @@ export function ChatInput({
             )}
           >
             {disabled ? (
-              <Loader2 className="size-4 animate-spin" />
+              <Loader2 className="size-4 animate-spin" aria-hidden />
             ) : (
-              <Send className="ml-0.5 size-4" />
+              <Send className="ml-0.5 size-4" aria-hidden />
             )}
           </button>
         </div>
       </form>
-      <p className="mt-2.5 text-center text-[11px] font-medium leading-4 tracking-wide text-fg-muted">
-        Revise textos, preços e condições antes de exportar.
+      <p
+        id="brieflow-composer-help"
+        className="mt-2.5 text-center text-xs font-medium leading-5 tracking-wide text-fg-muted"
+      >
+        Enter envia · Shift+Enter quebra linha · revise textos, preços e condições antes de exportar.
       </p>
     </div>
   );
