@@ -1,0 +1,36 @@
+name: Refresh Creative Dependencies
+
+on:
+  push:
+    branches: [production/creative-studio]
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Update vulnerable TanStack Start
+        run: npm install @tanstack/react-start@1.169.3 --save-exact --ignore-scripts
+      - name: Format changed files
+        run: npx prettier --write package.json package-lock.json src/components/briefflow/builder/BuilderHeader.tsx
+      - name: Commit dependency refresh
+        run: |
+          if git diff --quiet; then
+            echo "No dependency changes required"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json src/components/briefflow/builder/BuilderHeader.tsx
+          git commit -m "fix: update vulnerable TanStack React Start"
+          git push origin HEAD:production/creative-studio
