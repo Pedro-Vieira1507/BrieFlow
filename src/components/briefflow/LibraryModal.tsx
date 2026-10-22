@@ -34,11 +34,22 @@ import {
   Calendar,
   Sparkles,
   ShieldCheck,
+  Search,
+  CopyPlus,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { getBuilderCampaignBrandName } from "@/lib/campaignGeneration";
 import type { BuilderState, CampaignAsset } from "@/types/builder";
+
+function getLibraryItemLabel(item: SavedLibraryAsset): string {
+  return (
+    getBuilderCampaignBrandName(item.content) ||
+    item.name ||
+    "Campanha sem nome"
+  );
+}
 
 export function LibraryModal() {
   const {
@@ -53,6 +64,7 @@ export function LibraryModal() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [nextCursor, setNextCursor] = useState<SavedAssetsCursor | null>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [query, setQuery] = useState("");
   const [activeTab, setActiveTab] = useState<CampaignAsset["type"]>("banner");
   const [pendingDelete, setPendingDelete] = useState<{
     id: string;
@@ -68,6 +80,7 @@ export function LibraryModal() {
     setItems([]);
     setNextCursor(null);
     setLoading(true);
+    setQuery("");
     try {
       const page = await getSavedAssetsPage();
       if (
@@ -99,6 +112,7 @@ export function LibraryModal() {
       setItems([]);
       setNextCursor(null);
       setSelectedIndex(0);
+      setQuery("");
     }
   }, [libraryOpen, loadLibrary, user]);
 
@@ -175,6 +189,33 @@ export function LibraryModal() {
     setLibraryOpen(false);
   };
 
+  const handleDuplicateToCanvas = (item: SavedLibraryAsset) => {
+    setBuilder(item.content);
+    setActiveLibraryAssetId(null);
+    toast.success("Cópia carregada no Canvas", {
+      description: "Ao salvar, ela será criada como uma nova campanha.",
+    });
+    setLibraryOpen(false);
+  };
+
+  const normalizedQuery = query.trim().toLocaleLowerCase("pt-BR");
+  const visibleEntries = items
+    .map((item, index) => ({ item, index, label: getLibraryItemLabel(item) }))
+    .filter(({ item, label }) => {
+      if (!normalizedQuery) return true;
+      const haystack = `${label} ${item.name} ${item.type}`.toLocaleLowerCase(
+        "pt-BR",
+      );
+      return haystack.includes(normalizedQuery);
+    });
+
+  useEffect(() => {
+    if (!normalizedQuery || visibleEntries.length === 0) return;
+    if (!visibleEntries.some(({ index }) => index === selectedIndex)) {
+      setSelectedIndex(visibleEntries[0].index);
+    }
+  }, [normalizedQuery, selectedIndex, visibleEntries]);
+
   const selectedItem = items[selectedIndex];
   const selectedState: BuilderState | undefined = selectedItem?.content;
   const campaignAssets =
@@ -211,107 +252,143 @@ export function LibraryModal() {
               <DialogDescription className="mt-2 max-w-2xl text-xs leading-5 text-fg-tertiary sm:text-sm">
                 <span className="inline-flex items-center gap-1.5">
                   <ShieldCheck className="size-3.5 text-emerald-400" />
-                  Biblioteca privada: somente este login pode acessar estes
-                  conteúdos.
+                  Biblioteca privada: busque, reabra ou crie uma cópia sem
+                  alterar o original.
                 </span>
               </DialogDescription>
             </div>
           </DialogHeader>
 
           {loading ? (
-            <div className="flex-1 flex flex-col items-center justify-center py-20 text-fg-muted">
-              <Loader2 className="size-8 animate-spin text-brand mb-3" />
+            <div className="flex flex-1 flex-col items-center justify-center py-20 text-fg-muted" role="status">
+              <Loader2 className="mb-3 size-8 animate-spin text-brand" />
               <p className="text-xs font-medium text-fg-tertiary">
                 Carregando campanhas...
               </p>
             </div>
           ) : items.length === 0 ? (
-            <div className="flex-1 flex flex-col items-center justify-center p-8 text-center animate-in fade-in duration-500">
-              <div className="size-16 rounded-2xl bg-surface-2 border border-border-subtle flex items-center justify-center mb-4 text-fg-muted">
+            <div className="flex flex-1 flex-col items-center justify-center p-8 text-center animate-in fade-in duration-500">
+              <div className="mb-4 flex size-16 items-center justify-center rounded-2xl border border-border-subtle bg-surface-2 text-fg-muted">
                 <Sparkles className="size-8" />
               </div>
-              <h3 className="font-semibold text-lg text-fg-primary mb-1">
+              <h3 className="mb-1 text-lg font-semibold text-fg-primary">
                 Nenhuma campanha salva
               </h3>
-              <p className="text-sm text-fg-tertiary max-w-sm">
+              <p className="max-w-sm text-sm text-fg-tertiary">
                 Crie uma nova campanha no chat e clique em "Salvar na
                 Biblioteca" no topo da tela para guardá-la aqui.
               </p>
             </div>
           ) : (
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden md:flex-row">
-              {/* PAINEL LATERAL DE CAMPANHAS SALVAS */}
-              <div className="flex max-h-52 w-full shrink-0 gap-2 overflow-x-auto border-b border-border-subtle bg-surface-2/35 p-3 md:max-h-none md:w-[286px] md:flex-col md:overflow-x-hidden md:overflow-y-auto md:border-b-0 md:border-r">
-                <div className="hidden px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-fg-muted md:block">
-                  Campanhas salvas ({items.length}
-                  {nextCursor ? "+" : ""})
+              <div className="flex max-h-[260px] w-full shrink-0 flex-col border-b border-border-subtle bg-surface-2/35 md:max-h-none md:w-[300px] md:border-b-0 md:border-r">
+                <div className="shrink-0 border-b border-border-subtle p-3">
+                  <label htmlFor="library-search" className="sr-only">
+                    Buscar campanhas salvas
+                  </label>
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-fg-muted" />
+                    <input
+                      id="library-search"
+                      type="search"
+                      value={query}
+                      onChange={(event) => setQuery(event.target.value)}
+                      placeholder="Buscar campanha..."
+                      className="h-11 w-full rounded-xl border border-border-strong bg-surface-1 pl-9 pr-9 text-sm text-fg-primary outline-none transition placeholder:text-fg-muted focus:border-brand/50 focus:ring-2 focus:ring-brand/20"
+                    />
+                    {query ? (
+                      <button
+                        type="button"
+                        onClick={() => setQuery("")}
+                        aria-label="Limpar busca"
+                        className="absolute right-2 top-1/2 grid size-8 -translate-y-1/2 place-items-center rounded-lg text-fg-muted transition hover:bg-surface-3 hover:text-fg-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                      >
+                        <X className="size-3.5" />
+                      </button>
+                    ) : null}
+                  </div>
+                  <p className="mt-2 px-1 text-[10px] font-semibold uppercase tracking-[0.13em] text-fg-muted" aria-live="polite">
+                    {visibleEntries.length} de {items.length} campanhas
+                    {nextCursor ? " carregadas" : ""}
+                  </p>
                 </div>
-                {items.map((item, idx) => {
-                  const isSelected = idx === selectedIndex;
-                  const dateStr = item.created_at
-                    ? new Date(item.created_at).toLocaleDateString("pt-BR", {
-                        day: "2-digit",
-                        month: "2-digit",
-                        year: "2-digit",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })
-                    : "";
-                  const brand =
-                    getBuilderCampaignBrandName(item.content) ||
-                    item.name ||
-                    "Campanha sem nome";
 
-                  return (
-                    <div
-                      key={item.id}
-                      onClick={() => setSelectedIndex(idx)}
-                      // UX: Efeito tátil de clique (active:scale-[0.98])
-                      className={cn(
-                        "group relative flex min-w-[220px] cursor-pointer flex-col gap-1.5 rounded-xl border p-3 transition-all duration-200 active:scale-[0.98] md:min-w-0",
-                        isSelected
-                          ? "bg-surface-3 border-brand shadow-md"
-                          : "bg-surface-2/80 border-border-subtle hover:border-border-strong hover:bg-surface-3/50",
-                      )}
-                    >
-                      <div className="flex justify-between items-start">
-                        <span className="font-semibold text-xs text-fg-primary truncate max-w-[170px]">
-                          {brand}
-                        </span>
+                <div className="flex min-h-0 flex-1 gap-2 overflow-x-auto p-3 md:flex-col md:overflow-x-hidden md:overflow-y-auto">
+                  {visibleEntries.length === 0 ? (
+                    <div className="flex min-w-[220px] flex-1 items-center justify-center rounded-xl border border-dashed border-border-strong p-5 text-center text-xs leading-5 text-fg-tertiary md:min-w-0">
+                      Nenhuma campanha corresponde a “{query.trim()}”.
+                    </div>
+                  ) : null}
+
+                  {visibleEntries.map(({ item, index, label }) => {
+                    const isSelected = index === selectedIndex;
+                    const dateStr = item.created_at
+                      ? new Date(item.created_at).toLocaleDateString("pt-BR", {
+                          day: "2-digit",
+                          month: "2-digit",
+                          year: "2-digit",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })
+                      : "";
+
+                    return (
+                      <div
+                        key={item.id}
+                        className={cn(
+                          "group relative flex min-w-[220px] items-start gap-1 rounded-xl border transition-all duration-200 md:min-w-0",
+                          isSelected
+                            ? "border-brand bg-surface-3 shadow-md"
+                            : "border-border-subtle bg-surface-2/80 hover:border-border-strong hover:bg-surface-3/50",
+                        )}
+                      >
                         <button
-                          onClick={(e) => requestDelete(item.id, brand, e)}
-                          className="rounded-md p-1 text-fg-muted opacity-100 transition-colors hover:bg-rose-500/10 hover:text-rose-400 md:opacity-0 md:group-hover:opacity-100 md:focus:opacity-100"
+                          type="button"
+                          onClick={() => setSelectedIndex(index)}
+                          aria-current={isSelected ? "true" : undefined}
+                          className="min-w-0 flex-1 rounded-xl p-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                        >
+                          <span className="block truncate text-xs font-semibold text-fg-primary">
+                            {label}
+                          </span>
+                          <span className="mt-1.5 flex items-center gap-1.5 text-[10px] text-fg-tertiary">
+                            <Calendar className="size-3" />
+                            {dateStr}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(event) =>
+                            requestDelete(item.id, label, event)
+                          }
+                          className="mr-2 mt-2 rounded-md p-1.5 text-fg-muted opacity-100 transition-colors hover:bg-rose-500/10 hover:text-rose-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400 md:opacity-0 md:group-hover:opacity-100 md:focus:opacity-100"
                           title="Excluir da biblioteca"
-                          aria-label={`Excluir ${brand}`}
+                          aria-label={`Excluir ${label}`}
                         >
                           <Trash2 className="size-3.5" />
                         </button>
                       </div>
-                      <div className="flex items-center gap-1.5 text-[10px] text-fg-tertiary">
-                        <Calendar className="size-3" />
-                        <span>{dateStr}</span>
-                      </div>
-                    </div>
-                  );
-                })}
-                {nextCursor && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={loadingMore}
-                    onClick={() => void loadMore()}
-                    className="min-w-[150px] shrink-0 rounded-xl border-border-strong bg-surface-2 text-xs text-fg-secondary hover:bg-surface-3 hover:text-fg-primary md:min-w-0"
-                  >
-                    {loadingMore && (
-                      <Loader2 className="mr-2 size-3.5 animate-spin" />
-                    )}
-                    Carregar mais
-                  </Button>
-                )}
+                    );
+                  })}
+
+                  {nextCursor && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={loadingMore}
+                      onClick={() => void loadMore()}
+                      className="min-w-[150px] shrink-0 rounded-xl border-border-strong bg-surface-2 text-xs text-fg-secondary hover:bg-surface-3 hover:text-fg-primary md:min-w-0"
+                    >
+                      {loadingMore && (
+                        <Loader2 className="mr-2 size-3.5 animate-spin" />
+                      )}
+                      Carregar mais
+                    </Button>
+                  )}
+                </div>
               </div>
 
-              {/* ÁREA DE VISUALIZAÇÃO COM ABAS */}
               <div className="relative flex min-w-0 flex-1 flex-col overflow-y-auto bg-surface-0 p-4 sm:p-6">
                 {selectedState &&
                 campaignAssets &&
@@ -319,27 +396,38 @@ export function LibraryModal() {
                   <div className="space-y-6 pb-20 animate-in fade-in slide-in-from-bottom-4 duration-300">
                     <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border-subtle pb-4">
                       <div>
-                        <h4 className="font-display font-semibold text-lg text-fg-primary">
+                        <h4 className="font-display text-lg font-semibold text-fg-primary">
                           {getBuilderCampaignBrandName(selectedState) ||
                             selectedItem.name ||
                             "Campanha Salva"}
                         </h4>
-                        <p className="text-xs text-fg-muted mt-0.5">
-                          Alterne entre as abas para ver cada peça ou recarregue
-                          no Canvas para editar.
+                        <p className="mt-0.5 text-xs text-fg-muted">
+                          Reabra para continuar o original ou crie uma cópia para
+                          testar outra direção.
                         </p>
                       </div>
-                      <Button
-                        size="sm"
-                        onClick={() => handleApplyToCanvas(selectedItem)}
-                        className="w-full rounded-xl bg-brand text-xs font-semibold text-brand-fg shadow-[var(--shadow-brand)] transition-all duration-200 hover:brightness-110 active:scale-[0.98] sm:w-auto"
-                      >
-                        Carregar no Canvas{" "}
-                        <ArrowRight className="ml-1.5 size-4" />
-                      </Button>
+                      <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleDuplicateToCanvas(selectedItem)}
+                          className="w-full rounded-xl border-border-strong bg-surface-2 text-xs font-semibold text-fg-secondary hover:bg-surface-3 hover:text-fg-primary sm:w-auto"
+                        >
+                          <CopyPlus className="mr-1.5 size-4" /> Criar cópia
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          onClick={() => handleApplyToCanvas(selectedItem)}
+                          className="w-full rounded-xl bg-brand text-xs font-semibold text-brand-fg shadow-[var(--shadow-brand)] transition-all duration-200 hover:brightness-110 active:scale-[0.98] sm:w-auto"
+                        >
+                          Continuar original
+                          <ArrowRight className="ml-1.5 size-4" />
+                        </Button>
+                      </div>
                     </div>
 
-                    {/* PREVIEW SEPARADO POR ABAS */}
                     <CampaignTabs
                       assets={campaignAssets}
                       onAssetChange={handleAssetPatch}
@@ -348,9 +436,9 @@ export function LibraryModal() {
                     />
                   </div>
                 ) : (
-                  <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-fg-muted">
+                  <div className="flex flex-1 flex-col items-center justify-center p-8 text-center text-fg-muted">
                     <p className="text-sm">
-                      Selecione uma campanha à esquerda para visualizar.
+                      Selecione uma campanha para visualizar.
                     </p>
                   </div>
                 )}
