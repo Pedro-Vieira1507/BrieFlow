@@ -56,8 +56,13 @@ export function BuilderHeader({
   onOpenSettings,
   onOpenContentCatalog,
 }: Props) {
-  const { user, reset, builder, setAuthOpen, setLibraryOpen } =
-    useBriefflowStore();
+  const {
+    user,
+    reset,
+    workspaceDirty,
+    setAuthOpen,
+    setLibraryOpen,
+  } = useBriefflowStore();
   const { plan } = useCredits();
   const [confirmResetOpen, setConfirmResetOpen] = useState(false);
 
@@ -66,11 +71,11 @@ export function BuilderHeader({
   };
 
   const handleNewBriefing = () => {
-    if (builder.type !== "none") {
+    if (workspaceDirty) {
       setConfirmResetOpen(true);
-    } else {
-      reset();
+      return;
     }
+    reset();
   };
 
   return (
@@ -151,7 +156,6 @@ export function BuilderHeader({
             <span className="hidden sm:inline">Salvar</span>
           </Button>
 
-          {/* PERFIL E MENU DE OPÇÕES */}
           {user ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -226,14 +230,13 @@ export function BuilderHeader({
         </div>
       </header>
 
-      {/* MODAL DE CONFIRMAÇÃO DE NOVO BRIEFING */}
       <AlertDialog open={confirmResetOpen} onOpenChange={setConfirmResetOpen}>
         <AlertDialogContent className="bg-surface-1 border-border-strong text-fg-primary shadow-2xl">
           <AlertDialogHeader>
-            <AlertDialogTitle>Descartar campanha atual?</AlertDialogTitle>
+            <AlertDialogTitle>Descartar alterações atuais?</AlertDialogTitle>
             <AlertDialogDescription className="text-fg-secondary">
-              Você tem alterações no canvas que não foram salvas na biblioteca.
-              Ao iniciar um novo briefing, todo o progresso atual será perdido.
+              Existem alterações que ainda não foram salvas na biblioteca. Ao
+              iniciar um novo briefing, esse progresso será perdido.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
