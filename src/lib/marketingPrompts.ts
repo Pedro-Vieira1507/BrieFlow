@@ -15,7 +15,7 @@ export interface PromptPair {
   user: string;
 }
 
-export const PROMPT_VERSION = "brieflow-creative-director-2026-09.24";
+export const PROMPT_VERSION = "brieflow-creative-director-2026-10.22";
 
 export const BRAND_VOICE = `VOZ E ESTILO:
 - Escreva sempre em Português do Brasil natural, contemporâneo e fluido.
@@ -68,7 +68,9 @@ export const CREATIVE_DIRECTION_PROCESS = `DIREÇÃO CRIATIVA DE AGÊNCIA — PR
 10. Rejeite a primeira formulação segura. Headlines no padrão “[categoria] sem [problema]”, “[benefício] para você” ou “[adjetivo] que [verbo]” só podem sobreviver se contiverem uma tensão ou imagem verbal realmente própria do briefing.
 11. Registre silenciosamente a plataforma em uma frase: “Esta campanha torna X desejável ao mostrar Y”. Banner, e-mail e social devem partir dessa mesma decisão, sem repetir a mesma copy.
 12. Se o briefing trouxer “PLATAFORMA CRIATIVA DA CAMPANHA”, ela é obrigatória: preserve a mesma promessa, os mesmos fatos e dois ou três termos-chave. Mude apenas o papel de cada canal.
-13. Pontue conceito, distinção, clareza, hierarquia, adequação à marca, força visual e credibilidade. Reescreva silenciosamente até todos atingirem 8/10.`;
+13. Pontue conceito, distinção, clareza, hierarquia, adequação à marca, força visual e credibilidade. Reescreva silenciosamente até todos atingirem 8/10.
+14. Dê a cada canal uma função própria na campanha: banner fixa a ideia na memória; social dramatiza uma situação ou conversa; e-mail desenvolve argumento, contexto e decisão; WhatsApp reduz fricção para o próximo passo; formatos longos organizam narrativa, prova e aprofundamento. Preserve a promessa, não a redação.
+15. Faça um teste de diversidade entre peças: não repita a mesma abertura de quatro ou mais palavras, a mesma construção de headline ou o mesmo CTA por padrão. Repetição só é permitida quando o briefing exige uma assinatura literal ou quando ela é estrategicamente indispensável.`;
 
 export const CREATIVE_QUALITY_BENCHMARK = `RÉGUA CRIATIVA — EXEMPLOS DE PRINCÍPIO, NUNCA COPIE AS FRASES:
 - Fraco: “Gestão inteligente sem complicação”. Aprovável: “Sua operação não deveria depender de caça ao dado.” O segundo revela uma tensão observável.

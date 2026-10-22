@@ -321,6 +321,7 @@ export function useGenerateMaterials(): UseGenerateMaterialsResult {
           provider,
           stage: "content",
           action: material,
+          temperature: material === "banner" ? 0.28 : 0.24,
         });
 
         const safeData = sanitizeGeneratedCopy(material, data, brief);
