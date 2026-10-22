@@ -1,0 +1,139 @@
+name: Creative Evolution Patch
+
+on:
+  push:
+    branches: [production/creative-studio]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Apply product evolution patch
+        run: |
+          python <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str):
+              p = Path(path)
+              text = p.read_text()
+              if old not in text:
+                  raise SystemExit(f"Expected block not found in {path}: {old[:100]!r}")
+              text = text.replace(old, new, 1)
+              p.write_text(text)
+
+          # 1) Campaign coherence: full regeneration must not freeze the old copy,
+          # while isolated channel regeneration inherits the existing campaign platform.
+          hook = "src/hooks/useBriefflowAgent.ts"
+          replace_once(
+              hook,
+              '''const channelLabel = (channel: CampaignChannel) =>\n  CONTENT_FORMATS[channel].shortLabel;\n''',
+              '''const channelLabel = (channel: CampaignChannel) =>\n  CONTENT_FORMATS[channel].shortLabel;\n\nfunction buildExistingCampaignPlatformContext(\n  state: BuilderState,\n  target?: CampaignChannel,\n): string {\n  if (state.type !== "campaign" || !state.campaignAssets?.length) return "";\n\n  const siblingSignals = state.campaignAssets\n    .filter(\n      (asset) =>\n        asset.type !== target &&\n        !asset.content.generationError &&\n        ["banner", "email", "social"].includes(asset.type),\n    )\n    .map((asset) => {\n      const content = asset.content;\n      const signal = [\n        content.title,\n        content.subtitle,\n        content.hook,\n        content.body,\n        content.caption,\n        content.cta,\n      ]\n        .filter(\n          (value): value is string =>\n            typeof value === "string" && Boolean(value.trim()),\n        )\n        .join(" | ")\n        .slice(0, 900);\n      return signal ? `${channelLabel(asset.type)}: ${signal}` : "";\n    })\n    .filter(Boolean);\n\n  if (siblingSignals.length === 0) return "";\n\n  return `\n\n=== COERÊNCIA COM A CAMPANHA EXISTENTE ===\nAs outras peças já estabeleceram a plataforma abaixo:\n${siblingSignals.join("\\n")}\nAo regenerar ${target ? channelLabel(target) : "esta peça"}, preserve a promessa central, os fatos confirmados, o nível de sofisticação e o território verbal. Crie uma execução nova para o papel deste canal: não copie frases inteiras, não introduza uma nova promessa e não altere a mecânica comercial.`;\n}\n''',
+          )
+          replace_once(
+              hook,
+              '      let hasErrors = false;\n      let campaignPlatformContext = "";\n',
+              '      let hasErrors = false;\n      let campaignPlatformContext = buildExistingCampaignPlatformContext(\n        builderRef.current,\n        only,\n      );\n',
+          )
+          replace_once(
+              hook,
+              '          let currentContentContext = "";\n          if (existingAsset?.content) {\n',
+              '          let currentContentContext = "";\n          // Ajustes parciais preservam os demais campos. Uma regeneração\n          // completa precisa de liberdade para propor uma nova execução.\n          if (!isAll && existingAsset?.content) {\n',
+          )
+
+          # 2) Library custom names without changing the schema.
+          supabase = "src/lib/supabase.ts"
+          replace_once(
+              supabase,
+              '''function normalizeAssetName(name: string, state: BuilderState): string {\n  const requested = state.brandName ? `Campanha ${state.brandName}` : name;\n  return (\n    Array.from(requested)\n      .map((character) => (character.charCodeAt(0) < 32 ? " " : character))\n      .join("")\n      .trim()\n      .slice(0, 120) || "Campanha sem nome"\n  );\n}\n''',
+              '''function normalizeLibraryLabel(name: string): string {\n  return (\n    Array.from(name)\n      .map((character) => (character.charCodeAt(0) < 32 ? " " : character))\n      .join("")\n      .replace(/\\s+/g, " ")\n      .trim()\n      .slice(0, 120) || "Campanha sem nome"\n  );\n}\n\nfunction normalizeAssetName(name: string, state: BuilderState): string {\n  const requested = state.brandName ? `Campanha ${state.brandName}` : name;\n  return normalizeLibraryLabel(requested);\n}\n''',
+          )
+          replace_once(
+              supabase,
+              '''export async function deleteSavedAsset(id: string): Promise<void> {\n  if (!supabase) throw new Error("Supabase não configurado.");\n  const user = await requireUser();\n  const { error } = await supabase\n    .from("assets")\n    .delete()\n    .eq("id", id)\n    .eq("user_id", user.id);\n  if (error) throw error;\n}\n\nconst ALLOWED_IMAGE_TYPES = new Set([\n''',
+              '''export async function deleteSavedAsset(id: string): Promise<void> {\n  if (!supabase) throw new Error("Supabase não configurado.");\n  const user = await requireUser();\n  const { error } = await supabase\n    .from("assets")\n    .delete()\n    .eq("id", id)\n    .eq("user_id", user.id);\n  if (error) throw error;\n}\n\nexport async function renameSavedAsset(\n  id: string,\n  name: string,\n): Promise<SavedLibraryAsset> {\n  if (!supabase) throw new Error("Supabase não configurado.");\n  const user = await requireUser();\n  const normalizedName = normalizeLibraryLabel(name);\n  const { data, error } = await supabase\n    .from("assets")\n    .update({ name: normalizedName })\n    .eq("id", id)\n    .eq("user_id", user.id)\n    .select(SAVED_ASSET_COLUMNS)\n    .single();\n\n  if (error) throw error;\n  return data as SavedLibraryAsset;\n}\n\nconst ALLOWED_IMAGE_TYPES = new Set([\n''',
+          )
+
+          # 3) Library UX: rename in-place, use last edited timestamp, and avoid 10px metadata.
+          library = "src/components/briefflow/LibraryModal.tsx"
+          replace_once(
+              library,
+              '''  deleteSavedAsset,\n  getSavedAssetsPage,\n''',
+              '''  deleteSavedAsset,\n  getSavedAssetsPage,\n  renameSavedAsset,\n''',
+          )
+          replace_once(
+              library,
+              '''  CopyPlus,\n  X,\n''',
+              '''  CopyPlus,\n  PencilLine,\n  Check,\n  X,\n''',
+          )
+          replace_once(
+              library,
+              '''  const [deleting, setDeleting] = useState(false);\n  const loadRequestRef = useRef(0);\n''',
+              '''  const [deleting, setDeleting] = useState(false);\n  const [editingName, setEditingName] = useState(false);\n  const [nameDraft, setNameDraft] = useState("");\n  const [renaming, setRenaming] = useState(false);\n  const loadRequestRef = useRef(0);\n''',
+          )
+          replace_once(
+              library,
+              '''                    const dateStr = item.created_at\n                      ? new Date(item.created_at).toLocaleDateString("pt-BR", {\n''',
+              '''                    const dateValue = item.updated_at || item.created_at;\n                    const dateStr = dateValue\n                      ? new Date(dateValue).toLocaleDateString("pt-BR", {\n''',
+          )
+          replace_once(
+              library,
+              '''                          <span className="mt-1.5 flex items-center gap-1.5 text-[10px] text-fg-tertiary">\n                            <Calendar className="size-3" />\n                            {dateStr}\n''',
+              '''                          <span\n                            className="mt-1.5 flex items-center gap-1.5 text-xs text-fg-tertiary"\n                            title="Última edição"\n                          >\n                            <Calendar className="size-3" aria-hidden />\n                            {dateStr}\n''',
+          )
+          replace_once(
+              library,
+              '''  const campaignAssets =\n    selectedState?.type === "campaign"\n      ? selectedState.campaignAssets\n      : undefined;\n\n  const handleAssetPatch = (assetId: string, patch: Partial<BuilderState>) => {\n''',
+              '''  const campaignAssets =\n    selectedState?.type === "campaign"\n      ? selectedState.campaignAssets\n      : undefined;\n\n  const beginRename = () => {\n    if (!selectedItem) return;\n    setNameDraft(selectedItem.name || getLibraryItemLabel(selectedItem));\n    setEditingName(true);\n  };\n\n  const confirmRename = async () => {\n    if (!selectedItem || renaming) return;\n    const nextName = nameDraft.trim();\n    if (!nextName) {\n      toast.error("Digite um nome para a campanha");\n      return;\n    }\n    setRenaming(true);\n    try {\n      const renamed = await renameSavedAsset(selectedItem.id, nextName);\n      setItems((current) =>\n        current.map((item) =>\n          item.id === selectedItem.id ? { ...item, ...renamed } : item,\n        ),\n      );\n      setEditingName(false);\n      toast.success("Campanha renomeada");\n    } catch (error) {\n      toast.error("Não foi possível renomear a campanha", {\n        description:\n          error instanceof Error ? error.message : "Tente novamente em instantes.",\n      });\n    } finally {\n      setRenaming(false);\n    }\n  };\n\n  const handleAssetPatch = (assetId: string, patch: Partial<BuilderState>) => {\n''',
+          )
+          replace_once(
+              library,
+              '''                      <div>\n                        <h4 className="font-display text-lg font-semibold text-fg-primary">\n                          {getBuilderCampaignBrandName(selectedState) ||\n                            selectedItem.name ||\n                            "Campanha Salva"}\n                        </h4>\n                        <p className="mt-0.5 text-xs text-fg-muted">\n                          Reabra para continuar o original ou crie uma cópia\n                          para testar outra direção.\n                        </p>\n                      </div>\n''',
+              '''                      <div className="min-w-0 flex-1">\n                        {editingName ? (\n                          <div className="flex max-w-xl items-center gap-2">\n                            <label htmlFor="library-campaign-name" className="sr-only">\n                              Nome da campanha\n                            </label>\n                            <input\n                              id="library-campaign-name"\n                              value={nameDraft}\n                              maxLength={120}\n                              autoFocus\n                              onChange={(event) => setNameDraft(event.target.value)}\n                              onKeyDown={(event) => {\n                                if (event.key === "Enter") void confirmRename();\n                                if (event.key === "Escape") setEditingName(false);\n                              }}\n                              className="h-11 min-w-0 flex-1 rounded-xl border border-brand/40 bg-surface-1 px-3 text-base font-semibold text-fg-primary outline-none focus:ring-2 focus:ring-brand/30 sm:text-sm"\n                            />\n                            <button\n                              type="button"\n                              disabled={renaming}\n                              onClick={() => void confirmRename()}\n                              aria-label="Salvar novo nome"\n                              className="grid size-11 shrink-0 place-items-center rounded-xl bg-brand text-brand-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-50"\n                            >\n                              {renaming ? (\n                                <Loader2 className="size-4 animate-spin" aria-hidden />\n                              ) : (\n                                <Check className="size-4" aria-hidden />\n                              )}\n                            </button>\n                            <button\n                              type="button"\n                              disabled={renaming}\n                              onClick={() => setEditingName(false)}\n                              aria-label="Cancelar renomeação"\n                              className="grid size-11 shrink-0 place-items-center rounded-xl border border-border-strong bg-surface-2 text-fg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-50"\n                            >\n                              <X className="size-4" aria-hidden />\n                            </button>\n                          </div>\n                        ) : (\n                          <div className="flex items-center gap-2">\n                            <h4 className="truncate font-display text-lg font-semibold text-fg-primary">\n                              {selectedItem.name ||\n                                getBuilderCampaignBrandName(selectedState) ||\n                                "Campanha Salva"}\n                            </h4>\n                            <button\n                              type="button"\n                              onClick={beginRename}\n                              aria-label="Renomear campanha"\n                              title="Renomear campanha"\n                              className="grid size-10 shrink-0 place-items-center rounded-xl text-fg-muted transition hover:bg-surface-2 hover:text-fg-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"\n                            >\n                              <PencilLine className="size-4" aria-hidden />\n                            </button>\n                          </div>\n                        )}\n                        <p className="mt-1 text-xs leading-5 text-fg-muted">\n                          Reabra para continuar o original ou crie uma cópia\n                          para testar outra direção.\n                        </p>\n                      </div>\n''',
+          )
+          # Raise the smallest metadata to a more legible baseline inside the library.
+          p = Path(library)
+          text = p.read_text().replace('text-[10px]', 'text-xs').replace('text-[11px]', 'text-xs')
+          p.write_text(text)
+
+          # 4) SEO language alternatives for the single public locale.
+          root = "src/routes/__root.tsx"
+          replace_once(
+              root,
+              '''        { rel: "canonical", href: SITE_URL },\n        { rel: "stylesheet", href: appCss },\n''',
+              '''        { rel: "canonical", href: SITE_URL },\n        { rel: "alternate", hrefLang: "pt-BR", href: SITE_URL },\n        { rel: "alternate", hrefLang: "x-default", href: SITE_URL },\n        { rel: "stylesheet", href: appCss },\n''',
+          )
+          replace_once(
+              root,
+              '''        { name: "apple-mobile-web-app-title", content: "BrieFlow" },\n        { name: "theme-color", content: "#07080c" },\n''',
+              '''        { name: "apple-mobile-web-app-title", content: "BrieFlow" },\n        { name: "apple-mobile-web-app-capable", content: "yes" },\n        { name: "mobile-web-app-capable", content: "yes" },\n        { name: "apple-mobile-web-app-status-bar-style", content: "black-translucent" },\n        { name: "theme-color", content: "#07080c" },\n''',
+          )
+          PY
+      - name: Use npm 11
+        run: npm install --global npm@11
+      - run: npm ci --ignore-scripts
+      - name: Format touched files
+        run: npx prettier --write src/hooks/useBriefflowAgent.ts src/lib/supabase.ts src/components/briefflow/LibraryModal.tsx src/routes/__root.tsx
+      - name: Validate patch
+        run: |
+          npm run lint
+          npm run typecheck
+          npm test
+          npm run build
+          npm audit --audit-level=high
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/hooks/useBriefflowAgent.ts src/lib/supabase.ts src/components/briefflow/LibraryModal.tsx src/routes/__root.tsx
+          git commit -m "feat: evolve creative generation and campaign library"
+          git push origin HEAD:production/creative-studio
