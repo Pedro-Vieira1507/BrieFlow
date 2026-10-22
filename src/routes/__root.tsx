@@ -143,6 +143,12 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         { name: "description", content: SITE_DESCRIPTION },
         { name: "application-name", content: "BrieFlow" },
         { name: "apple-mobile-web-app-title", content: "BrieFlow" },
+        { name: "apple-mobile-web-app-capable", content: "yes" },
+        { name: "mobile-web-app-capable", content: "yes" },
+        {
+          name: "apple-mobile-web-app-status-bar-style",
+          content: "black-translucent",
+        },
         { name: "theme-color", content: "#07080c" },
         { name: "color-scheme", content: "dark" },
         { name: "robots", content: "index,follow,max-image-preview:large" },
@@ -169,6 +175,8 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       ],
       links: [
         { rel: "canonical", href: SITE_URL },
+        { rel: "alternate", hrefLang: "pt-BR", href: SITE_URL },
+        { rel: "alternate", hrefLang: "x-default", href: SITE_URL },
         { rel: "stylesheet", href: appCss },
         {
           rel: "icon",

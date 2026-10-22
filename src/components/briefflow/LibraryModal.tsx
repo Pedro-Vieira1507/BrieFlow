@@ -22,6 +22,7 @@ import { useBriefflowStore } from "@/store/briefflow";
 import {
   deleteSavedAsset,
   getSavedAssetsPage,
+  renameSavedAsset,
   type SavedAssetsCursor,
   type SavedLibraryAsset,
 } from "@/lib/supabase";
@@ -36,6 +37,8 @@ import {
   ShieldCheck,
   Search,
   CopyPlus,
+  PencilLine,
+  Check,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -71,6 +74,9 @@ export function LibraryModal() {
     name: string;
   } | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
+  const [renaming, setRenaming] = useState(false);
   const loadRequestRef = useRef(0);
 
   const loadLibrary = useCallback(async () => {
@@ -223,6 +229,41 @@ export function LibraryModal() {
       ? selectedState.campaignAssets
       : undefined;
 
+  const beginRename = () => {
+    if (!selectedItem) return;
+    setNameDraft(selectedItem.name || getLibraryItemLabel(selectedItem));
+    setEditingName(true);
+  };
+
+  const confirmRename = async () => {
+    if (!selectedItem || renaming) return;
+    const nextName = nameDraft.trim();
+    if (!nextName) {
+      toast.error("Digite um nome para a campanha");
+      return;
+    }
+    setRenaming(true);
+    try {
+      const renamed = await renameSavedAsset(selectedItem.id, nextName);
+      setItems((current) =>
+        current.map((item) =>
+          item.id === selectedItem.id ? { ...item, ...renamed } : item,
+        ),
+      );
+      setEditingName(false);
+      toast.success("Campanha renomeada");
+    } catch (error) {
+      toast.error("Não foi possível renomear a campanha", {
+        description:
+          error instanceof Error
+            ? error.message
+            : "Tente novamente em instantes.",
+      });
+    } finally {
+      setRenaming(false);
+    }
+  };
+
   const handleAssetPatch = (assetId: string, patch: Partial<BuilderState>) => {
     if (!selectedState || !campaignAssets) return;
     const nextAssets = campaignAssets.map((a) =>
@@ -311,7 +352,7 @@ export function LibraryModal() {
                     ) : null}
                   </div>
                   <p
-                    className="mt-2 px-1 text-[10px] font-semibold uppercase tracking-[0.13em] text-fg-muted"
+                    className="mt-2 px-1 text-xs font-semibold uppercase tracking-[0.13em] text-fg-muted"
                     aria-live="polite"
                   >
                     {visibleEntries.length} de {items.length} campanhas
@@ -328,8 +369,9 @@ export function LibraryModal() {
 
                   {visibleEntries.map(({ item, index, label }) => {
                     const isSelected = index === selectedIndex;
-                    const dateStr = item.created_at
-                      ? new Date(item.created_at).toLocaleDateString("pt-BR", {
+                    const dateValue = item.updated_at || item.created_at;
+                    const dateStr = dateValue
+                      ? new Date(dateValue).toLocaleDateString("pt-BR", {
                           day: "2-digit",
                           month: "2-digit",
                           year: "2-digit",
@@ -357,8 +399,11 @@ export function LibraryModal() {
                           <span className="block truncate text-xs font-semibold text-fg-primary">
                             {label}
                           </span>
-                          <span className="mt-1.5 flex items-center gap-1.5 text-[10px] text-fg-tertiary">
-                            <Calendar className="size-3" />
+                          <span
+                            className="mt-1.5 flex items-center gap-1.5 text-xs text-fg-tertiary"
+                            title="Última edição"
+                          >
+                            <Calendar className="size-3" aria-hidden />
                             {dateStr}
                           </span>
                         </button>
@@ -401,13 +446,75 @@ export function LibraryModal() {
                 campaignAssets.length > 0 ? (
                   <div className="space-y-6 pb-20 animate-in fade-in slide-in-from-bottom-4 duration-300">
                     <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border-subtle pb-4">
-                      <div>
-                        <h4 className="font-display text-lg font-semibold text-fg-primary">
-                          {getBuilderCampaignBrandName(selectedState) ||
-                            selectedItem.name ||
-                            "Campanha Salva"}
-                        </h4>
-                        <p className="mt-0.5 text-xs text-fg-muted">
+                      <div className="min-w-0 flex-1">
+                        {editingName ? (
+                          <div className="flex max-w-xl items-center gap-2">
+                            <label
+                              htmlFor="library-campaign-name"
+                              className="sr-only"
+                            >
+                              Nome da campanha
+                            </label>
+                            <input
+                              id="library-campaign-name"
+                              value={nameDraft}
+                              maxLength={120}
+                              autoFocus
+                              onChange={(event) =>
+                                setNameDraft(event.target.value)
+                              }
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter") void confirmRename();
+                                if (event.key === "Escape")
+                                  setEditingName(false);
+                              }}
+                              className="h-11 min-w-0 flex-1 rounded-xl border border-brand/40 bg-surface-1 px-3 text-base font-semibold text-fg-primary outline-none focus:ring-2 focus:ring-brand/30 sm:text-sm"
+                            />
+                            <button
+                              type="button"
+                              disabled={renaming}
+                              onClick={() => void confirmRename()}
+                              aria-label="Salvar novo nome"
+                              className="grid size-11 shrink-0 place-items-center rounded-xl bg-brand text-brand-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-50"
+                            >
+                              {renaming ? (
+                                <Loader2
+                                  className="size-4 animate-spin"
+                                  aria-hidden
+                                />
+                              ) : (
+                                <Check className="size-4" aria-hidden />
+                              )}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={renaming}
+                              onClick={() => setEditingName(false)}
+                              aria-label="Cancelar renomeação"
+                              className="grid size-11 shrink-0 place-items-center rounded-xl border border-border-strong bg-surface-2 text-fg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-50"
+                            >
+                              <X className="size-4" aria-hidden />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <h4 className="truncate font-display text-lg font-semibold text-fg-primary">
+                              {selectedItem.name ||
+                                getBuilderCampaignBrandName(selectedState) ||
+                                "Campanha Salva"}
+                            </h4>
+                            <button
+                              type="button"
+                              onClick={beginRename}
+                              aria-label="Renomear campanha"
+                              title="Renomear campanha"
+                              className="grid size-10 shrink-0 place-items-center rounded-xl text-fg-muted transition hover:bg-surface-2 hover:text-fg-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                            >
+                              <PencilLine className="size-4" aria-hidden />
+                            </button>
+                          </div>
+                        )}
+                        <p className="mt-1 text-xs leading-5 text-fg-muted">
                           Reabra para continuar o original ou crie uma cópia
                           para testar outra direção.
                         </p>

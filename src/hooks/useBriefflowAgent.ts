@@ -43,6 +43,49 @@ const ALL_CHANNELS: CampaignChannel[] = [...CORE_MATERIAL_TYPES];
 const channelLabel = (channel: CampaignChannel) =>
   CONTENT_FORMATS[channel].shortLabel;
 
+function buildExistingCampaignPlatformContext(
+  state: BuilderState,
+  target?: CampaignChannel,
+): string {
+  if (state.type !== "campaign" || !state.campaignAssets?.length) return "";
+
+  const siblingSignals = state.campaignAssets
+    .filter(
+      (asset) =>
+        asset.type !== target &&
+        !asset.content.generationError &&
+        ["banner", "email", "social"].includes(asset.type),
+    )
+    .map((asset) => {
+      const content = asset.content;
+      const signal = [
+        content.title,
+        content.subtitle,
+        content.hook,
+        content.body,
+        content.caption,
+        content.cta,
+      ]
+        .filter(
+          (value): value is string =>
+            typeof value === "string" && Boolean(value.trim()),
+        )
+        .join(" | ")
+        .slice(0, 900);
+      return signal ? `${channelLabel(asset.type)}: ${signal}` : "";
+    })
+    .filter(Boolean);
+
+  if (siblingSignals.length === 0) return "";
+
+  return `
+
+=== COERÊNCIA COM A CAMPANHA EXISTENTE ===
+As outras peças já estabeleceram a plataforma abaixo:
+${siblingSignals.join("\n")}
+Ao regenerar ${target ? channelLabel(target) : "esta peça"}, preserve a promessa central, os fatos confirmados, o nível de sofisticação e o território verbal. Crie uma execução nova para o papel deste canal: não copie frases inteiras, não introduza uma nova promessa e não altere a mecânica comercial.`;
+}
+
 export function useBriefflowAgent() {
   const {
     messages,
@@ -245,7 +288,10 @@ export function useBriefflowAgent() {
       });
 
       let hasErrors = false;
-      let campaignPlatformContext = "";
+      let campaignPlatformContext = buildExistingCampaignPlatformContext(
+        builderRef.current,
+        only,
+      );
 
       for (const [index, channel] of channels.entries()) {
         setGeneratingLabel(
@@ -439,7 +485,9 @@ export function useBriefflowAgent() {
               : undefined;
 
           let currentContentContext = "";
-          if (existingAsset?.content) {
+          // Ajustes parciais preservam os demais campos. Uma regeneração
+          // completa precisa de liberdade para propor uma nova execução.
+          if (!isAll && existingAsset?.content) {
             try {
               const c = existingAsset.content;
 

@@ -137,15 +137,20 @@ export async function invokeEdgeFunction<T>(
   return payload as T;
 }
 
-function normalizeAssetName(name: string, state: BuilderState): string {
-  const requested = state.brandName ? `Campanha ${state.brandName}` : name;
+function normalizeLibraryLabel(name: string): string {
   return (
-    Array.from(requested)
+    Array.from(name)
       .map((character) => (character.charCodeAt(0) < 32 ? " " : character))
       .join("")
+      .replace(/\s+/g, " ")
       .trim()
       .slice(0, 120) || "Campanha sem nome"
   );
+}
+
+function normalizeAssetName(name: string, state: BuilderState): string {
+  const requested = state.brandName ? `Campanha ${state.brandName}` : name;
+  return normalizeLibraryLabel(requested);
 }
 
 export async function saveAssetToLibrary(
@@ -357,6 +362,25 @@ export async function deleteSavedAsset(id: string): Promise<void> {
     .eq("id", id)
     .eq("user_id", user.id);
   if (error) throw error;
+}
+
+export async function renameSavedAsset(
+  id: string,
+  name: string,
+): Promise<SavedLibraryAsset> {
+  if (!supabase) throw new Error("Supabase não configurado.");
+  const user = await requireUser();
+  const normalizedName = normalizeLibraryLabel(name);
+  const { data, error } = await supabase
+    .from("assets")
+    .update({ name: normalizedName })
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .select(SAVED_ASSET_COLUMNS)
+    .single();
+
+  if (error) throw error;
+  return data as SavedLibraryAsset;
 }
 
 const ALLOWED_IMAGE_TYPES = new Set([
