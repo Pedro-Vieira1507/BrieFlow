@@ -1,5 +1,5 @@
 // src/components/briefflow/chat/ChatInput.tsx
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ImagePlus, Loader2, Send, X } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -24,11 +24,16 @@ export function ChatInput({
 }: Props) {
   const [text, setText] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [clientReady, setClientReady] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const canSend =
-    Boolean(text.trim() || attachedImage) && !disabled && !uploading;
+  useEffect(() => {
+    setClientReady(true);
+  }, []);
+
+  const interactionDisabled = Boolean(disabled || uploading || !clientReady);
+  const canSend = Boolean(text.trim() || attachedImage) && !interactionDisabled;
 
   const handleSubmit = (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -60,7 +65,7 @@ export function ChatInput({
   ) => {
     const file = event.target.files?.[0];
     event.target.value = "";
-    if (!file || !onAttachImage) return;
+    if (!file || !onAttachImage || !clientReady) return;
 
     setUploading(true);
     const toastId = toast.loading("Anexando foto do produto...");
@@ -114,7 +119,7 @@ export function ChatInput({
               <button
                 type="button"
                 onClick={onRemoveImage}
-                disabled={disabled || uploading}
+                disabled={interactionDisabled}
                 aria-label="Remover imagem anexada"
                 title="Remover imagem anexada"
                 className="grid size-10 shrink-0 place-items-center rounded-full text-fg-muted transition hover:bg-surface-3 hover:text-fg-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-40"
@@ -136,7 +141,7 @@ export function ChatInput({
           />
           <button
             type="button"
-            disabled={disabled || uploading || !onAttachImage}
+            disabled={interactionDisabled || !onAttachImage}
             onClick={() => fileInputRef.current?.click()}
             aria-label={
               attachedImage
@@ -168,7 +173,7 @@ export function ChatInput({
             value={text}
             onChange={handleInput}
             onKeyDown={handleKeyDown}
-            disabled={disabled || uploading}
+            disabled={interactionDisabled}
             maxLength={8000}
             enterKeyHint="send"
             autoCapitalize="sentences"
@@ -181,23 +186,24 @@ export function ChatInput({
             }
             aria-label="Mensagem para o BrieFlow"
             aria-describedby="brieflow-composer-help"
+            aria-busy={!clientReady || Boolean(disabled)}
             className="max-h-[150px] min-h-[44px] w-full resize-none bg-transparent px-2 py-3 text-base leading-5 text-fg-primary placeholder:text-fg-muted focus:outline-none disabled:opacity-50 sm:text-sm"
             rows={1}
           />
           <button
             type="submit"
             disabled={!canSend}
-            aria-label={disabled ? "Aguarde a resposta" : "Enviar mensagem"}
-            title={disabled ? "Aguarde a resposta" : "Enviar mensagem"}
+            aria-label={interactionDisabled ? "Aguarde a resposta" : "Enviar mensagem"}
+            title={interactionDisabled ? "Aguarde a resposta" : "Enviar mensagem"}
             className={cn(
               "mb-0.5 flex size-11 shrink-0 items-center justify-center rounded-full transition-all duration-200 sm:size-10",
               canSend
-                ? "bg-brand text-white shadow-md hover:brightness-110 active:scale-90"
+                ? "bg-brand text-brand-fg shadow-md hover:brightness-110 active:scale-90"
                 : "cursor-not-allowed bg-surface-3 text-fg-muted",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-surface-2",
             )}
           >
-            {disabled ? (
+            {interactionDisabled ? (
               <Loader2 className="size-4 animate-spin" aria-hidden />
             ) : (
               <Send className="ml-0.5 size-4" aria-hidden />
