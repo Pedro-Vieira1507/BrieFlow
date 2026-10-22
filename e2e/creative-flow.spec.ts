@@ -41,6 +41,8 @@ test("briefing → direção → campanha → biblioteca → cópia", async ({
   await expect(page.getByRole("tab", { name: "Banner" })).toBeVisible();
   await expect(page.getByRole("tab", { name: "E-mail" })).toBeVisible();
   await expect(page.getByRole("tab", { name: "Social" })).toBeVisible();
+
+  await page.getByRole("tab", { name: "Banner" }).click();
   await expect(
     page.getByText("Decidir sem caça ao dado", { exact: true }),
   ).toBeVisible();
