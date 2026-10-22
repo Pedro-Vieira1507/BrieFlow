@@ -13,9 +13,38 @@ import { ArrowLeft, RefreshCw, TriangleAlert } from "lucide-react";
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 
-// --> Imports adicionados para autenticação global
 import { supabase } from "../lib/supabase";
 import { useBriefflowStore } from "../store/briefflow";
+
+const SITE_URL = "https://brieflow-ai.vercel.app";
+const SITE_TITLE = "BrieFlow — Estúdio criativo de marketing com IA";
+const SITE_DESCRIPTION =
+  "Transforme um briefing em campanhas, banners, e-mails, posts, apresentações e documentos com IA, revisão humana e exportação em um único estúdio.";
+const SOCIAL_IMAGE = `${SITE_URL}/app-preview.jpg`;
+
+const SOFTWARE_APPLICATION_SCHEMA = JSON.stringify({
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  name: "BrieFlow",
+  applicationCategory: "BusinessApplication",
+  operatingSystem: "Web",
+  url: SITE_URL,
+  image: SOCIAL_IMAGE,
+  description: SITE_DESCRIPTION,
+  inLanguage: "pt-BR",
+  offers: {
+    "@type": "Offer",
+    category: "SaaS",
+  },
+  featureList: [
+    "Briefing guiado por IA",
+    "Direção criativa multiformato",
+    "Geração de banner, social e e-mail",
+    "Apresentações e documentos exportáveis",
+    "Biblioteca privada de campanhas",
+    "Revisão e edição antes da exportação",
+  ],
+});
 
 function NotFoundComponent() {
   return (
@@ -38,7 +67,7 @@ function NotFoundComponent() {
         <div className="mt-7">
           <Link
             to="/"
-            className="inline-flex h-11 items-center justify-center rounded-xl bg-brand px-5 text-sm font-semibold text-brand-fg shadow-[var(--shadow-brand)] transition hover:-translate-y-px hover:brightness-110"
+            className="inline-flex h-11 items-center justify-center rounded-xl bg-brand px-5 text-sm font-semibold text-brand-fg shadow-[var(--shadow-brand)] transition hover:-translate-y-px hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
           >
             <ArrowLeft className="mr-2 size-4" /> Voltar ao estúdio
           </Link>
@@ -85,13 +114,13 @@ function ErrorComponent({
               router.invalidate();
               reset();
             }}
-            className="inline-flex h-10 items-center justify-center rounded-xl bg-brand px-4 text-sm font-semibold text-brand-fg transition hover:brightness-110"
+            className="inline-flex h-10 items-center justify-center rounded-xl bg-brand px-4 text-sm font-semibold text-brand-fg transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
           >
             <RefreshCw className="mr-2 size-4" /> Tentar novamente
           </button>
           <a
             href="/"
-            className="inline-flex h-10 items-center justify-center rounded-xl border border-border-strong bg-surface-1 px-4 text-sm font-semibold text-fg-secondary transition hover:bg-surface-2 hover:text-fg-primary"
+            className="inline-flex h-10 items-center justify-center rounded-xl border border-border-strong bg-surface-1 px-4 text-sm font-semibold text-fg-secondary transition hover:bg-surface-2 hover:text-fg-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
           >
             Voltar ao início
           </a>
@@ -106,24 +135,40 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     head: () => ({
       meta: [
         { charSet: "utf-8" },
-        { name: "viewport", content: "width=device-width, initial-scale=1" },
-        { title: "BrieFlow - Agente de Peças de Marketing com IA" },
         {
-          name: "description",
-          content:
-            "Estúdio de marketing com IA para criar campanhas, banners, e-mails, posts, apresentações e documentos em um fluxo editável.",
+          name: "viewport",
+          content: "width=device-width, initial-scale=1, viewport-fit=cover",
         },
+        { title: SITE_TITLE },
+        { name: "description", content: SITE_DESCRIPTION },
+        { name: "application-name", content: "BrieFlow" },
+        { name: "apple-mobile-web-app-title", content: "BrieFlow" },
         { name: "theme-color", content: "#07080c" },
-        { property: "og:title", content: "BrieFlow — Estúdio criativo com IA" },
-        {
-          property: "og:description",
-          content:
-            "Transforme um briefing em uma campanha multiformato, editável e pronta para exportação.",
-        },
+        { name: "color-scheme", content: "dark" },
+        { name: "robots", content: "index,follow,max-image-preview:large" },
+        { name: "format-detection", content: "telephone=no" },
+        { property: "og:title", content: SITE_TITLE },
+        { property: "og:description", content: SITE_DESCRIPTION },
         { property: "og:type", content: "website" },
+        { property: "og:locale", content: "pt_BR" },
+        { property: "og:site_name", content: "BrieFlow" },
+        { property: "og:url", content: SITE_URL },
+        { property: "og:image", content: SOCIAL_IMAGE },
+        {
+          property: "og:image:alt",
+          content: "Prévia do estúdio criativo BrieFlow",
+        },
         { name: "twitter:card", content: "summary_large_image" },
+        { name: "twitter:title", content: SITE_TITLE },
+        { name: "twitter:description", content: SITE_DESCRIPTION },
+        { name: "twitter:image", content: SOCIAL_IMAGE },
+        {
+          name: "twitter:image:alt",
+          content: "Prévia do estúdio criativo BrieFlow",
+        },
       ],
       links: [
+        { rel: "canonical", href: SITE_URL },
         { rel: "stylesheet", href: appCss },
         {
           rel: "icon",
@@ -132,6 +177,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
           sizes: "any",
         },
         { rel: "apple-touch-icon", href: "/assets/icone-brieflow.png?v=3" },
+        { rel: "manifest", href: "/site.webmanifest" },
         { rel: "preconnect", href: "https://fonts.googleapis.com" },
         {
           rel: "preconnect",
@@ -157,6 +203,10 @@ function RootShell({ children }: { children: ReactNode }) {
     <html lang="pt-BR" translate="no" suppressHydrationWarning>
       <head>
         <HeadContent />
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: SOFTWARE_APPLICATION_SCHEMA }}
+        />
       </head>
       <body suppressHydrationWarning>
         {children}
@@ -170,17 +220,14 @@ function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   const setUser = useBriefflowStore((state) => state.setUser);
 
-  // Sincronização Global de Sessão
   useEffect(() => {
     if (!supabase) return;
     let observedAuthEvent = false;
 
-    // 1. Carrega a sessão inicial para persistência após F5/Refresh
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (!observedAuthEvent) setUser(session?.user ?? null);
     });
 
-    // 2. Escuta mudanças globais de estado (Login concluído, Logout, Token expirado)
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -188,7 +235,6 @@ function RootComponent() {
       setUser(session?.user ?? null);
     });
 
-    // Limpeza de memória
     return () => subscription.unsubscribe();
   }, [setUser]);
 
