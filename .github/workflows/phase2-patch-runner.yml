@@ -1,4 +1,5 @@
 name: Phase 2 patch runner
+# Registered on the branch; this update triggers the one-time runner.
 
 on:
   push:
