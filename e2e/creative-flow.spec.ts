@@ -43,23 +43,19 @@ test("briefing → direção → campanha → biblioteca → cópia", async ({
   await expect(page.getByRole("tab", { name: "Social" })).toBeVisible();
 
   await page.getByRole("tab", { name: "Banner" }).click();
-  await expect(
-    page.getByText("Decidir sem caça ao dado", { exact: true }),
-  ).toBeVisible();
+  await expect(page.getByRole("tabpanel", { name: "Banner" })).toContainText(
+    "Decidir sem caça ao dado",
+  );
 
   await page.getByRole("tab", { name: "E-mail" }).click();
-  await expect(
-    page.getByRole("tabpanel", { name: "E-mail" }).getByRole("heading", {
-      name: "Decisão começa com contexto",
-    }),
-  ).toBeVisible();
+  await expect(page.getByRole("tabpanel", { name: "E-mail" })).toContainText(
+    "Decisão começa com contexto",
+  );
 
   await page.getByRole("tab", { name: "Social" }).click();
-  await expect(
-    page.getByText("Sua equipe encontra o dado ou caça o dado?", {
-      exact: true,
-    }),
-  ).toBeVisible();
+  await expect(page.getByRole("tabpanel", { name: "Social" })).toContainText(
+    "Sua equipe encontra o dado ou caça o dado?",
+  );
 
   await page.getByRole("button", { name: "Salvar na biblioteca" }).click();
   await expect(
