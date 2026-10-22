@@ -12,12 +12,18 @@ test("briefing → direção → campanha → biblioteca → cópia", async ({
   const backend = await installMockBackend(page);
   await page.goto("/");
 
-  const composer = page.getByLabel("Mensagem para o BrieFlow");
+  const main = page.getByRole("main", { name: "Estúdio criativo BrieFlow" });
+  const composer = main.getByLabel("Mensagem para o BrieFlow");
   await expect(composer).toBeVisible();
-  await composer.fill(
+  await composer.pressSequentially(
     "A marca Atlas vende um painel de gestão operacional para gestores B2B. Quero agendar demonstrações. Use tom claro, direto e confiante. Não invente preços, clientes ou resultados.",
+    { delay: 1 },
   );
-  await page.getByRole("button", { name: "Enviar mensagem" }).click();
+  const sendButton = composer.locator("xpath=ancestor::form").getByRole("button", {
+    name: "Enviar mensagem",
+  });
+  await expect(sendButton).toBeEnabled();
+  await sendButton.click();
 
   await expect(
     page.getByRole("heading", { name: "Revise a direção da campanha" }),
@@ -98,7 +104,14 @@ test("onboarding e assistente funcionam em viewport mobile sem overflow", async 
     page.getByRole("button", { name: "Abrir assistente BrieFlow" }),
   ).toBeVisible();
   await page.getByRole("button", { name: "Abrir assistente BrieFlow" }).click();
-  await expect(page.getByLabel("Mensagem para o BrieFlow")).toBeVisible();
+
+  const mobileAssistant = page.getByRole("dialog", {
+    name: "Assistente criativo BrieFlow",
+  });
+  await expect(mobileAssistant).toBeVisible();
+  await expect(
+    mobileAssistant.getByLabel("Mensagem para o BrieFlow"),
+  ).toBeVisible();
 
   const hasHorizontalOverflow = await page.evaluate(
     () => document.documentElement.scrollWidth > window.innerWidth + 1,
