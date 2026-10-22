@@ -103,10 +103,10 @@ export function ChatInput({
               className="size-10 shrink-0 rounded-lg border border-white/10 bg-white object-contain"
             />
             <div className="min-w-0 flex-1">
-              <p className="truncate text-[11px] font-semibold text-fg-primary">
+              <p className="truncate text-xs font-semibold text-fg-primary">
                 Foto real do produto anexada
               </p>
-              <p className="truncate text-[10px] text-fg-muted">
+              <p className="truncate text-[11px] text-fg-muted">
                 Será priorizada como imagem principal
               </p>
             </div>
@@ -117,7 +117,7 @@ export function ChatInput({
                 disabled={disabled || uploading}
                 aria-label="Remover imagem anexada"
                 title="Remover imagem anexada"
-                className="grid size-7 shrink-0 place-items-center rounded-full text-fg-muted transition hover:bg-surface-3 hover:text-fg-primary disabled:opacity-40"
+                className="grid size-8 shrink-0 place-items-center rounded-full text-fg-muted transition hover:bg-surface-3 hover:text-fg-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-40"
               >
                 <X className="size-3.5" />
               </button>
@@ -149,11 +149,11 @@ export function ChatInput({
                 : "Anexar foto do produto"
             }
             className={cn(
-              "mb-0.5 flex size-10 shrink-0 items-center justify-center rounded-full transition-all",
+              "mb-0.5 flex size-11 shrink-0 items-center justify-center rounded-full transition-all sm:size-10",
               attachedImage
                 ? "bg-brand/15 text-brand hover:bg-brand/25"
                 : "text-fg-muted hover:bg-surface-3 hover:text-fg-primary",
-              "disabled:cursor-not-allowed disabled:opacity-40",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:cursor-not-allowed disabled:opacity-40",
             )}
           >
             {uploading ? (
@@ -175,7 +175,7 @@ export function ChatInput({
                 : "Digite o site ou o que deseja criar..."
             }
             aria-label="Mensagem para o BrieFlow"
-            className="max-h-[150px] min-h-[44px] w-full resize-none bg-transparent px-2 py-3 text-base sm:text-sm leading-5 text-fg-primary placeholder:text-fg-muted focus:outline-none disabled:opacity-50"
+            className="max-h-[150px] min-h-[44px] w-full resize-none bg-transparent px-2 py-3 text-base leading-5 text-fg-primary placeholder:text-fg-muted focus:outline-none disabled:opacity-50 sm:text-sm"
             rows={1}
           />
           <button
@@ -184,10 +184,11 @@ export function ChatInput({
             aria-label={disabled ? "Aguarde a resposta" : "Enviar mensagem"}
             title={disabled ? "Aguarde a resposta" : "Enviar mensagem"}
             className={cn(
-              "mb-0.5 flex size-10 shrink-0 items-center justify-center rounded-full transition-all duration-200",
+              "mb-0.5 flex size-11 shrink-0 items-center justify-center rounded-full transition-all duration-200 sm:size-10",
               canSend
-                ? "bg-brand text-white shadow-md active:scale-90 hover:brightness-110"
+                ? "bg-brand text-white shadow-md hover:brightness-110 active:scale-90"
                 : "cursor-not-allowed bg-surface-3 text-fg-muted",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-surface-2",
             )}
           >
             {disabled ? (
@@ -198,11 +199,9 @@ export function ChatInput({
           </button>
         </div>
       </form>
-      <div className="mt-2.5 text-center">
-        <span className="text-[9px] font-medium tracking-wide text-fg-muted sm:text-[10px]">
-          Revise textos, preços e condições antes de exportar.
-        </span>
-      </div>
+      <p className="mt-2.5 text-center text-[11px] font-medium leading-4 tracking-wide text-fg-muted">
+        Revise textos, preços e condições antes de exportar.
+      </p>
     </div>
   );
 }
