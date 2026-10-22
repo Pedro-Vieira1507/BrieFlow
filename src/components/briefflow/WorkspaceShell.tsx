@@ -16,6 +16,7 @@ import { useBriefflowStore } from "@/store/briefflow";
 
 import { BrandPalette } from "./BrandPalette";
 import { ChatPanel } from "./ChatPanel";
+import { OnboardingCoach } from "./OnboardingCoach";
 import { PageBuilder } from "./PageBuilder";
 import { CONTENT_FORMATS } from "@/lib/plans";
 import type { MaterialType } from "@/types/brief";
@@ -40,8 +41,11 @@ export function WorkspaceShell() {
     brandContext,
     authOpen,
     builder,
+    generatingLabel,
     libraryOpen,
+    loading,
     messages,
+    scraping,
     setAuthOpen,
     user,
     workspaceDirty,
@@ -125,14 +129,34 @@ export function WorkspaceShell() {
     openFormat(material);
   };
 
+  const busyMessage = generatingLabel
+    ? generatingLabel
+    : scraping
+      ? "Analisando a referência enviada."
+      : loading
+        ? "O BrieFlow está processando sua solicitação."
+        : "";
+
   return (
-    <main className="app-shell relative flex h-[100dvh] w-full overflow-hidden bg-surface-0 text-fg-primary">
+    <main
+      aria-label="Estúdio criativo BrieFlow"
+      aria-busy={loading || scraping}
+      className="app-shell relative flex h-[100dvh] w-full overflow-hidden bg-surface-0 text-fg-primary"
+    >
+      <a
+        href="#creative-canvas"
+        className="sr-only z-[100] rounded-lg bg-brand px-4 py-2 font-semibold text-brand-fg focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:outline-none focus:ring-2 focus:ring-white/80"
+      >
+        Pular para o canvas
+      </a>
+
       <div
         aria-hidden
         className="app-ambient pointer-events-none absolute inset-0"
       />
 
       <aside
+        aria-label="Assistente criativo"
         className={cn(
           "relative z-20 hidden h-full w-[404px] shrink-0 flex-col lg:flex",
           "border-r border-border-subtle bg-surface-1/95 shadow-[18px_0_60px_-42px_rgba(0,0,0,0.9)] backdrop-blur-2xl",
@@ -144,7 +168,12 @@ export function WorkspaceShell() {
         <ChatPanel onSend={(text) => handleSend(text, false)} />
       </aside>
 
-      <section className="relative z-10 flex min-h-0 min-w-0 flex-1 flex-col">
+      <section
+        id="creative-canvas"
+        tabIndex={-1}
+        aria-label="Canvas da campanha"
+        className="relative z-10 flex min-h-0 min-w-0 flex-1 flex-col outline-none"
+      >
         <PageBuilder
           onGenerateCampaign={generateCampaign}
           onRetry={regenerateChannel}
@@ -159,10 +188,11 @@ export function WorkspaceShell() {
               <Button
                 size="lg"
                 aria-label="Abrir assistente BrieFlow"
+                aria-expanded={mobileChatOpen}
                 className={cn(
                   "fixed bottom-[max(1rem,env(safe-area-inset-bottom))] right-4 z-40 h-13 rounded-2xl px-4",
                   "border border-white/10 bg-brand text-brand-fg shadow-[var(--shadow-brand)]",
-                  "transition duration-200 hover:-translate-y-0.5 hover:brightness-110 active:translate-y-0 active:scale-[0.98]",
+                  "transition duration-200 hover:-translate-y-0.5 hover:brightness-110 active:translate-y-0 active:scale-[0.98] focus-visible:ring-2 focus-visible:ring-white/80",
                 )}
               >
                 <span className="mr-2 grid size-7 place-items-center rounded-lg bg-white/12">
@@ -195,6 +225,14 @@ export function WorkspaceShell() {
         </div>
       </section>
 
+      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {busyMessage}
+      </div>
+
+      <OnboardingCoach
+        onStartBriefing={openAssistant}
+        onOpenFormats={() => setCatalogOpen(true)}
+      />
       <AuthModal open={authOpen} onOpenChange={setAuthOpen} />
       <Suspense fallback={null}>
         {settingsOpen ? (
