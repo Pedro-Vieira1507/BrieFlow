@@ -11,7 +11,7 @@
   "icons": [
     {
       "src": "/assets/icone-brieflow.png?v=3",
-      "sizes": "512x512",
+      "sizes": "any",
       "type": "image/png",
       "purpose": "any maskable"
     }
