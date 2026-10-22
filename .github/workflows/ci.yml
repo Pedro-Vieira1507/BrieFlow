@@ -46,7 +46,7 @@ jobs:
         run: npm install --global npm@11
       - run: npm ci --ignore-scripts
       - name: Install Chromium
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install chromium
       - name: Run browser E2E and accessibility suite
         run: npm run test:e2e
       - name: Upload Playwright report
