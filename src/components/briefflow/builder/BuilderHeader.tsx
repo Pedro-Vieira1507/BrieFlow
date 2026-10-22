@@ -56,8 +56,14 @@ export function BuilderHeader({
   onOpenSettings,
   onOpenContentCatalog,
 }: Props) {
-  const { user, reset, workspaceDirty, setAuthOpen, setLibraryOpen } =
-    useBriefflowStore();
+  const {
+    user,
+    reset,
+    workspaceDirty,
+    activeLibraryAssetId,
+    setAuthOpen,
+    setLibraryOpen,
+  } = useBriefflowStore();
   const { plan } = useCredits();
   const [confirmResetOpen, setConfirmResetOpen] = useState(false);
 
@@ -72,6 +78,28 @@ export function BuilderHeader({
     }
     reset();
   };
+
+  const saveState = workspaceDirty
+    ? {
+        label: "Não salvo",
+        title: "Existem alterações ainda não salvas na biblioteca",
+        dot: "bg-amber-300",
+        badge: "border-amber-300/20 bg-amber-300/10 text-amber-200",
+      }
+    : activeLibraryAssetId
+      ? {
+          label: "Salvo",
+          title: "Campanha sincronizada com a biblioteca",
+          dot: "bg-emerald-400",
+          badge:
+            "border-emerald-400/15 bg-emerald-400/8 text-emerald-300/90",
+        }
+      : {
+          label: "Novo",
+          title: "Novo briefing ainda não salvo na biblioteca",
+          dot: "bg-fg-muted",
+          badge: "border-border-strong bg-surface-2 text-fg-tertiary",
+        };
 
   return (
     <>
@@ -91,12 +119,21 @@ export function BuilderHeader({
               <h2 className="truncate font-display text-[14px] font-semibold tracking-tight text-fg-primary sm:text-[15px]">
                 Estúdio criativo
               </h2>
-              <span className="hidden items-center gap-1.5 rounded-full border border-emerald-400/15 bg-emerald-400/8 px-2 py-0.5 text-[9px] font-semibold text-emerald-300/90 md:inline-flex">
-                <span className="size-1 rounded-full bg-emerald-400" /> Ao vivo
+              <span
+                role="status"
+                aria-live="polite"
+                title={saveState.title}
+                className={cn(
+                  "hidden items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-semibold md:inline-flex",
+                  saveState.badge,
+                )}
+              >
+                <span className={cn("size-1.5 rounded-full", saveState.dot)} />
+                {saveState.label}
               </span>
             </div>
-            <p className="truncate text-[9px] font-semibold uppercase tracking-[0.16em] text-fg-muted sm:text-[10px]">
-              Canvas em tempo real
+            <p className="truncate text-[10px] font-semibold uppercase tracking-[0.14em] text-fg-muted sm:text-[11px]">
+              Briefing → direção → entrega
             </p>
           </div>
         </div>
@@ -109,7 +146,7 @@ export function BuilderHeader({
             title="Criar outro formato"
             onClick={onOpenContentCatalog}
             disabled={loading}
-            className="size-11 rounded-xl border-border-strong bg-surface-1/50 p-0 text-fg-secondary transition hover:border-brand/30 hover:bg-surface-2 hover:text-fg-primary disabled:opacity-40 sm:h-9 sm:w-auto sm:px-3"
+            className="size-11 rounded-xl border-border-strong bg-surface-1/50 p-0 text-fg-secondary transition hover:border-brand/30 hover:bg-surface-2 hover:text-fg-primary focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-40 sm:h-9 sm:w-auto sm:px-3"
           >
             <LayoutGrid className="size-3.5 sm:mr-2" />
             <span className="hidden sm:inline">Formatos</span>
@@ -122,7 +159,7 @@ export function BuilderHeader({
             title="Exportar campanha"
             onClick={onExport}
             disabled={!isSaveable || loading || isExporting}
-            className="size-11 rounded-xl border-border-strong bg-surface-1/50 p-0 text-fg-secondary transition hover:border-brand/30 hover:bg-surface-2 hover:text-fg-primary disabled:opacity-40 sm:h-9 sm:w-auto sm:px-3"
+            className="size-11 rounded-xl border-border-strong bg-surface-1/50 p-0 text-fg-secondary transition hover:border-brand/30 hover:bg-surface-2 hover:text-fg-primary focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-40 sm:h-9 sm:w-auto sm:px-3"
           >
             {isExporting ? (
               <Loader2 className="size-3.5 animate-spin sm:mr-2" />
@@ -139,7 +176,7 @@ export function BuilderHeader({
             aria-label="Salvar na biblioteca"
             title="Salvar na biblioteca"
             className={cn(
-              "size-11 rounded-xl bg-brand p-0 text-xs font-semibold text-brand-fg transition hover:-translate-y-px hover:brightness-110 sm:h-9 sm:w-auto sm:px-3",
+              "size-11 rounded-xl bg-brand p-0 text-xs font-semibold text-brand-fg transition hover:-translate-y-px hover:brightness-110 focus-visible:ring-2 focus-visible:ring-white/80 sm:h-9 sm:w-auto sm:px-3",
               "shadow-[var(--shadow-brand)] disabled:translate-y-0 disabled:shadow-none disabled:opacity-40",
             )}
           >
@@ -156,7 +193,7 @@ export function BuilderHeader({
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
-                  className="ml-0.5 flex size-11 items-center justify-center rounded-xl border border-white/10 bg-gradient-to-br from-brand to-violet-500 text-xs font-bold text-white shadow-[var(--shadow-brand)] transition hover:brightness-110 sm:ml-1"
+                  className="ml-0.5 flex size-11 items-center justify-center rounded-xl border border-white/10 bg-gradient-to-br from-brand to-violet-500 text-xs font-bold text-white shadow-[var(--shadow-brand)] transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80 sm:ml-1"
                   title={user.email ?? "Perfil"}
                   aria-label="Abrir menu do perfil"
                 >
@@ -166,19 +203,19 @@ export function BuilderHeader({
               <DropdownMenuContent
                 side="bottom"
                 align="end"
-                className="w-56 bg-surface-2 border-border-strong text-fg-primary shadow-2xl p-1"
+                className="w-56 border-border-strong bg-surface-2 p-1 text-fg-primary shadow-2xl"
               >
-                <div className="px-3 py-2.5 border-b border-border-subtle">
-                  <p className="text-xs font-bold text-fg-primary truncate">
+                <div className="border-b border-border-subtle px-3 py-2.5">
+                  <p className="truncate text-xs font-bold text-fg-primary">
                     {user.email}
                   </p>
-                  <p className="text-[10px] font-medium text-fg-muted uppercase tracking-wider mt-0.5">
+                  <p className="mt-0.5 text-[10px] font-medium uppercase tracking-wider text-fg-muted">
                     Plano {plan ? planLabel(plan.plan) : "Gratuito"}
                   </p>
                 </div>
 
                 <DropdownMenuItem
-                  className="cursor-pointer hover:bg-surface-3 my-0.5 text-xs font-medium text-fg-secondary hover:text-fg-primary"
+                  className="my-0.5 cursor-pointer text-xs font-medium text-fg-secondary hover:bg-surface-3 hover:text-fg-primary"
                   onClick={handleNewBriefing}
                 >
                   <PlusCircle className="mr-2 size-4 text-brand" /> Novo
@@ -186,24 +223,24 @@ export function BuilderHeader({
                 </DropdownMenuItem>
 
                 <DropdownMenuItem
-                  className="cursor-pointer hover:bg-surface-3 my-0.5 text-xs font-medium text-fg-secondary hover:text-fg-primary"
+                  className="my-0.5 cursor-pointer text-xs font-medium text-fg-secondary hover:bg-surface-3 hover:text-fg-primary"
                   onClick={() => setLibraryOpen(true)}
                 >
                   <FolderKanban className="mr-2 size-4 text-brand" /> Biblioteca
                 </DropdownMenuItem>
 
                 <DropdownMenuItem
-                  className="cursor-pointer hover:bg-surface-3 my-0.5 text-xs font-medium text-fg-secondary hover:text-fg-primary"
+                  className="my-0.5 cursor-pointer text-xs font-medium text-fg-secondary hover:bg-surface-3 hover:text-fg-primary"
                   onClick={onOpenSettings}
                 >
                   <Settings className="mr-2 size-4 text-fg-muted" />{" "}
                   Configurações
                 </DropdownMenuItem>
 
-                <DropdownMenuSeparator className="bg-border-subtle my-1" />
+                <DropdownMenuSeparator className="my-1 bg-border-subtle" />
 
                 <DropdownMenuItem
-                  className="cursor-pointer hover:bg-rose-500/10 hover:text-rose-400 text-xs font-medium text-rose-400/90"
+                  className="cursor-pointer text-xs font-medium text-rose-400/90 hover:bg-rose-500/10 hover:text-rose-400"
                   onClick={handleSignOut}
                 >
                   <LogOut className="mr-2 size-4" /> Sair
@@ -216,7 +253,7 @@ export function BuilderHeader({
               variant="outline"
               onClick={() => setAuthOpen(true)}
               aria-label="Entrar no BrieFlow"
-              className="ml-0.5 size-11 rounded-xl border-border-strong bg-surface-2 p-0 text-fg-secondary hover:text-fg-primary sm:ml-1 sm:h-9 sm:w-auto sm:px-3"
+              className="ml-0.5 size-11 rounded-xl border-border-strong bg-surface-2 p-0 text-fg-secondary hover:text-fg-primary focus-visible:ring-2 focus-visible:ring-brand sm:ml-1 sm:h-9 sm:w-auto sm:px-3"
             >
               <LogIn className="size-3.5 sm:mr-1.5" />
               <span className="hidden sm:inline">Entrar</span>
@@ -226,7 +263,7 @@ export function BuilderHeader({
       </header>
 
       <AlertDialog open={confirmResetOpen} onOpenChange={setConfirmResetOpen}>
-        <AlertDialogContent className="bg-surface-1 border-border-strong text-fg-primary shadow-2xl">
+        <AlertDialogContent className="border-border-strong bg-surface-1 text-fg-primary shadow-2xl">
           <AlertDialogHeader>
             <AlertDialogTitle>Descartar alterações atuais?</AlertDialogTitle>
             <AlertDialogDescription className="text-fg-secondary">
@@ -243,7 +280,7 @@ export function BuilderHeader({
                 reset();
                 setConfirmResetOpen(false);
               }}
-              className="bg-rose-600 text-white hover:bg-rose-700 shadow-md"
+              className="bg-rose-600 text-white shadow-md hover:bg-rose-700"
             >
               Sim, descartar
             </AlertDialogAction>
