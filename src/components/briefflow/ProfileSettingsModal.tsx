@@ -28,6 +28,7 @@ import { CONTENT_FORMATS, PLAN_CATALOG, type PlanId } from "@/lib/plans";
 import { invokeEdgeFunction } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import { useBriefflowStore } from "@/store/briefflow";
+import { BrandKitPanel } from "./BrandKitPanel";
 
 interface Props {
   open: boolean;
@@ -196,25 +197,31 @@ export function ProfileSettingsModal({ open, onOpenChange }: Props) {
               Configurações
             </DialogTitle>
             <DialogDescription className="text-fg-tertiary">
-              Ajuste a direção padrão e acompanhe seu plano.
+              Ajuste a direção padrão, seus Brand Kits e acompanhe seu plano.
             </DialogDescription>
           </DialogHeader>
         ) : null}
 
         {!isUpgrading ? (
           <Tabs defaultValue="ai" className="mt-1 w-full">
-            <TabsList className="grid h-12 w-full grid-cols-2 rounded-xl border border-border-subtle bg-surface-2 p-1">
+            <TabsList className="grid h-12 w-full grid-cols-3 rounded-xl border border-border-subtle bg-surface-2 p-1">
               <TabsTrigger
                 value="ai"
                 className="rounded-lg text-xs font-semibold sm:text-sm"
               >
-                <Bot className="mr-2 size-4" /> Preferências de IA
+                <Bot className="mr-1.5 size-4" /> IA
+              </TabsTrigger>
+              <TabsTrigger
+                value="brand"
+                className="rounded-lg text-xs font-semibold sm:text-sm"
+              >
+                <Building2 className="mr-1.5 size-4" /> Brand Kit
               </TabsTrigger>
               <TabsTrigger
                 value="billing"
                 className="rounded-lg text-xs font-semibold sm:text-sm"
               >
-                <CreditCard className="mr-2 size-4" /> Assinatura
+                <CreditCard className="mr-1.5 size-4" /> Plano
               </TabsTrigger>
             </TabsList>
 
@@ -259,6 +266,10 @@ export function ProfileSettingsModal({ open, onOpenChange }: Props) {
                   <Sparkles className="mr-2 size-4" /> Salvar preferências
                 </Button>
               </div>
+            </TabsContent>
+
+            <TabsContent value="brand" className="mt-6">
+              <BrandKitPanel />
             </TabsContent>
 
             <TabsContent value="billing" className="mt-6 space-y-5 px-1">

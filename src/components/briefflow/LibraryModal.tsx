@@ -23,6 +23,8 @@ import {
   deleteSavedAsset,
   getSavedAssetsPage,
   renameSavedAsset,
+  updateSavedAssetStatus,
+  type LibraryAssetStatus,
   type SavedAssetsCursor,
   type SavedLibraryAsset,
 } from "@/lib/supabase";
@@ -54,6 +56,22 @@ function getLibraryItemLabel(item: SavedLibraryAsset): string {
   );
 }
 
+const LIBRARY_STATUS_OPTIONS: Array<{
+  value: LibraryAssetStatus;
+  label: string;
+}> = [
+  { value: "draft", label: "Rascunho" },
+  { value: "review", label: "Em revisão" },
+  { value: "approved", label: "Aprovada" },
+];
+
+function libraryStatusLabel(status: LibraryAssetStatus): string {
+  return (
+    LIBRARY_STATUS_OPTIONS.find((option) => option.value === status)?.label ??
+    "Rascunho"
+  );
+}
+
 export function LibraryModal() {
   const {
     libraryOpen,
@@ -68,6 +86,10 @@ export function LibraryModal() {
   const [nextCursor, setNextCursor] = useState<SavedAssetsCursor | null>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | LibraryAssetStatus>(
+    "all",
+  );
+  const [updatingStatus, setUpdatingStatus] = useState(false);
   const [activeTab, setActiveTab] = useState<CampaignAsset["type"]>("banner");
   const [pendingDelete, setPendingDelete] = useState<{
     id: string;
@@ -87,6 +109,7 @@ export function LibraryModal() {
     setNextCursor(null);
     setLoading(true);
     setQuery("");
+    setStatusFilter("all");
     try {
       const page = await getSavedAssetsPage();
       if (
@@ -208,6 +231,7 @@ export function LibraryModal() {
   const visibleEntries = items
     .map((item, index) => ({ item, index, label: getLibraryItemLabel(item) }))
     .filter(({ item, label }) => {
+      if (statusFilter !== "all" && item.status !== statusFilter) return false;
       if (!normalizedQuery) return true;
       const haystack = `${label} ${item.name} ${item.type}`.toLocaleLowerCase(
         "pt-BR",
@@ -216,11 +240,11 @@ export function LibraryModal() {
     });
 
   useEffect(() => {
-    if (!normalizedQuery || visibleEntries.length === 0) return;
+    if (visibleEntries.length === 0) return;
     if (!visibleEntries.some(({ index }) => index === selectedIndex)) {
       setSelectedIndex(visibleEntries[0].index);
     }
-  }, [normalizedQuery, selectedIndex, visibleEntries]);
+  }, [normalizedQuery, selectedIndex, statusFilter, visibleEntries]);
 
   const selectedItem = items[selectedIndex];
   const selectedState: BuilderState | undefined = selectedItem?.content;
@@ -261,6 +285,26 @@ export function LibraryModal() {
       });
     } finally {
       setRenaming(false);
+    }
+  };
+
+  const handleStatusChange = async (status: LibraryAssetStatus) => {
+    if (!selectedItem || updatingStatus || selectedItem.status === status) return;
+    setUpdatingStatus(true);
+    try {
+      const updated = await updateSavedAssetStatus(selectedItem.id, status);
+      setItems((current) =>
+        current.map((item) =>
+          item.id === updated.id ? { ...item, ...updated } : item,
+        ),
+      );
+      toast.success(`Status alterado para ${libraryStatusLabel(status)}`);
+    } catch (error) {
+      toast.error("Não foi possível alterar o status", {
+        description: error instanceof Error ? error.message : undefined,
+      });
+    } finally {
+      setUpdatingStatus(false);
     }
   };
 
@@ -351,6 +395,28 @@ export function LibraryModal() {
                       </button>
                     ) : null}
                   </div>
+                  <div className="mt-2">
+                    <label htmlFor="library-status-filter" className="sr-only">
+                      Filtrar campanhas por status
+                    </label>
+                    <select
+                      id="library-status-filter"
+                      value={statusFilter}
+                      onChange={(event) =>
+                        setStatusFilter(
+                          event.target.value as "all" | LibraryAssetStatus,
+                        )
+                      }
+                      className="h-10 w-full rounded-xl border border-border-subtle bg-surface-1 px-3 text-xs font-semibold text-fg-secondary outline-none focus:border-brand/50 focus:ring-2 focus:ring-brand/20"
+                    >
+                      <option value="all">Todos os status</option>
+                      {LIBRARY_STATUS_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                   <p
                     className="mt-2 px-1 text-xs font-semibold uppercase tracking-[0.13em] text-fg-muted"
                     aria-live="polite"
@@ -398,6 +464,9 @@ export function LibraryModal() {
                         >
                           <span className="block truncate text-xs font-semibold text-fg-primary">
                             {label}
+                          </span>
+                          <span className="mt-1.5 inline-flex rounded-full border border-border-subtle bg-surface-1 px-2 py-0.5 text-[10px] font-semibold text-fg-secondary">
+                            {libraryStatusLabel(item.status)}
                           </span>
                           <span
                             className="mt-1.5 flex items-center gap-1.5 text-xs text-fg-tertiary"
@@ -518,6 +587,25 @@ export function LibraryModal() {
                           Reabra para continuar o original ou crie uma cópia
                           para testar outra direção.
                         </p>
+                        <div className="mt-3 flex flex-wrap items-center gap-2" aria-label="Status da campanha">
+                          {LIBRARY_STATUS_OPTIONS.map((option) => (
+                            <button
+                              key={option.value}
+                              type="button"
+                              aria-pressed={selectedItem.status === option.value}
+                              disabled={updatingStatus}
+                              onClick={() => void handleStatusChange(option.value)}
+                              className={cn(
+                                "min-h-9 rounded-lg border px-3 text-xs font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-50",
+                                selectedItem.status === option.value
+                                  ? "border-brand/40 bg-brand-muted text-brand"
+                                  : "border-border-subtle bg-surface-2 text-fg-secondary hover:border-border-strong hover:text-fg-primary",
+                              )}
+                            >
+                              {option.label}
+                            </button>
+                          ))}
+                        </div>
                       </div>
                       <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
                         <Button

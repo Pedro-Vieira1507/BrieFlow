@@ -22,6 +22,8 @@ export const supabase: SupabaseClient | null = isSupabaseConfigured
     })
   : null;
 
+export type LibraryAssetStatus = \"draft\" | \"review\" | \"approved\";
+
 export interface SavedLibraryAsset {
   id: string;
   user_id: string;
@@ -29,7 +31,7 @@ export interface SavedLibraryAsset {
   name: string;
   type: string;
   content: BuilderState;
-  status: string;
+  status: LibraryAssetStatus;
   created_at: string;
   updated_at?: string;
 }
@@ -42,6 +44,36 @@ export interface SavedAssetsCursor {
 export interface SavedAssetsPage {
   items: SavedLibraryAsset[];
   nextCursor: SavedAssetsCursor | null;
+}
+
+export interface BrandKit {
+  id: string;
+  user_id: string;
+  name: string;
+  brand_name: string | null;
+  persona: string;
+  tone: string;
+  framework: string;
+  product: string | null;
+  offer: string | null;
+  website_url: string | null;
+  keywords: string[];
+  forbidden_terms: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BrandKitInput {
+  name: string;
+  brandName?: string;
+  persona: string;
+  tone: string;
+  framework: string;
+  product?: string;
+  offer?: string;
+  websiteUrl?: string;
+  keywords?: string[];
+  forbiddenTerms?: string[];
 }
 
 export class EdgeFunctionError extends Error {
@@ -178,7 +210,6 @@ export async function saveAssetToLibrary(
     name: normalizeAssetName(name, state),
     type: state.type,
     content: state,
-    status: "draft",
   };
   const query = existingAssetId
     ? supabase
@@ -186,7 +217,9 @@ export async function saveAssetToLibrary(
         .update(payload)
         .eq("id", existingAssetId)
         .eq("user_id", user.id)
-    : supabase.from("assets").insert({ user_id: user.id, ...payload });
+    : supabase
+        .from("assets")
+        .insert({ user_id: user.id, ...payload, status: "draft" });
   const { data, error } = await query.select().single();
 
   if (error) {
@@ -381,6 +414,119 @@ export async function renameSavedAsset(
 
   if (error) throw error;
   return data as SavedLibraryAsset;
+}
+
+
+const LIBRARY_ASSET_STATUSES = new Set<LibraryAssetStatus>([
+  "draft",
+  "review",
+  "approved",
+]);
+
+export async function updateSavedAssetStatus(
+  id: string,
+  status: LibraryAssetStatus,
+): Promise<SavedLibraryAsset> {
+  if (!supabase) throw new Error("Supabase não configurado.");
+  if (!LIBRARY_ASSET_STATUSES.has(status)) {
+    throw new Error("Status de campanha inválido.");
+  }
+  const user = await requireUser();
+  const { data, error } = await supabase
+    .from("assets")
+    .update({ status })
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .select(SAVED_ASSET_COLUMNS)
+    .single();
+
+  if (error) throw error;
+  return data as SavedLibraryAsset;
+}
+
+const BRAND_KIT_COLUMNS =
+  "id,user_id,name,brand_name,persona,tone,framework,product,offer,website_url,keywords,forbidden_terms,created_at,updated_at";
+
+function normalizeBrandKitText(
+  value: string | undefined,
+  maxLength: number,
+): string | null {
+  if (!value) return null;
+  const normalized = Array.from(value)
+    .map((character) => (character.charCodeAt(0) < 32 ? " " : character))
+    .join("")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, maxLength);
+  return normalized || null;
+}
+
+function normalizeBrandKitList(values: string[] | undefined): string[] {
+  if (!values?.length) return [];
+  return Array.from(
+    new Set(
+      values
+        .map((value) => normalizeBrandKitText(value, 80))
+        .filter((value): value is string => Boolean(value)),
+    ),
+  ).slice(0, 24);
+}
+
+export async function getBrandKits(): Promise<BrandKit[]> {
+  if (!supabase) throw new Error("Supabase não configurado.");
+  const user = await requireUser();
+  const { data, error } = await supabase
+    .from("brand_kits")
+    .select(BRAND_KIT_COLUMNS)
+    .eq("user_id", user.id)
+    .order("updated_at", { ascending: false });
+
+  if (error) throw error;
+  return (data ?? []) as BrandKit[];
+}
+
+export async function saveBrandKit(
+  input: BrandKitInput,
+  existingId?: string | null,
+): Promise<BrandKit> {
+  if (!supabase) throw new Error("Supabase não configurado.");
+  const user = await requireUser();
+  const payload = {
+    name: normalizeLibraryLabel(input.name),
+    brand_name: normalizeBrandKitText(input.brandName, 120),
+    persona:
+      normalizeBrandKitText(input.persona, 300) ?? "Público-alvo",
+    tone: normalizeBrandKitText(input.tone, 300) ?? "Premium",
+    framework: normalizeBrandKitText(input.framework, 120) ?? "AIDA",
+    product: normalizeBrandKitText(input.product, 500),
+    offer: normalizeBrandKitText(input.offer, 500),
+    website_url: normalizeBrandKitText(input.websiteUrl, 500),
+    keywords: normalizeBrandKitList(input.keywords),
+    forbidden_terms: normalizeBrandKitList(input.forbiddenTerms),
+    updated_at: new Date().toISOString(),
+  };
+
+  const query = existingId
+    ? supabase
+        .from("brand_kits")
+        .update(payload)
+        .eq("id", existingId)
+        .eq("user_id", user.id)
+    : supabase.from("brand_kits").insert({ user_id: user.id, ...payload });
+  const { data, error } = await query.select(BRAND_KIT_COLUMNS).single();
+  if (error) throw error;
+  return data as BrandKit;
+}
+
+export async function deleteBrandKit(id: string): Promise<void> {
+  if (!supabase) throw new Error("Supabase não configurado.");
+  const user = await requireUser();
+  const { error } = await supabase
+    .from("brand_kits")
+    .delete()
+    .eq("id", id)
+    .eq("user_id", user.id);
+  if (error) throw error;
 }
 
 const ALLOWED_IMAGE_TYPES = new Set([

@@ -27,6 +27,10 @@ const DesignExporter = lazy(() =>
 interface Props {
   onGenerateCampaign: () => void | Promise<void>;
   onRetry: (channel: CampaignAsset["type"]) => void | Promise<void>;
+  onRefine?: (
+    channel: CampaignAsset["type"],
+    instruction: string,
+  ) => void | Promise<void>;
   onOpenSettings?: () => void;
   onOpenChat?: () => void;
   onOpenContentCatalog?: () => void;
@@ -35,6 +39,7 @@ interface Props {
 export function PageBuilder({
   onGenerateCampaign,
   onRetry,
+  onRefine,
   onOpenSettings,
   onOpenChat,
   onOpenContentCatalog,
@@ -199,6 +204,7 @@ export function PageBuilder({
                 onTabChange={setActiveTab}
                 loading={loading}
                 onRetry={onRetry}
+                onRefine={onRefine}
               />
             </div>
           )}

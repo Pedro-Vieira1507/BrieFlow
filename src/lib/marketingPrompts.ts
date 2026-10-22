@@ -15,7 +15,7 @@ export interface PromptPair {
   user: string;
 }
 
-export const PROMPT_VERSION = "brieflow-creative-director-2026-10.22";
+export const PROMPT_VERSION = "brieflow-creative-director-2026-10.22-brand-kit";
 
 export const BRAND_VOICE = `VOZ E ESTILO:
 - Escreva sempre em Português do Brasil natural, contemporâneo e fluido.
@@ -262,6 +262,15 @@ function brandSection(brief: MarketingBrief): string {
     brief.tone ? `Tom confirmado: ${clipPromptValue(brief.tone, 300)}` : null,
     brief.framework
       ? `Framework solicitado: ${clipPromptValue(brief.framework, 200)}`
+      : null,
+    brief.websiteUrl
+      ? `Site cadastrado da marca: ${clipPromptValue(brief.websiteUrl, 500)}`
+      : null,
+    brief.keywords?.length
+      ? `Território verbal preferido: ${clipPromptValue(brief.keywords.join(", "), 900)}`
+      : null,
+    brief.forbiddenTerms?.length
+      ? `Termos proibidos pela marca — não usar: ${clipPromptValue(brief.forbiddenTerms.join(", "), 900)}`
       : null,
     brief.strategy
       ? `Estratégia atual: ${clipPromptValue(brief.strategy, 1200)}`

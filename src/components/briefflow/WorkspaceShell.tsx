@@ -50,8 +50,12 @@ export function WorkspaceShell() {
     user,
     workspaceDirty,
   } = useBriefflowStore();
-  const { handleSend, generateCampaign, regenerateChannel } =
-    useBriefflowAgent();
+  const {
+    handleSend,
+    generateCampaign,
+    regenerateChannel,
+    refineChannel,
+  } = useBriefflowAgent();
   const [mobileChatOpen, setMobileChatOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [catalogOpen, setCatalogOpen] = useState(false);
@@ -177,6 +181,7 @@ export function WorkspaceShell() {
         <PageBuilder
           onGenerateCampaign={generateCampaign}
           onRetry={regenerateChannel}
+          onRefine={refineChannel}
           onOpenSettings={() => setSettingsOpen(true)}
           onOpenChat={openAssistant}
           onOpenContentCatalog={() => setCatalogOpen(true)}

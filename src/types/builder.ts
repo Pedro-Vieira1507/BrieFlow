@@ -228,6 +228,9 @@ export interface BrandContext {
   brandName?: string;
   product?: string;
   offer?: string;
+  websiteUrl?: string;
+  keywords?: string[];
+  forbiddenTerms?: string[];
   site?: SiteBrandData | null;
 }
 

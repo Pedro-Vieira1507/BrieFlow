@@ -97,6 +97,9 @@ export interface MarketingBrief extends ProductReference {
   offer?: string | null;
   tone?: string | null;
   framework?: string | null;
+  websiteUrl?: string | null;
+  keywords?: string[];
+  forbiddenTerms?: string[];
   channels?: MarketingChannel[];
   /** Dados extraídos do site da marca, quando houver. */
   site?: SiteBrandData | null;
@@ -206,6 +209,15 @@ export function toMarketingBrief(input: {
     offer: cleanOffer(plan?.offer) ?? cleanOffer(brandContext.offer),
     tone: clean(plan?.tone) ?? clean(brandContext.tone),
     framework: clean(brandContext.framework),
+    websiteUrl: clean(brandContext.websiteUrl),
+    keywords: (brandContext.keywords ?? [])
+      .map((value) => clean(value))
+      .filter((value): value is string => Boolean(value))
+      .slice(0, 24),
+    forbiddenTerms: (brandContext.forbiddenTerms ?? [])
+      .map((value) => clean(value))
+      .filter((value): value is string => Boolean(value))
+      .slice(0, 24),
     channels,
     site: brandContext.site ?? null,
     availableImageUrls: images,

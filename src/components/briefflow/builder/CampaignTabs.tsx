@@ -21,6 +21,7 @@ import {
   Presentation,
   RefreshCw,
   ScrollText,
+  Sparkles,
   Upload,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -40,6 +41,10 @@ interface Props {
   onTabChange: (tab: CampaignAsset["type"]) => void;
   loading?: boolean;
   onRetry?: (channel: CampaignAsset["type"]) => void | Promise<void>;
+  onRefine?: (
+    channel: CampaignAsset["type"],
+    instruction: string,
+  ) => void | Promise<void>;
 }
 
 const CHANNELS: Array<{
@@ -159,8 +164,10 @@ export function CampaignTabs({
   onTabChange,
   loading = false,
   onRetry,
+  onRefine,
 }: Props) {
   const previousAssetIdsRef = useRef<string[]>([]);
+  const [refinementRequest, setRefinementRequest] = useState("");
   const campaignBrandName = getCampaignBrandName(assets);
   const visibleChannels = CHANNELS.filter(
     ({ key }) =>
@@ -223,6 +230,62 @@ export function CampaignTabs({
             value={asset.type}
             className="mt-0 outline-none animate-in fade-in slide-in-from-bottom-2 duration-300"
           >
+            {!generationError &&
+            onRefine &&
+            (CORE_MATERIAL_TYPES as readonly string[]).includes(asset.type) ? (
+              <div className="mx-auto mb-5 max-w-4xl rounded-2xl border border-brand/15 bg-surface-1/80 p-3 shadow-[var(--shadow-soft)]">
+                <form
+                  className="flex flex-col gap-2 sm:flex-row"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    const request = refinementRequest.trim();
+                    if (!request) return;
+                    setRefinementRequest("");
+                    void onRefine(asset.type, request);
+                  }}
+                >
+                  <label htmlFor={`refine-${asset.id}`} className="sr-only">
+                    Pedido de refinamento com IA
+                  </label>
+                  <div className="relative min-w-0 flex-1">
+                    <Sparkles className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-brand" />
+                    <input
+                      id={`refine-${asset.id}`}
+                      value={refinementRequest}
+                      disabled={loading}
+                      onChange={(event) => setRefinementRequest(event.target.value)}
+                      placeholder="Ex.: deixe a headline mais premium sem mudar a oferta"
+                      className="h-11 w-full rounded-xl border border-border-subtle bg-surface-2 pl-10 pr-3 text-sm text-fg-primary outline-none placeholder:text-fg-muted focus:border-brand/50 focus:ring-2 focus:ring-brand/20 disabled:opacity-50"
+                    />
+                  </div>
+                  <Button
+                    type="submit"
+                    disabled={loading || !refinementRequest.trim()}
+                    className="h-11 rounded-xl bg-brand font-semibold text-brand-fg"
+                  >
+                    <Sparkles className="mr-2 size-4" /> Refinar com IA
+                  </Button>
+                </form>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {[
+                    "Mais direto e específico",
+                    "Mais premium e contido",
+                    "Encurte sem perder a ideia central",
+                  ].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      disabled={loading}
+                      onClick={() => void onRefine(asset.type, preset)}
+                      className="min-h-9 rounded-lg border border-border-subtle bg-surface-2 px-3 text-xs font-medium text-fg-secondary transition hover:border-brand/30 hover:text-fg-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-50"
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
             {generationError ? (
               <div className="mx-auto flex min-h-[420px] max-w-2xl flex-col items-center justify-center rounded-[28px] border border-amber-400/20 bg-surface-1/90 px-8 py-12 text-center shadow-[var(--shadow-elevated)]">
                 <div className="mb-5 grid size-14 place-items-center rounded-2xl bg-amber-400/10 text-amber-300">
