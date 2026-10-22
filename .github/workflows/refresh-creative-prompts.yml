@@ -1,0 +1,64 @@
+name: Refresh Creative Prompt Quality
+
+on:
+  push:
+    branches: [production/creative-studio]
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Use npm 11
+        run: npm install --global npm@11
+      - run: npm ci --ignore-scripts
+      - name: Refine creative direction and generation diversity
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          prompts = Path('src/lib/marketingPrompts.ts')
+          text = prompts.read_text()
+          old_version = 'export const PROMPT_VERSION = "brieflow-creative-director-2026-09.24";'
+          new_version = 'export const PROMPT_VERSION = "brieflow-creative-director-2026-10.22";'
+          if old_version not in text:
+              raise SystemExit('prompt version marker not found')
+          text = text.replace(old_version, new_version, 1)
+
+          old_rule = '13. Pontue conceito, distinção, clareza, hierarquia, adequação à marca, força visual e credibilidade. Reescreva silenciosamente até todos atingirem 8/10.`;'
+          new_rule = '''13. Pontue conceito, distinção, clareza, hierarquia, adequação à marca, força visual e credibilidade. Reescreva silenciosamente até todos atingirem 8/10.\n14. Dê a cada canal uma função própria na campanha: banner fixa a ideia na memória; social dramatiza uma situação ou conversa; e-mail desenvolve argumento, contexto e decisão; WhatsApp reduz fricção para o próximo passo; formatos longos organizam narrativa, prova e aprofundamento. Preserve a promessa, não a redação.\n15. Faça um teste de diversidade entre peças: não repita a mesma abertura de quatro ou mais palavras, a mesma construção de headline ou o mesmo CTA por padrão. Repetição só é permitida quando o briefing exige uma assinatura literal ou quando ela é estrategicamente indispensável.`;'''
+          if old_rule not in text:
+              raise SystemExit('creative direction marker not found')
+          text = text.replace(old_rule, new_rule, 1)
+          prompts.write_text(text)
+
+          generator = Path('src/hooks/useGenerateMaterials.ts')
+          source = generator.read_text()
+          old_call = '''          schema,\n          signal: controller.signal,\n          provider,\n          stage: "content",\n          action: material,\n'''
+          new_call = '''          schema,\n          signal: controller.signal,\n          provider,\n          stage: "content",\n          action: material,\n          temperature: material === "banner" ? 0.28 : 0.24,\n'''
+          if old_call not in source:
+              raise SystemExit('generation call marker not found')
+          generator.write_text(source.replace(old_call, new_call, 1))
+          PY
+      - name: Format and validate
+        run: |
+          npx prettier --write src/lib/marketingPrompts.ts src/hooks/useGenerateMaterials.ts
+          npm run typecheck
+          npm test
+          npm run build
+      - name: Commit creative quality refresh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/lib/marketingPrompts.ts src/hooks/useGenerateMaterials.ts
+          git commit -m "feat: strengthen cross-channel creative diversity"
+          git push origin HEAD:production/creative-studio
