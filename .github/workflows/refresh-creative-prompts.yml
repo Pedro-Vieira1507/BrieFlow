@@ -7,6 +7,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: creative-refresh-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   refresh:
     if: github.actor != 'github-actions[bot]'
@@ -57,11 +61,14 @@ jobs:
           src/components/briefflow/LibraryModal.tsx
           src/components/briefflow/OnboardingCoach.tsx
           src/components/briefflow/WorkspaceShell.tsx
+          src/components/briefflow/builder/BuilderHeader.tsx
+          src/components/briefflow/chat/ChatInput.tsx
           e2e/accessibility.spec.ts
           e2e/creative-flow.spec.ts
           e2e/production-smoke.spec.ts
           e2e/support/mockBackend.ts
           tests/marketing-prompts.test.mjs
+          public/site.webmanifest
       - name: Validate refreshed branch
         run: |
           npm run format:check
@@ -74,6 +81,6 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/lib/marketingPrompts.ts src/hooks/useGenerateMaterials.ts src/components/briefflow/LibraryModal.tsx src/components/briefflow/OnboardingCoach.tsx src/components/briefflow/WorkspaceShell.tsx e2e tests/marketing-prompts.test.mjs
+          git add src/lib/marketingPrompts.ts src/hooks/useGenerateMaterials.ts src/components/briefflow/LibraryModal.tsx src/components/briefflow/OnboardingCoach.tsx src/components/briefflow/WorkspaceShell.tsx src/components/briefflow/builder/BuilderHeader.tsx src/components/briefflow/chat/ChatInput.tsx e2e tests/marketing-prompts.test.mjs public/site.webmanifest
           git commit -m "feat: strengthen creative quality and format QA suite"
           git push origin HEAD:production/creative-studio
