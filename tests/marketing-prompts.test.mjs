@@ -163,7 +163,7 @@ test("material prompt adapts the agency method without leaking the reference bra
     "utf8",
   );
 
-  assert.match(source, /brieflow-creative-director-2026-09\.24/);
+  assert.match(source, /brieflow-creative-director-2026-10\.22/);
   assert.match(source, /produto-herói/);
   assert.match(source, /Prefira omitir a preencher/);
   assert.match(source, /B2B técnico\/regulado/);
@@ -171,6 +171,8 @@ test("material prompt adapts the agency method without leaking the reference bra
   assert.match(source, /SaaS\/tecnologia/);
   assert.match(source, /recipiente vazio/);
   assert.match(source, /estratégia é direção criativa, não fonte de prova/i);
+  assert.match(source, /Preserve a promessa, não a redação/);
+  assert.match(source, /não repita a mesma abertura de quatro ou mais palavras/i);
   assert.doesNotMatch(source, /Forlab/i);
 });
 
