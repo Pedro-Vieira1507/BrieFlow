@@ -59,7 +59,8 @@ function inferRefinementTargets(
   if (matches(/legenda|caption/)) targets.add("caption");
   if (matches(/gancho|\bhook\b|abertura/)) targets.add("hook");
   if (matches(/hashtag|hashtags/)) targets.add("hashtags");
-  if (matches(/imagem|visual|foto|arte|background|fundo/)) targets.add("imagePrompt");
+  if (matches(/imagem|visual|foto|arte|background|fundo/))
+    targets.add("imagePrompt");
 
   if (targets.size > 0) return [...targets];
   if (channel === "banner") return ["title", "subtitle", "cta"];
@@ -1086,8 +1087,9 @@ Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo terri
       const request = instruction.trim().slice(0, 800);
       if (!request) return;
       const targets = inferRefinementTargets(channel, request);
-      const targetDescription =
-        targets.includes("all") ? "a peça" : targets.join(", ");
+      const targetDescription = targets.includes("all")
+        ? "a peça"
+        : targets.join(", ");
       const history: ChatTurn[] = [
         ...currentChatHistory(),
         {
@@ -1095,12 +1097,7 @@ Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo terri
           content: `Refine somente ${channelLabel(channel)}. Pedido: ${request}. Altere somente ${targetDescription}; preserve todos os demais campos, fatos confirmados, oferta e plataforma criativa.`,
         },
       ];
-      await generateCampaignSafely(
-        history,
-        channel,
-        targets,
-        "omniroute",
-      );
+      await generateCampaignSafely(history, channel, targets, "omniroute");
     },
     [currentChatHistory, generateCampaignSafely],
   );

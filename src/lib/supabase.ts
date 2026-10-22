@@ -22,7 +22,7 @@ export const supabase: SupabaseClient | null = isSupabaseConfigured
     })
   : null;
 
-export type LibraryAssetStatus = \"draft\" | \"review\" | \"approved\";
+export type LibraryAssetStatus = "draft" | "review" | "approved";
 
 export interface SavedLibraryAsset {
   id: string;
@@ -416,7 +416,6 @@ export async function renameSavedAsset(
   return data as SavedLibraryAsset;
 }
 
-
 const LIBRARY_ASSET_STATUSES = new Set<LibraryAssetStatus>([
   "draft",
   "review",
@@ -494,8 +493,7 @@ export async function saveBrandKit(
   const payload = {
     name: normalizeLibraryLabel(input.name),
     brand_name: normalizeBrandKitText(input.brandName, 120),
-    persona:
-      normalizeBrandKitText(input.persona, 300) ?? "Público-alvo",
+    persona: normalizeBrandKitText(input.persona, 300) ?? "Público-alvo",
     tone: normalizeBrandKitText(input.tone, 300) ?? "Premium",
     framework: normalizeBrandKitText(input.framework, 120) ?? "AIDA",
     product: normalizeBrandKitText(input.product, 500),

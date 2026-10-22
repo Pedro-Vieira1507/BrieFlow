@@ -8,8 +8,14 @@ test("brand kits are user-scoped and explicitly exposed only to authenticated us
   const migration = read(
     "supabase/migrations/20261022182910_add_brand_kits_and_library_status_index.sql",
   );
-  assert.match(migration, /alter table public\.brand_kits enable row level security/i);
-  assert.match(migration, /to authenticated[\s\S]*auth\.uid\(\)[\s\S]*user_id/i);
+  assert.match(
+    migration,
+    /alter table public\.brand_kits enable row level security/i,
+  );
+  assert.match(
+    migration,
+    /to authenticated[\s\S]*auth\.uid\(\)[\s\S]*user_id/i,
+  );
   assert.match(
     migration,
     /grant select, insert, update, delete on table public\.brand_kits to authenticated/i,

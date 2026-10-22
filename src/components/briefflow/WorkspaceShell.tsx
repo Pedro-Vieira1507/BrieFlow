@@ -50,12 +50,8 @@ export function WorkspaceShell() {
     user,
     workspaceDirty,
   } = useBriefflowStore();
-  const {
-    handleSend,
-    generateCampaign,
-    regenerateChannel,
-    refineChannel,
-  } = useBriefflowAgent();
+  const { handleSend, generateCampaign, regenerateChannel, refineChannel } =
+    useBriefflowAgent();
   const [mobileChatOpen, setMobileChatOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [catalogOpen, setCatalogOpen] = useState(false);

@@ -289,7 +289,8 @@ export function LibraryModal() {
   };
 
   const handleStatusChange = async (status: LibraryAssetStatus) => {
-    if (!selectedItem || updatingStatus || selectedItem.status === status) return;
+    if (!selectedItem || updatingStatus || selectedItem.status === status)
+      return;
     setUpdatingStatus(true);
     try {
       const updated = await updateSavedAssetStatus(selectedItem.id, status);
@@ -587,14 +588,21 @@ export function LibraryModal() {
                           Reabra para continuar o original ou crie uma cópia
                           para testar outra direção.
                         </p>
-                        <div className="mt-3 flex flex-wrap items-center gap-2" aria-label="Status da campanha">
+                        <div
+                          className="mt-3 flex flex-wrap items-center gap-2"
+                          aria-label="Status da campanha"
+                        >
                           {LIBRARY_STATUS_OPTIONS.map((option) => (
                             <button
                               key={option.value}
                               type="button"
-                              aria-pressed={selectedItem.status === option.value}
+                              aria-pressed={
+                                selectedItem.status === option.value
+                              }
                               disabled={updatingStatus}
-                              onClick={() => void handleStatusChange(option.value)}
+                              onClick={() =>
+                                void handleStatusChange(option.value)
+                              }
                               className={cn(
                                 "min-h-9 rounded-lg border px-3 text-xs font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-50",
                                 selectedItem.status === option.value

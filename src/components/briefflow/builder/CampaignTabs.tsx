@@ -253,7 +253,9 @@ export function CampaignTabs({
                       id={`refine-${asset.id}`}
                       value={refinementRequest}
                       disabled={loading}
-                      onChange={(event) => setRefinementRequest(event.target.value)}
+                      onChange={(event) =>
+                        setRefinementRequest(event.target.value)
+                      }
                       placeholder="Ex.: deixe a headline mais premium sem mudar a oferta"
                       className="h-11 w-full rounded-xl border border-border-subtle bg-surface-2 pl-10 pr-3 text-sm text-fg-primary outline-none placeholder:text-fg-muted focus:border-brand/50 focus:ring-2 focus:ring-brand/20 disabled:opacity-50"
                     />

@@ -1,12 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import {
-  Building2,
-  Check,
-  Loader2,
-  Plus,
-  Save,
-  Trash2,
-} from "lucide-react";
+import { Building2, Check, Loader2, Plus, Save, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -37,7 +30,9 @@ function textToList(value: string): string[] {
     .filter(Boolean);
 }
 
-function createDraft(brandContext: ReturnType<typeof useBriefflowStore.getState>["brandContext"]): Draft {
+function createDraft(
+  brandContext: ReturnType<typeof useBriefflowStore.getState>["brandContext"],
+): Draft {
   return {
     name: brandContext.brandName || "Minha marca",
     brandName: brandContext.brandName || "",
@@ -189,7 +184,9 @@ export function BrandKitPanel() {
     setDeleting(true);
     try {
       await deleteBrandKit(selectedKit.id);
-      setKits((current) => current.filter((item) => item.id !== selectedKit.id));
+      setKits((current) =>
+        current.filter((item) => item.id !== selectedKit.id),
+      );
       setSelectedId(null);
       setDraft(createDraft(brandContext));
       toast.success("Brand Kit excluído");
@@ -273,13 +270,18 @@ export function BrandKitPanel() {
           ["Site da marca", "websiteUrl", "https://..."],
         ].map(([label, key, placeholder]) => (
           <div key={key} className="space-y-2">
-            <Label htmlFor={`brand-kit-${key}`} className="text-xs font-semibold text-fg-secondary">
+            <Label
+              htmlFor={`brand-kit-${key}`}
+              className="text-xs font-semibold text-fg-secondary"
+            >
               {label}
             </Label>
             <Input
               id={`brand-kit-${key}`}
               value={String(draft[key as keyof Draft] ?? "")}
-              onChange={(event) => update(key as keyof Draft, event.target.value)}
+              onChange={(event) =>
+                update(key as keyof Draft, event.target.value)
+              }
               placeholder={placeholder}
               className="h-11 rounded-xl border-border-subtle bg-surface-2 text-fg-primary focus-visible:ring-brand"
             />
@@ -289,7 +291,10 @@ export function BrandKitPanel() {
 
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-2">
-          <Label htmlFor="brand-kit-keywords" className="text-xs font-semibold text-fg-secondary">
+          <Label
+            htmlFor="brand-kit-keywords"
+            className="text-xs font-semibold text-fg-secondary"
+          >
             Palavras e territórios preferidos
           </Label>
           <textarea
@@ -301,13 +306,18 @@ export function BrandKitPanel() {
           />
         </div>
         <div className="space-y-2">
-          <Label htmlFor="brand-kit-forbidden" className="text-xs font-semibold text-fg-secondary">
+          <Label
+            htmlFor="brand-kit-forbidden"
+            className="text-xs font-semibold text-fg-secondary"
+          >
             Termos que a IA não deve usar
           </Label>
           <textarea
             id="brand-kit-forbidden"
             value={draft.forbiddenTermsText}
-            onChange={(event) => update("forbiddenTermsText", event.target.value)}
+            onChange={(event) =>
+              update("forbiddenTermsText", event.target.value)
+            }
             placeholder="Ex.: revolucione, exclusivo, imperdível"
             className="min-h-24 w-full resize-y rounded-xl border border-border-subtle bg-surface-2 px-3 py-2.5 text-sm text-fg-primary outline-none placeholder:text-fg-muted focus:border-brand/50 focus:ring-2 focus:ring-brand/20"
           />
