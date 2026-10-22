@@ -193,8 +193,12 @@ export function ChatInput({
           <button
             type="submit"
             disabled={!canSend}
-            aria-label={interactionDisabled ? "Aguarde a resposta" : "Enviar mensagem"}
-            title={interactionDisabled ? "Aguarde a resposta" : "Enviar mensagem"}
+            aria-label={
+              interactionDisabled ? "Aguarde a resposta" : "Enviar mensagem"
+            }
+            title={
+              interactionDisabled ? "Aguarde a resposta" : "Enviar mensagem"
+            }
             className={cn(
               "mb-0.5 flex size-11 shrink-0 items-center justify-center rounded-full transition-all duration-200 sm:size-10",
               canSend
