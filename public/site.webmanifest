@@ -1,0 +1,19 @@
+{
+  "name": "BrieFlow — Estúdio criativo de marketing com IA",
+  "short_name": "BrieFlow",
+  "description": "Estúdio criativo para transformar briefings em campanhas multiformato com IA, revisão humana e exportação.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#07080c",
+  "theme_color": "#07080c",
+  "lang": "pt-BR",
+  "icons": [
+    {
+      "src": "/assets/icone-brieflow.png?v=3",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
