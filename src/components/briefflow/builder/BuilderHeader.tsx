@@ -91,8 +91,7 @@ export function BuilderHeader({
           label: "Salvo",
           title: "Campanha sincronizada com a biblioteca",
           dot: "bg-emerald-400",
-          badge:
-            "border-emerald-400/15 bg-emerald-400/8 text-emerald-300/90",
+          badge: "border-emerald-400/15 bg-emerald-400/8 text-emerald-300/90",
         }
       : {
           label: "Novo",

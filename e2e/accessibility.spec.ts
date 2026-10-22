@@ -2,12 +2,19 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 import { installMockBackend } from "./support/mockBackend";
 
-test("estúdio não possui violações WCAG sérias ou críticas no estado inicial", async ({ page }, testInfo) => {
-  test.skip(testInfo.project.name !== "chromium", "Auditoria completa roda no projeto desktop.");
+test("estúdio não possui violações WCAG sérias ou críticas no estado inicial", async ({
+  page,
+}, testInfo) => {
+  test.skip(
+    testInfo.project.name !== "chromium",
+    "Auditoria completa roda no projeto desktop.",
+  );
 
   await installMockBackend(page);
   await page.goto("/");
-  await expect(page.getByRole("main", { name: "Estúdio criativo BrieFlow" })).toBeVisible();
+  await expect(
+    page.getByRole("main", { name: "Estúdio criativo BrieFlow" }),
+  ).toBeVisible();
 
   const results = await new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])

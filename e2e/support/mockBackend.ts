@@ -101,7 +101,8 @@ function materialResponse(action: string) {
   if (action === "email") {
     return {
       subject: "Quanto tempo sua operação perde procurando contexto?",
-      preheader: "Um convite para tornar decisão e informação parte do mesmo fluxo.",
+      preheader:
+        "Um convite para tornar decisão e informação parte do mesmo fluxo.",
       headline: "Decisão começa com contexto",
       subtitle: "Menos procura. Mais ação.",
       body: "Quando a equipe precisa abrir planilhas, mensagens e sistemas diferentes para entender o que está acontecendo, a decisão começa atrasada. O Painel Atlas organiza o contexto operacional em um só fluxo para que gestores encontrem o que precisam antes de agir. A proposta não é adicionar mais uma tela à rotina, mas reduzir a caça à informação que acontece antes de cada decisão. Veja a demonstração e avalie como esse fluxo se encaixa na sua operação.",
@@ -209,9 +210,7 @@ export async function installMockBackend(
       const payload = (request.postDataJSON() ?? {}) as { action?: string };
       const action = payload.action ?? "discovery";
       const raw =
-        action === "discovery"
-          ? discoveryResponse()
-          : materialResponse(action);
+        action === "discovery" ? discoveryResponse() : materialResponse(action);
       return json(route, {
         model: "brieflow-e2e",
         choices: [{ message: { content: JSON.stringify(raw) } }],

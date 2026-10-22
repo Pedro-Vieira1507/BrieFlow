@@ -260,7 +260,10 @@ export function LibraryModal() {
           </DialogHeader>
 
           {loading ? (
-            <div className="flex flex-1 flex-col items-center justify-center py-20 text-fg-muted" role="status">
+            <div
+              className="flex flex-1 flex-col items-center justify-center py-20 text-fg-muted"
+              role="status"
+            >
               <Loader2 className="mb-3 size-8 animate-spin text-brand" />
               <p className="text-xs font-medium text-fg-tertiary">
                 Carregando campanhas...
@@ -307,7 +310,10 @@ export function LibraryModal() {
                       </button>
                     ) : null}
                   </div>
-                  <p className="mt-2 px-1 text-[10px] font-semibold uppercase tracking-[0.13em] text-fg-muted" aria-live="polite">
+                  <p
+                    className="mt-2 px-1 text-[10px] font-semibold uppercase tracking-[0.13em] text-fg-muted"
+                    aria-live="polite"
+                  >
                     {visibleEntries.length} de {items.length} campanhas
                     {nextCursor ? " carregadas" : ""}
                   </p>
@@ -402,8 +408,8 @@ export function LibraryModal() {
                             "Campanha Salva"}
                         </h4>
                         <p className="mt-0.5 text-xs text-fg-muted">
-                          Reabra para continuar o original ou crie uma cópia para
-                          testar outra direção.
+                          Reabra para continuar o original ou crie uma cópia
+                          para testar outra direção.
                         </p>
                       </div>
                       <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">

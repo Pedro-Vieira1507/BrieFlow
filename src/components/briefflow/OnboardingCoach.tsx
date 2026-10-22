@@ -93,7 +93,10 @@ export function OnboardingCoach({ onStartBriefing, onOpenFormats }: Props) {
       <DialogContent className="w-[calc(100vw-24px)] max-w-[560px] rounded-[24px] border-border-strong bg-surface-1 p-0 text-fg-primary shadow-[var(--shadow-elevated)]">
         <div className="border-b border-border-subtle px-5 pb-5 pt-6 sm:px-7 sm:pt-7">
           <div className="mb-5 flex items-center justify-between gap-4 pr-8">
-            <div className="flex items-center gap-2" aria-label={`Etapa ${step + 1} de ${STEPS.length}`}>
+            <div
+              className="flex items-center gap-2"
+              aria-label={`Etapa ${step + 1} de ${STEPS.length}`}
+            >
               {STEPS.map((_, index) => (
                 <span
                   key={index}
@@ -161,7 +164,9 @@ export function OnboardingCoach({ onStartBriefing, onOpenFormats }: Props) {
             ) : (
               <Button
                 type="button"
-                onClick={() => setStep((value) => Math.min(STEPS.length - 1, value + 1))}
+                onClick={() =>
+                  setStep((value) => Math.min(STEPS.length - 1, value + 1))
+                }
                 className="min-h-11 rounded-xl bg-brand px-5 font-semibold text-brand-fg shadow-[var(--shadow-brand)]"
               >
                 Próximo <ArrowRight className="ml-2 size-4" />

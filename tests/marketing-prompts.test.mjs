@@ -172,7 +172,10 @@ test("material prompt adapts the agency method without leaking the reference bra
   assert.match(source, /recipiente vazio/);
   assert.match(source, /estratégia é direção criativa, não fonte de prova/i);
   assert.match(source, /Preserve a promessa, não a redação/);
-  assert.match(source, /não repita a mesma abertura de quatro ou mais palavras/i);
+  assert.match(
+    source,
+    /não repita a mesma abertura de quatro ou mais palavras/i,
+  );
   assert.doesNotMatch(source, /Forlab/i);
 });
 

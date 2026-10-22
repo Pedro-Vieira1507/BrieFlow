@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
 
-test("produção publica metadados e shell principal", async ({ page }, testInfo) => {
+test("produção publica metadados e shell principal", async ({
+  page,
+}, testInfo) => {
   test.skip(
     !process.env.E2E_BASE_URL || testInfo.project.name !== "chromium",
     "Smoke de produção roda somente quando E2E_BASE_URL é informado.",
@@ -26,7 +28,7 @@ test("produção publica metadados e shell principal", async ({ page }, testInfo
     "content",
     /index,follow/,
   );
-  await expect(page.locator('script[type="application/ld+json"]')).toContainText(
-    "SoftwareApplication",
-  );
+  await expect(
+    page.locator('script[type="application/ld+json"]'),
+  ).toContainText("SoftwareApplication");
 });
