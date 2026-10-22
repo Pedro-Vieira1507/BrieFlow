@@ -30,7 +30,9 @@ interface BriefflowState {
   libraryOpen: boolean;
   activeLibraryAssetId: string | null;
   workspaceVersion: number;
+  workspaceDirty: boolean;
   setActiveLibraryAssetId: (id: string | null) => void;
+  setWorkspaceDirty: (dirty: boolean) => void;
   // actions
   setMessages: (
     updater: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[]),
@@ -83,26 +85,36 @@ export const useBriefflowStore = create<BriefflowState>((set) => ({
   libraryOpen: false,
   activeLibraryAssetId: null,
   workspaceVersion: 0,
+  workspaceDirty: false,
   setActiveLibraryAssetId: (activeLibraryAssetId) =>
     set((state) => ({
       activeLibraryAssetId,
       workspaceVersion: state.workspaceVersion + 1,
+      workspaceDirty: activeLibraryAssetId ? false : state.workspaceDirty,
     })),
+  setWorkspaceDirty: (workspaceDirty) => set({ workspaceDirty }),
   setMessages: (updater) =>
     set((s) => ({
       messages: typeof updater === "function" ? updater(s.messages) : updater,
+      workspaceDirty: true,
     })),
-  appendMessage: (msg) => set((s) => ({ messages: [...s.messages, msg] })),
+  appendMessage: (msg) =>
+    set((s) => ({ messages: [...s.messages, msg], workspaceDirty: true })),
   updateMessage: (id, patch) =>
     set((s) => ({
       messages: s.messages.map((m) => (m.id === id ? { ...m, ...patch } : m)),
+      workspaceDirty: true,
     })),
   setBuilder: (updater) =>
     set((s) => ({
       builder: typeof updater === "function" ? updater(s.builder) : updater,
+      workspaceDirty: true,
     })),
   patchBuilder: (patch) =>
-    set((s) => ({ builder: { ...s.builder, ...patch } as BuilderState })),
+    set((s) => ({
+      builder: { ...s.builder, ...patch } as BuilderState,
+      workspaceDirty: true,
+    })),
   patchCampaignAssets: (campaignAssets) =>
     set((s) => ({
       builder: {
@@ -110,6 +122,7 @@ export const useBriefflowStore = create<BriefflowState>((set) => ({
         type: "campaign",
         campaignAssets,
       } as BuilderState,
+      workspaceDirty: true,
     })),
   updateCampaignAsset: (kind, updater) =>
     set((s) => {
@@ -131,12 +144,14 @@ export const useBriefflowStore = create<BriefflowState>((set) => ({
           type: "campaign",
           campaignAssets: nextAssets,
         } as BuilderState,
+        workspaceDirty: true,
       };
     }),
   setBrandContext: (updater) =>
     set((s) => ({
       brandContext:
         typeof updater === "function" ? updater(s.brandContext) : updater,
+      workspaceDirty: true,
     })),
   mergeSiteIntoContext: (site) =>
     set((s) => ({
@@ -149,6 +164,7 @@ export const useBriefflowStore = create<BriefflowState>((set) => ({
             ? `Público da marca ${site.brandName}`
             : s.brandContext.persona,
       },
+      workspaceDirty: true,
     })),
   setScores: (scores) => set({ scores }),
   setLoading: (loading) => set({ loading }),
@@ -171,6 +187,7 @@ export const useBriefflowStore = create<BriefflowState>((set) => ({
       return {
         user,
         workspaceVersion: state.workspaceVersion + 1,
+        workspaceDirty: false,
         messages: [],
         builder: { type: "none" },
         brandContext: initialBrand,
@@ -184,12 +201,13 @@ export const useBriefflowStore = create<BriefflowState>((set) => ({
         activeLibraryAssetId: null,
       };
     }),
-  setUploadedImage: (img) => set({ uploadedImage: img }),
+  setUploadedImage: (img) => set({ uploadedImage: img, workspaceDirty: true }),
   setAuthOpen: (authOpen) => set({ authOpen }),
   setLibraryOpen: (libraryOpen) => set({ libraryOpen }),
   reset: () =>
     set((state) => ({
       workspaceVersion: state.workspaceVersion + 1,
+      workspaceDirty: false,
       messages: [],
       builder: { type: "none" },
       brandContext: initialBrand,
