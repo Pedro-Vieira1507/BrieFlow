@@ -1,5 +1,4 @@
 name: Phase 2 patch runner
-# Registered on the branch; this update triggers the one-time runner.
 
 on:
   push:
@@ -31,11 +30,21 @@ jobs:
           start = source.index(start_marker)
           end = source.index(end_marker, start)
           block = source[start:end]
-          normalized = '\n'.join(
-              line[10:] if line.startswith('          ') else line
-              for line in block.splitlines()
-          ) + '\n'
-          Path('/tmp/phase2_patch.py').write_text(normalized)
+
+          normalized_lines = []
+          in_triple_string = False
+          for line in block.splitlines():
+              if in_triple_string:
+                  current = line
+              else:
+                  current = line[10:] if line.startswith('          ') else line
+              normalized_lines.append(current)
+              if current.count("'''") % 2 == 1:
+                  in_triple_string = not in_triple_string
+
+          Path('/tmp/phase2_patch.py').write_text(
+              '\n'.join(normalized_lines) + '\n'
+          )
           PY
           python3 /tmp/phase2_patch.py
 
