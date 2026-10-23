@@ -1,0 +1,49 @@
+name: Apply experiment history patch
+
+on:
+  push:
+    branches:
+      - production/creative-studio
+    paths:
+      - .github/workflows/experiment-history-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: production/creative-studio
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Use npm 11
+        run: npm install --global npm@11
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+      - name: Apply experiment history files
+        run: python .github/scripts/apply-experiment-history.py
+      - name: Format TypeScript and tests
+        run: npx prettier --write src/lib/experimentHistory.ts src/components/briefflow/ExperimentHistoryPanel.tsx src/components/briefflow/ExperimentEvidencePanel.tsx tests/experiment-history.test.mjs
+      - name: Validate quality gate
+        run: |
+          npm run format:check
+          npm run lint
+          npm run typecheck
+          npm test
+          npm run build
+          npm audit --audit-level=high
+      - name: Remove temporary patch files
+        run: git rm .github/scripts/apply-experiment-history.py .github/workflows/experiment-history-patch.yml
+      - name: Commit validated feature
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: add experiment history and traffic controls"
+          git push origin HEAD:production/creative-studio
