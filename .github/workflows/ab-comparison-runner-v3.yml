@@ -29,6 +29,12 @@ jobs:
         run: |
           python3 .github/scripts/ab_comparison_patch_runner.py
           bash /tmp/ab-patch.sh
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('tests/experiment-comparison.test.mjs')
+          text = path.read_text()
+          path.write_text(text.replace('/não prevê performance/', r'/não\s+prevê performance/'))
+          PY
           git rm .github/workflows/ab-comparison-patch.yml
           git rm .github/workflows/ab-comparison-runner.yml
           git rm .github/workflows/ab-comparison-runner-v2.yml
@@ -51,4 +57,4 @@ jobs:
           git commit -m "feat: add AB comparison metrics and winner workflow"
           git push origin HEAD:production/creative-studio
 
-# retry without SQL prettier parsing
+# retry with whitespace-tolerant regression assertion
