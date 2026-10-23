@@ -14,10 +14,7 @@ import {
   importExperimentHistory,
   type ExperimentHistoryImportSource,
 } from "@/lib/experimentHistory";
-import type {
-  AssetExperimentMetrics,
-  SavedLibraryAsset,
-} from "@/lib/supabase";
+import type { AssetExperimentMetrics, SavedLibraryAsset } from "@/lib/supabase";
 
 interface ExperimentHistoricalImportProps {
   variants: SavedLibraryAsset[];
@@ -56,9 +53,8 @@ export function ExperimentHistoricalImport({
   onMetricsImported,
 }: ExperimentHistoricalImportProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const [parsed, setParsed] = useState<HistoricalExperimentCsvParseResult | null>(
-    null,
-  );
+  const [parsed, setParsed] =
+    useState<HistoricalExperimentCsvParseResult | null>(null);
   const [fileName, setFileName] = useState("");
   const [importing, setImporting] = useState(false);
 
@@ -184,8 +180,8 @@ export function ExperimentHistoricalImport({
             </h6>
             <p className="mt-1 max-w-2xl text-xs leading-5 text-fg-tertiary">
               Importe resultados diários de A e B. O BrieFlow reconhece o
-              formato genérico e exports comuns do Meta Ads e Google Ads,
-              soma linhas do mesmo dia e transforma os períodos em snapshots
+              formato genérico e exports comuns do Meta Ads e Google Ads, soma
+              linhas do mesmo dia e transforma os períodos em snapshots
               cumulativos para os gráficos.
             </p>
           </div>
@@ -240,7 +236,8 @@ export function ExperimentHistoricalImport({
               </div>
               <div className="mt-1 text-[10px] text-fg-muted">
                 {formatDate(parsed.firstDate)} → {formatDate(parsed.lastDate)} ·{" "}
-                {parsed.sourceRowCount} linha(s) · {cumulative.length} snapshot(s)
+                {parsed.sourceRowCount} linha(s) · {cumulative.length}{" "}
+                snapshot(s)
               </div>
             </div>
             <Button

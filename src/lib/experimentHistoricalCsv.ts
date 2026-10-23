@@ -405,7 +405,7 @@ function parseDate(value: string): string {
     return toIsoDate(Number(iso[1]), Number(iso[2]), Number(iso[3]));
   }
 
-  const br = raw.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/);
+  const br = raw.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/);
   if (br) {
     return toIsoDate(Number(br[3]), Number(br[2]), Number(br[1]));
   }
@@ -419,9 +419,7 @@ function parseDate(value: string): string {
     );
   }
 
-  throw new Error(
-    `Data inválida: ${value}. Use AAAA-MM-DD ou DD/MM/AAAA.`,
-  );
+  throw new Error(`Data inválida: ${value}. Use AAAA-MM-DD ou DD/MM/AAAA.`);
 }
 
 function mergeNotes(current: string, incoming: string): string {
