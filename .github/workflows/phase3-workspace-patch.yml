@@ -25,6 +25,8 @@ jobs:
       - name: Use npm 11
         run: npm install --global npm@11
       - run: npm ci --ignore-scripts
+      - name: Fix phase 3 patch lint detail
+        run: sed -i 's/Boolean(content\.hashtags?\.length)/content.hashtags?.length/' .github/scripts/phase3_patch.py
       - name: Apply phase 3 patch
         run: python3 .github/scripts/phase3_patch.py
       - name: Format and validate
@@ -42,4 +44,4 @@ jobs:
           git commit -m "feat: add campaign history AB variants and quality score"
           git push origin HEAD:production/creative-studio
 
-# trigger phase 3 patch
+# retry after lint fix
