@@ -29,7 +29,21 @@ jobs:
         run: npm install --global npm@11
       - run: npm ci --ignore-scripts
       - name: Fix historical date regex
-        run: perl -0pi -e 's/\[\\\\\/\.\-\]/[\/\.\-]/g' src/lib/experimentHistoricalCsv.ts
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("src/lib/experimentHistoricalCsv.ts")
+          lines = path.read_text().splitlines()
+          matches = 0
+          for index, line in enumerate(lines):
+              if "const br = raw.match" in line:
+                  lines[index] = r'  const br = raw.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/);'
+                  matches += 1
+          if matches != 1:
+              raise SystemExit(f"expected one BR date regex, found {matches}")
+          path.write_text("\n".join(lines) + "\n")
+          PY
       - name: Format historical import files
         run: npx prettier --write src/components/briefflow/ExperimentHistoricalImport.tsx src/lib/experimentHistoricalCsv.ts src/lib/experimentHistory.ts tests/experiment-history-import.test.mjs
       - run: npm run format:check
