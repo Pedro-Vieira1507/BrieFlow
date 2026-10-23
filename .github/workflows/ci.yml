@@ -52,12 +52,11 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: npm audit --audit-level=high
-      - name: Restore permanent CI and commit validated result
+      - name: Commit validated source formatting
         run: |
-          git show HEAD^:.github/workflows/ci.yml > .github/workflows/ci.yml
           git config user.name "Pedro"
           git config user.email "65820000+Pedro-Vieira1507@users.noreply.github.com"
-          git add .github/workflows/ci.yml src/components/briefflow/ExperimentHistoricalImport.tsx src/lib/experimentHistoricalCsv.ts src/lib/experimentHistory.ts tests/experiment-history-import.test.mjs
+          git add src/components/briefflow/ExperimentHistoricalImport.tsx src/lib/experimentHistoricalCsv.ts src/lib/experimentHistory.ts tests/experiment-history-import.test.mjs
           git diff --cached --quiet && exit 0
           git commit -m "chore: finish historical import formatting"
           git push origin HEAD:production/creative-studio
