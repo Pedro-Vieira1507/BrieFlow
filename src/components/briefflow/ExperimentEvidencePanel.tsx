@@ -10,6 +10,7 @@ import {
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { ExperimentHistoryPanel } from "./ExperimentHistoryPanel";
 import {
   buildExperimentCsvTemplate,
   parseExperimentCsv,
@@ -397,6 +398,14 @@ export function ExperimentEvidencePanel({
           </p>
         ) : null}
       </section>
+
+      {a?.experiment_group_id ? (
+        <ExperimentHistoryPanel
+          experimentGroupId={a.experiment_group_id}
+          variants={variants}
+          metrics={metrics}
+        />
+      ) : null}
     </div>
   );
 }
