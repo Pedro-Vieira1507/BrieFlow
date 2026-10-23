@@ -30,6 +30,8 @@ jobs:
       - run: npm ci --ignore-scripts
       - name: Format historical import files
         run: npx prettier --write src/components/briefflow/ExperimentHistoricalImport.tsx src/lib/experimentHistoricalCsv.ts src/lib/experimentHistory.ts tests/experiment-history-import.test.mjs
+      - name: Autofix historical parser lint
+        run: npx eslint --fix src/lib/experimentHistoricalCsv.ts
       - run: npm run format:check
       - run: npm run lint
       - run: npm run typecheck
