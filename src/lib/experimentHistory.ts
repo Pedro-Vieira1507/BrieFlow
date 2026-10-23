@@ -1,6 +1,13 @@
-import { supabase } from "@/lib/supabase";
+import { supabase, type AssetExperimentMetrics } from "@/lib/supabase";
 
 export type ExperimentRunStatus = "running" | "completed";
+export type ExperimentHistorySource =
+  | "manual"
+  | "integration"
+  | "csv"
+  | "meta_ads"
+  | "google_ads";
+export type ExperimentHistoryImportSource = "csv" | "meta_ads" | "google_ads";
 
 export interface AssetExperimentRun {
   experiment_group_id: string;
@@ -23,10 +30,20 @@ export interface AssetExperimentMetricSnapshot {
   clicks: number;
   conversions: number;
   revenue: number;
-  source: "manual" | "integration";
+  source: ExperimentHistorySource;
   notes: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface HistoricalExperimentSnapshotInput {
+  assetId: string;
+  capturedOn: string;
+  impressions: number;
+  clicks: number;
+  conversions: number;
+  revenue: number;
+  notes?: string;
 }
 
 export interface ExperimentHistoryData {
@@ -39,11 +56,60 @@ const RUN_COLUMNS =
 const SNAPSHOT_COLUMNS =
   "id,experiment_group_id,asset_id,user_id,captured_on,impressions,clicks,conversions,revenue,source,notes,created_at,updated_at";
 const UUID_PATTERN = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
+const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 function normalizeId(value: string): string {
   const normalized = value.trim().toLowerCase();
   if (!UUID_PATTERN.test(normalized)) {
     throw new Error("Grupo de experimento inválido.");
+  }
+  return normalized;
+}
+
+function normalizeAssetId(value: string): string {
+  const normalized = value.trim().toLowerCase();
+  if (!UUID_PATTERN.test(normalized)) {
+    throw new Error("Campanha do experimento inválida.");
+  }
+  return normalized;
+}
+
+function normalizeCount(value: number, label: string): number {
+  if (!Number.isFinite(value) || value < 0 || !Number.isInteger(value)) {
+    throw new Error(`${label} deve ser um inteiro maior ou igual a zero.`);
+  }
+  return value;
+}
+
+function normalizeRevenue(value: number): number {
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error("Receita deve ser maior ou igual a zero.");
+  }
+  return Math.round(value * 100) / 100;
+}
+
+function normalizeNote(value?: string): string | null {
+  if (!value) return null;
+  const normalized = Array.from(value)
+    .map((character) => (character.charCodeAt(0) < 32 ? " " : character))
+    .join("")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 500);
+  return normalized || null;
+}
+
+function normalizeCapturedOn(value: string): string {
+  const normalized = value.trim();
+  if (!ISO_DATE_PATTERN.test(normalized)) {
+    throw new Error("Data histórica inválida.");
+  }
+  const parsed = new Date(`${normalized}T12:00:00Z`);
+  if (
+    Number.isNaN(parsed.getTime()) ||
+    parsed.toISOString().slice(0, 10) !== normalized
+  ) {
+    throw new Error("Data histórica inválida.");
   }
   return normalized;
 }
@@ -73,6 +139,18 @@ function normalizeRun(row: Record<string, unknown>): AssetExperimentRun {
   };
 }
 
+function normalizeHistorySource(value: unknown): ExperimentHistorySource {
+  if (
+    value === "integration" ||
+    value === "csv" ||
+    value === "meta_ads" ||
+    value === "google_ads"
+  ) {
+    return value;
+  }
+  return "manual";
+}
+
 function normalizeSnapshot(
   row: Record<string, unknown>,
 ): AssetExperimentMetricSnapshot {
@@ -82,6 +160,23 @@ function normalizeSnapshot(
     asset_id: String(row.asset_id),
     user_id: String(row.user_id),
     captured_on: String(row.captured_on),
+    impressions: Number(row.impressions ?? 0),
+    clicks: Number(row.clicks ?? 0),
+    conversions: Number(row.conversions ?? 0),
+    revenue: Number(row.revenue ?? 0),
+    source: normalizeHistorySource(row.source),
+    notes: typeof row.notes === "string" ? row.notes : null,
+    created_at: String(row.created_at),
+    updated_at: String(row.updated_at),
+  };
+}
+
+function normalizeMetricRow(
+  row: Record<string, unknown>,
+): AssetExperimentMetrics {
+  return {
+    asset_id: String(row.asset_id),
+    user_id: String(row.user_id),
     impressions: Number(row.impressions ?? 0),
     clicks: Number(row.clicks ?? 0),
     conversions: Number(row.conversions ?? 0),
@@ -156,6 +251,47 @@ export async function getExperimentHistory(
       normalizeSnapshot(row as Record<string, unknown>),
     ),
   };
+}
+
+export async function importExperimentHistory(
+  experimentGroupId: string,
+  snapshots: HistoricalExperimentSnapshotInput[],
+  source: ExperimentHistoryImportSource,
+  note?: string,
+): Promise<AssetExperimentMetrics[]> {
+  if (!supabase) throw new Error("Supabase não configurado.");
+  await requireExperimentUserId();
+  const groupId = normalizeId(experimentGroupId);
+
+  if (!["csv", "meta_ads", "google_ads"].includes(source)) {
+    throw new Error("Fonte de histórico inválida.");
+  }
+  if (snapshots.length < 2 || snapshots.length > 1500) {
+    throw new Error("O histórico deve conter entre 2 e 1.500 snapshots.");
+  }
+
+  const payload = snapshots.map((snapshot) => ({
+    asset_id: normalizeAssetId(snapshot.assetId),
+    captured_on: normalizeCapturedOn(snapshot.capturedOn),
+    impressions: normalizeCount(snapshot.impressions, "Impressões"),
+    clicks: normalizeCount(snapshot.clicks, "Cliques"),
+    conversions: normalizeCount(snapshot.conversions, "Conversões"),
+    revenue: normalizeRevenue(snapshot.revenue),
+    notes: normalizeNote(snapshot.notes),
+  }));
+
+  const { data, error } = await supabase.rpc(
+    "import_asset_experiment_history",
+    {
+      p_experiment_group_id: groupId,
+      p_snapshots: payload,
+      p_source: source,
+      p_notes: normalizeNote(note),
+    },
+  );
+  if (error) throw error;
+
+  return ((data ?? []) as Record<string, unknown>[]).map(normalizeMetricRow);
 }
 
 export async function saveExperimentTrafficSplit(
