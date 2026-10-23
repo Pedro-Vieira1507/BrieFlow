@@ -14,12 +14,42 @@ export interface ExperimentCsvParseResult {
 }
 
 const HEADER_ALIASES = {
-  variant: ["variant", "variante", "variacao", "variation", "versao", "version"],
-  impressions: ["impressions", "impression", "impressoes", "impressao", "views", "visualizacoes"],
+  variant: [
+    "variant",
+    "variante",
+    "variacao",
+    "variation",
+    "versao",
+    "version",
+  ],
+  impressions: [
+    "impressions",
+    "impression",
+    "impressoes",
+    "impressao",
+    "views",
+    "visualizacoes",
+  ],
   clicks: ["clicks", "click", "cliques", "clique"],
-  conversions: ["conversions", "conversion", "conversoes", "conversao", "compras", "purchases", "leads"],
+  conversions: [
+    "conversions",
+    "conversion",
+    "conversoes",
+    "conversao",
+    "compras",
+    "purchases",
+    "leads",
+  ],
   revenue: ["revenue", "receita", "faturamento", "valor", "sales_value"],
-  notes: ["notes", "note", "observacoes", "observacao", "contexto", "source", "fonte"],
+  notes: [
+    "notes",
+    "note",
+    "observacoes",
+    "observacao",
+    "contexto",
+    "source",
+    "fonte",
+  ],
 } as const;
 
 type CanonicalHeader = keyof typeof HEADER_ALIASES;
@@ -55,7 +85,8 @@ function countDelimiterOutsideQuotes(line: string, delimiter: string): number {
 function detectDelimiter(line: string): "," | ";" | "\t" {
   const candidates = [",", ";", "\t"] as const;
   return candidates.reduce((best, candidate) =>
-    countDelimiterOutsideQuotes(line, candidate) > countDelimiterOutsideQuotes(line, best)
+    countDelimiterOutsideQuotes(line, candidate) >
+    countDelimiterOutsideQuotes(line, best)
       ? candidate
       : best,
   );
@@ -88,7 +119,10 @@ function parseLine(line: string, delimiter: string): string[] {
   return cells;
 }
 
-function findHeaderIndex(headers: string[], canonical: CanonicalHeader): number {
+function findHeaderIndex(
+  headers: string[],
+  canonical: CanonicalHeader,
+): number {
   const aliases = new Set(HEADER_ALIASES[canonical]);
   return headers.findIndex((header) => aliases.has(header as never));
 }
@@ -111,7 +145,10 @@ function parseNumber(value: string, label: string, integer: boolean): number {
         : raw.replace(/,/g, "");
   } else if (lastComma >= 0) {
     const decimals = raw.length - lastComma - 1;
-    normalized = decimals > 0 && decimals <= 2 ? raw.replace(",", ".") : raw.replace(/,/g, "");
+    normalized =
+      decimals > 0 && decimals <= 2
+        ? raw.replace(",", ".")
+        : raw.replace(/,/g, "");
   }
 
   const parsed = Number(normalized);
@@ -125,7 +162,10 @@ function parseNumber(value: string, label: string, integer: boolean): number {
 }
 
 function parseVariant(value: string): "A" | "B" {
-  const normalized = value.trim().toUpperCase().replace(/^VARIA(?:NTE|ÇÃO)\s*/i, "");
+  const normalized = value
+    .trim()
+    .toUpperCase()
+    .replace(/^VARIA(?:NTE|ÇÃO)\s*/i, "");
   if (normalized === "A" || normalized === "B") return normalized;
   throw new Error(`Variante inválida: ${value || "vazia"}. Use A ou B.`);
 }
@@ -137,7 +177,9 @@ export function parseExperimentCsv(text: string): ExperimentCsvParseResult {
     .map((line) => line.trim())
     .filter(Boolean);
   if (lines.length < 2) {
-    throw new Error("O CSV precisa ter cabeçalho e pelo menos uma linha de dados.");
+    throw new Error(
+      "O CSV precisa ter cabeçalho e pelo menos uma linha de dados.",
+    );
   }
 
   const delimiter = detectDelimiter(lines[0]);
@@ -151,7 +193,12 @@ export function parseExperimentCsv(text: string): ExperimentCsvParseResult {
     notes: findHeaderIndex(headers, "notes"),
   };
 
-  for (const required of ["variant", "impressions", "clicks", "conversions"] as const) {
+  for (const required of [
+    "variant",
+    "impressions",
+    "clicks",
+    "conversions",
+  ] as const) {
     if (indexes[required] < 0) {
       throw new Error(`Coluna obrigatória ausente: ${required}.`);
     }
@@ -172,11 +219,23 @@ export function parseExperimentCsv(text: string): ExperimentCsvParseResult {
       revenue: 0,
       notes: "",
     };
-    current.impressions += parseNumber(cells[indexes.impressions] ?? "", "Impressões", true);
+    current.impressions += parseNumber(
+      cells[indexes.impressions] ?? "",
+      "Impressões",
+      true,
+    );
     current.clicks += parseNumber(cells[indexes.clicks] ?? "", "Cliques", true);
-    current.conversions += parseNumber(cells[indexes.conversions] ?? "", "Conversões", true);
+    current.conversions += parseNumber(
+      cells[indexes.conversions] ?? "",
+      "Conversões",
+      true,
+    );
     if (indexes.revenue >= 0) {
-      current.revenue += parseNumber(cells[indexes.revenue] ?? "", "Receita", false);
+      current.revenue += parseNumber(
+        cells[indexes.revenue] ?? "",
+        "Receita",
+        false,
+      );
     }
     if (indexes.notes >= 0) {
       const note = (cells[indexes.notes] ?? "").trim();
@@ -193,7 +252,8 @@ export function parseExperimentCsv(text: string): ExperimentCsvParseResult {
     .filter((row): row is ExperimentCsvRow => Boolean(row))
     .map((row) => ({ ...row, revenue: Math.round(row.revenue * 100) / 100 }));
 
-  if (!rows.length) throw new Error("Nenhuma linha válida de A ou B foi encontrada.");
+  if (!rows.length)
+    throw new Error("Nenhuma linha válida de A ou B foi encontrada.");
   return { rows, delimiter, sourceRowCount };
 }
 

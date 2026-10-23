@@ -103,7 +103,9 @@ export function ExperimentEvidencePanel({
   onMetricsImported,
 }: ExperimentEvidencePanelProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const [parsedCsv, setParsedCsv] = useState<ExperimentCsvParseResult | null>(null);
+  const [parsedCsv, setParsedCsv] = useState<ExperimentCsvParseResult | null>(
+    null,
+  );
   const [fileName, setFileName] = useState("");
   const [importing, setImporting] = useState(false);
 
@@ -185,7 +187,8 @@ export function ExperimentEvidencePanel({
       setParsedCsv(null);
       setFileName("");
       toast.success("Métricas importadas", {
-        description: "Os agregados do CSV substituíram os valores atuais das variações importadas.",
+        description:
+          "Os agregados do CSV substituíram os valores atuais das variações importadas.",
       });
     } catch (error) {
       toast.error("Não foi possível importar as métricas", {
@@ -247,7 +250,9 @@ export function ExperimentEvidencePanel({
               Importar resultados por CSV
             </h6>
             <p className="mt-1 max-w-2xl text-xs leading-5 text-fg-tertiary">
-              Use colunas de variante, impressões, cliques e conversões. Receita e observações são opcionais. Linhas repetidas de A ou B são somadas antes da gravação.
+              Use colunas de variante, impressões, cliques e conversões. Receita
+              e observações são opcionais. Linhas repetidas de A ou B são
+              somadas antes da gravação.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -289,7 +294,8 @@ export function ExperimentEvidencePanel({
                   Prévia · {fileName}
                 </div>
                 <div className="mt-1 text-[10px] text-fg-muted">
-                  {parsedCsv.sourceRowCount} linha(s) → {parsedCsv.rows.length} agregado(s)
+                  {parsedCsv.sourceRowCount} linha(s) → {parsedCsv.rows.length}{" "}
+                  agregado(s)
                 </div>
               </div>
               <Button
@@ -366,18 +372,28 @@ export function ExperimentEvidencePanel({
         {evidence.conversion.status !== "significant" &&
         evidence.conversion.targetPerVariant ? (
           <div className="mt-3 rounded-xl border border-border-subtle bg-surface-1 p-3 text-xs leading-5 text-fg-tertiary">
-            Com o efeito observado agora, uma referência aproximada para 80% de poder estatístico seria ~
+            Com o efeito observado agora, uma referência aproximada para 80% de
+            poder estatístico seria ~
             <strong className="text-fg-primary">
-              {integer.format(evidence.conversion.targetPerVariant)} impressões por variante
+              {integer.format(evidence.conversion.targetPerVariant)} impressões
+              por variante
             </strong>
-            . Faltariam cerca de {integer.format(evidence.conversion.additionalA ?? 0)} em A e {integer.format(evidence.conversion.additionalB ?? 0)} em B. Essa projeção muda conforme as taxas mudam.
+            . Faltariam cerca de{" "}
+            {integer.format(evidence.conversion.additionalA ?? 0)} em A e{" "}
+            {integer.format(evidence.conversion.additionalB ?? 0)} em B. Essa
+            projeção muda conforme as taxas mudam.
           </div>
         ) : null}
 
         {evidence.conversion.ciLowPercentagePoints !== null &&
         evidence.conversion.ciHighPercentagePoints !== null ? (
           <p className="mt-3 text-[11px] leading-5 text-fg-muted">
-            IC95% da diferença de conversão B − A: {formatDelta(evidence.conversion.ciLowPercentagePoints)} a {formatDelta(evidence.conversion.ciHighPercentagePoints)}. Teste bilateral de duas proporções; significância estatística não substitui validação de atribuição, distribuição de tráfego ou impacto financeiro.
+            IC95% da diferença de conversão B − A:{" "}
+            {formatDelta(evidence.conversion.ciLowPercentagePoints)} a{" "}
+            {formatDelta(evidence.conversion.ciHighPercentagePoints)}. Teste
+            bilateral de duas proporções; significância estatística não
+            substitui validação de atribuição, distribuição de tráfego ou
+            impacto financeiro.
           </p>
         ) : null}
       </section>

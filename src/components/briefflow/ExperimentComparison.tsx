@@ -10,6 +10,7 @@ import {
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { ExperimentEvidencePanel } from "./ExperimentEvidencePanel";
 import {
   calculateCampaignChannelQuality,
   calculateExperimentRates,
@@ -247,6 +248,32 @@ export function ExperimentComparison({
     }
   };
 
+  const handleImportedMetrics = (savedMetrics: AssetExperimentMetrics[]) => {
+    setData((current) =>
+      current
+        ? {
+            ...current,
+            metrics: [
+              ...savedMetrics,
+              ...current.metrics.filter(
+                (metric) =>
+                  !savedMetrics.some(
+                    (savedMetric) => savedMetric.asset_id === metric.asset_id,
+                  ),
+              ),
+            ],
+          }
+        : current,
+    );
+    setDrafts((current) => {
+      const next = { ...current };
+      savedMetrics.forEach((metric) => {
+        next[metric.asset_id] = toDraft(metric);
+      });
+      return next;
+    });
+  };
+
   const handleWinner = async (variant: SavedLibraryAsset) => {
     setDeciding(true);
     try {
@@ -356,6 +383,12 @@ export function ExperimentComparison({
           </Button>
         ) : null}
       </div>
+
+      <ExperimentEvidencePanel
+        variants={data.variants}
+        metrics={data.metrics}
+        onMetricsImported={handleImportedMetrics}
+      />
 
       <div className="grid gap-4 lg:grid-cols-2">
         {data.variants.map((variant) => {

@@ -63,9 +63,7 @@ function erf(value: number): number {
   const p = 0.3275911;
   const t = 1 / (1 + p * x);
   const y =
-    1 -
-    (((((a5 * t + a4) * t + a3) * t + a2) * t + a1) * t) *
-      Math.exp(-x * x);
+    1 - ((((a5 * t + a4) * t + a3) * t + a2) * t + a1) * t * Math.exp(-x * x);
   return sign * y;
 }
 
@@ -78,10 +76,12 @@ function estimateRequiredPerVariant(pA: number, pB: number): number | null {
   if (delta < 0.000001) return null;
   const average = clamp((pA + pB) / 2, 0.000001, 0.999999);
   const estimated =
-    (2 * average * (1 - average) * (Z_95 + Z_80_POWER) ** 2) /
-    delta ** 2;
+    (2 * average * (1 - average) * (Z_95 + Z_80_POWER) ** 2) / delta ** 2;
   if (!Number.isFinite(estimated) || estimated <= 0) return null;
-  return Math.min(MAX_ESTIMATED_SAMPLE, Math.max(MIN_TOTAL_PER_VARIANT, Math.ceil(estimated)));
+  return Math.min(
+    MAX_ESTIMATED_SAMPLE,
+    Math.max(MIN_TOTAL_PER_VARIANT, Math.ceil(estimated)),
+  );
 }
 
 export function compareExperimentProportions(input: {
@@ -120,7 +120,8 @@ export function compareExperimentProportions(input: {
   let ciHigh: number | null = null;
 
   if (aTotal > 0 && bTotal > 0) {
-    const pooledVariance = pooledRate * (1 - pooledRate) * (1 / aTotal + 1 / bTotal);
+    const pooledVariance =
+      pooledRate * (1 - pooledRate) * (1 / aTotal + 1 / bTotal);
     if (pooledVariance > 0) {
       const z = delta / Math.sqrt(pooledVariance);
       pValue = clamp(2 * (1 - normalCdf(Math.abs(z))), 0, 1);

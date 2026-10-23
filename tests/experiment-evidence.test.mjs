@@ -11,12 +11,14 @@ import {
 } from "../src/lib/experimentStatistics.ts";
 
 test("CSV parser aggregates repeated A/B rows and understands Brazilian revenue", () => {
-  const parsed = parseExperimentCsv([
-    "variante;impressoes;cliques;conversoes;receita;observacoes",
-    "A;1000;80;10;1.250,50;dia 1",
-    "A;500;40;5;750,25;dia 2",
-    "B;1500;150;25;2.500,75;teste B",
-  ].join("\n"));
+  const parsed = parseExperimentCsv(
+    [
+      "variante;impressoes;cliques;conversoes;receita;observacoes",
+      "A;1000;80;10;1.250,50;dia 1",
+      "A;500;40;5;750,25;dia 2",
+      "B;1500;150;25;2.500,75;teste B",
+    ].join("\n"),
+  );
 
   assert.equal(parsed.sourceRowCount, 3);
   assert.deepEqual(parsed.rows[0], {
@@ -57,7 +59,9 @@ test("two-proportion evidence identifies a strong conversion lift", () => {
   assert.equal(result.status, "significant");
   assert.equal(result.significantWinner, "B");
   assert.ok(result.pValue !== null && result.pValue < 0.05);
-  assert.ok(result.ciLowPercentagePoints !== null && result.ciLowPercentagePoints > 0);
+  assert.ok(
+    result.ciLowPercentagePoints !== null && result.ciLowPercentagePoints > 0,
+  );
 });
 
 test("small experiments stay explicitly insufficient", () => {
