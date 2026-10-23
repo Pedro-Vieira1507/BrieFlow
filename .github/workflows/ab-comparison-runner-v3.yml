@@ -1,0 +1,52 @@
+name: Execute A/B comparison patch
+
+on:
+  push:
+    branches: [production/creative-studio]
+    paths:
+      - .github/workflows/ab-comparison-runner-v3.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: production/creative-studio
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Use npm 11
+        run: npm install --global npm@11
+      - run: npm ci --ignore-scripts
+      - name: Apply staged product patch
+        run: |
+          python3 .github/scripts/ab_comparison_patch_runner.py
+          bash /tmp/ab-patch.sh
+          git rm .github/workflows/ab-comparison-patch.yml
+          git rm .github/workflows/ab-comparison-runner.yml
+          git rm .github/workflows/ab-comparison-runner-v2.yml
+          git rm .github/workflows/ab-comparison-runner-v3.yml
+          git rm .github/scripts/ab_comparison_patch_runner.py
+      - name: Format and validate
+        run: |
+          npx prettier --write src/lib/supabase.ts src/lib/campaignExperiment.ts src/components/briefflow/LibraryModal.tsx src/components/briefflow/ExperimentComparison.tsx tests/campaign-history.test.mjs tests/experiment-comparison.test.mjs supabase/migrations/20261023121753_add_asset_versions_and_ab_variants.sql supabase/migrations/20261023122529_lock_down_asset_version_snapshot_rpc.sql supabase/migrations/20261023132243_add_ab_experiment_metrics_and_decisions.sql
+          npm run format:check
+          npm run lint
+          npm run typecheck
+          npm test
+          npm run build
+          npm audit --audit-level=high
+      - name: Commit validated A/B comparison
+        run: |
+          git config user.name "Pedro"
+          git config user.email "65820000+Pedro-Vieira1507@users.noreply.github.com"
+          git add src tests supabase/migrations
+          git commit -m "feat: add AB comparison metrics and winner workflow"
+          git push origin HEAD:production/creative-studio
