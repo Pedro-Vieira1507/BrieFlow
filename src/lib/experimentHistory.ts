@@ -2,11 +2,7 @@ import { supabase, type AssetExperimentMetrics } from "@/lib/supabase";
 
 export type ExperimentRunStatus = "running" | "completed";
 export type ExperimentHistorySource =
-  | "manual"
-  | "integration"
-  | "csv"
-  | "meta_ads"
-  | "google_ads";
+  "manual" | "integration" | "csv" | "meta_ads" | "google_ads";
 export type ExperimentHistoryImportSource = "csv" | "meta_ads" | "google_ads";
 
 export interface AssetExperimentRun {
