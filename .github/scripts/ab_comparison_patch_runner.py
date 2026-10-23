@@ -7,10 +7,9 @@ start = source.index(marker) + len(marker)
 end = source.index('      - name: Format and validate\n', start)
 script = textwrap.dedent(source[start:end])
 
-fragile_start = script.index("history_button_anchor = '''")
-fragile_end = script.index("history_section_anchor = '''", fragile_start)
-
-robust = '''library_path = Path("src/components/briefflow/LibraryModal.tsx")
+button_block_start = script.index("history_button_anchor = '''")
+button_block_end = script.index("history_section_anchor = '''", button_block_start)
+button_patch = '''library_path = Path("src/components/briefflow/LibraryModal.tsx")
 library_text = library_path.read_text()
 history_token = """                          disabled={loadingVersions}
                           onClick={() => void handleToggleHistory()}"""
@@ -38,6 +37,30 @@ library_path.write_text(
 )
 
 '''
+script = script[:button_block_start] + button_patch + script[button_block_end:]
 
-script = script[:fragile_start] + robust + script[fragile_end:]
+section_block_start = script.index("history_section_anchor = '''")
+section_block_end = script.index(
+    'replace_once(\n    "tests/campaign-history.test.mjs"',
+    section_block_start,
+)
+section_patch = '''library_path = Path("src/components/briefflow/LibraryModal.tsx")
+library_text = library_path.read_text()
+campaign_tabs_token = "                    <CampaignTabs\\n"
+campaign_tabs_position = library_text.index(campaign_tabs_token)
+comparison_section = """                    {comparisonOpen && selectedItem.experiment_group_id ? (
+                      <ExperimentComparison
+                        experimentGroupId={selectedItem.experiment_group_id}
+                      />
+                    ) : null}
+
+"""
+library_path.write_text(
+    library_text[:campaign_tabs_position]
+    + comparison_section
+    + library_text[campaign_tabs_position:]
+)
+
+'''
+script = script[:section_block_start] + section_patch + script[section_block_end:]
 Path('/tmp/ab-patch.sh').write_text(script)
