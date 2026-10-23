@@ -41,3 +41,5 @@ jobs:
           git add src tests
           git commit -m "feat: add campaign history AB variants and quality score"
           git push origin HEAD:production/creative-studio
+
+# trigger phase 3 patch
