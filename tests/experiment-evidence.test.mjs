@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import assert from "node:assert/strict";
 
@@ -86,4 +87,18 @@ test("CTR signal alone never becomes a suggested business winner", () => {
   assert.equal(summary.ctr.status, "significant");
   assert.equal(summary.recommendation, "ctr_only_signal");
   assert.equal(summary.suggestedWinner, null);
+});
+
+test("A/B comparison wires the evidence panel to imported metrics", () => {
+  const source = readFileSync(
+    new URL(
+      "../src/components/briefflow/ExperimentComparison.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(source, /ExperimentEvidencePanel/);
+  assert.match(source, /onMetricsImported=\{handleImportedMetrics\}/);
+  assert.match(source, /metrics=\{data\.metrics\}/);
 });
