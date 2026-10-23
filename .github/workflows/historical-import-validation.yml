@@ -1,0 +1,49 @@
+name: Historical Import Validation
+
+on:
+  push:
+    branches: [production/creative-studio]
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    if: github.event.head_commit.message == 'chore: run historical import validation'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Use npm 11
+        run: npm install --global npm@11
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+      - name: Format historical import files
+        run: >-
+          npx prettier --write
+          src/components/briefflow/ExperimentHistoricalImport.tsx
+          src/lib/experimentHistoricalCsv.ts
+          src/lib/experimentHistory.ts
+          tests/experiment-history-import.test.mjs
+      - name: Validate quality gate
+        run: |
+          npm run format:check
+          npm run lint
+          npm run typecheck
+          npm test
+          npm run build
+          npm audit --audit-level=high
+      - name: Remove temporary validation workflow
+        run: rm -f .github/workflows/historical-import-validation.yml
+      - name: Commit validated result
+        run: |
+          git config user.name "Pedro"
+          git config user.email "65820000+Pedro-Vieira1507@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m "chore: format historical experiment import"
+          git push origin HEAD:production/creative-studio
