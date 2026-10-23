@@ -40,6 +40,8 @@ test("experiment history migration protects snapshots and traffic settings with 
   assert.match(migration, /enable row level security/);
   assert.match(migration, /asset_experiment_metric_snapshots_insert_own/);
   assert.match(migration, /capture_asset_experiment_metric_snapshot_trigger/);
+  assert.match(migration, /status in \('running', 'completed'\)/);
+  assert.match(migration, /traffic_a_percent between 1 and 99/);
   assert.match(
     migration,
     /revoke all on function public\.capture_asset_experiment_metric_snapshot\(\) from authenticated/,
