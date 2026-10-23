@@ -1,0 +1,91 @@
+name: Retry A/B comparison patch
+
+on:
+  push:
+    branches: [production/creative-studio]
+    paths:
+      - .github/workflows/ab-comparison-runner-v2.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: production/creative-studio
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Use npm 11
+        run: npm install --global npm@11
+      - run: npm ci --ignore-scripts
+      - name: Extract, harden and apply staged patch
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import textwrap
+
+          source = Path('.github/workflows/ab-comparison-patch.yml').read_text()
+          marker = '      - name: Align migrations and add experiment layer\n        shell: bash\n        run: |\n'
+          start = source.index(marker) + len(marker)
+          end = source.index('      - name: Format and validate\n', start)
+          script = textwrap.dedent(source[start:end])
+
+          fragile_start = script.index("history_button_anchor = '''")
+          fragile_end = script.index("history_section_anchor = '''", fragile_start)
+          robust = r'''library_path = Path("src/components/briefflow/LibraryModal.tsx")
+          library_text = library_path.read_text()
+          history_token = ''' + '"""' + '''                          disabled={loadingVersions}
+                          onClick={() => void handleToggleHistory()}''' + '"""' + r'''
+          history_position = library_text.index(history_token)
+          button_start = library_text.rfind("                        <Button\n", 0, history_position)
+          if button_start < 0:
+              raise SystemExit("history button start not found")
+          comparison_button = ''' + '"""' + '''                        {selectedItem.experiment_group_id &&
+                        selectedItem.variant_label ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            aria-pressed={comparisonOpen}
+                            onClick={() => setComparisonOpen((open) => !open)}
+                            className="w-full rounded-xl border-border-strong bg-surface-2 text-xs font-semibold text-fg-secondary hover:bg-surface-3 hover:text-fg-primary sm:w-auto"
+                          >
+                            <GitCompareArrows className="mr-1.5 size-4" />
+                            {comparisonOpen ? "Ocultar A/B" : "Comparar A/B"}
+                          </Button>
+                        ) : null}
+''' + '"""' + r'''
+          library_path.write_text(
+              library_text[:button_start] + comparison_button + library_text[button_start:]
+          )
+
+          '''
+          script = script[:fragile_start] + robust + script[fragile_end:]
+          Path('/tmp/ab-patch.sh').write_text(script)
+          PY
+          bash /tmp/ab-patch.sh
+          git rm .github/workflows/ab-comparison-patch.yml .github/workflows/ab-comparison-runner.yml .github/workflows/ab-comparison-runner-v2.yml
+      - name: Format and validate
+        run: |
+          npx prettier --write src/lib/supabase.ts src/lib/campaignExperiment.ts src/components/briefflow/LibraryModal.tsx src/components/briefflow/ExperimentComparison.tsx tests/campaign-history.test.mjs tests/experiment-comparison.test.mjs supabase/migrations/20261023121753_add_asset_versions_and_ab_variants.sql supabase/migrations/20261023122529_lock_down_asset_version_snapshot_rpc.sql supabase/migrations/20261023132243_add_ab_experiment_metrics_and_decisions.sql
+          npm run format:check
+          npm run lint
+          npm run typecheck
+          npm test
+          npm run build
+          npm audit --audit-level=high
+      - name: Commit validated A/B comparison
+        run: |
+          git config user.name "Pedro"
+          git config user.email "65820000+Pedro-Vieira1507@users.noreply.github.com"
+          git add src tests supabase/migrations
+          git commit -m "feat: add AB comparison metrics and winner workflow"
+          git push origin HEAD:production/creative-studio
