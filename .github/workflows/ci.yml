@@ -28,17 +28,17 @@ jobs:
       - name: Use npm 11
         run: npm install --global npm@11
       - run: npm ci --ignore-scripts
+      - name: Fix historical date regex
+        run: perl -0pi -e 's/\[\\\\\/\.\-\]/[\/\.\-]/g' src/lib/experimentHistoricalCsv.ts
       - name: Format historical import files
         run: npx prettier --write src/components/briefflow/ExperimentHistoricalImport.tsx src/lib/experimentHistoricalCsv.ts src/lib/experimentHistory.ts tests/experiment-history-import.test.mjs
-      - name: Autofix historical parser lint
-        run: npx eslint --fix src/lib/experimentHistoricalCsv.ts
       - run: npm run format:check
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
       - run: npm audit --audit-level=high
-      - name: Restore permanent CI and commit formatting
+      - name: Restore permanent CI and commit validated result
         run: |
           git show HEAD^:.github/workflows/ci.yml > .github/workflows/ci.yml
           git config user.name "Pedro"
