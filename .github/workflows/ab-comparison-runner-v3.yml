@@ -50,3 +50,5 @@ jobs:
           git add src tests supabase/migrations
           git commit -m "feat: add AB comparison metrics and winner workflow"
           git push origin HEAD:production/creative-studio
+
+# retry after structural section fix
