@@ -101,7 +101,10 @@ test("historical import RPC is invoker-scoped and protects automatic snapshots",
   assert.match(migration, /security invoker/);
   assert.match(migration, /set search_path = ''/);
   assert.match(migration, /brieflow\.skip_experiment_snapshot/);
-  assert.match(migration, /p_source not in \('csv', 'meta_ads', 'google_ads'\)/);
+  assert.match(
+    migration,
+    /p_source not in \('csv', 'meta_ads', 'google_ads'\)/,
+  );
   assert.match(migration, /a\.user_id = v_user_id/);
   assert.match(migration, /a\.variant_label in \('A', 'B'\)/);
   assert.match(
