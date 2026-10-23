@@ -1,0 +1,49 @@
+name: Apply experiment evidence UI patch
+
+on:
+  push:
+    branches: [production/creative-studio]
+    paths:
+      - .github/workflows/experiment-evidence-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: production/creative-studio
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Use npm 11
+        run: npm install --global npm@11
+      - run: npm ci --ignore-scripts
+      - name: Apply UI integration patch
+        run: python3 .github/scripts/experiment_evidence_patch.py
+      - name: Format and validate
+        run: |
+          npx prettier --write src/components/briefflow/ExperimentComparison.tsx src/components/briefflow/ExperimentEvidencePanel.tsx src/lib/experimentCsv.ts src/lib/experimentStatistics.ts tests/experiment-evidence.test.mjs
+          npm run format:check
+          npm run lint
+          npm run typecheck
+          npm test
+          npm run build
+          npm audit --audit-level=high
+      - name: Remove temporary patch files
+        run: |
+          git rm .github/workflows/experiment-evidence-patch.yml
+          git rm .github/scripts/experiment_evidence_patch.py
+      - name: Commit validated feature
+        run: |
+          git config user.name "Pedro"
+          git config user.email "65820000+Pedro-Vieira1507@users.noreply.github.com"
+          git add src tests
+          git commit -m "feat: add CSV import and statistical AB evidence"
+          git push origin HEAD:production/creative-studio
