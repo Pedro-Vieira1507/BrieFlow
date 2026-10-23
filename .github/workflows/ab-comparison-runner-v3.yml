@@ -36,7 +36,7 @@ jobs:
           git rm .github/scripts/ab_comparison_patch_runner.py
       - name: Format and validate
         run: |
-          npx prettier --write src/lib/supabase.ts src/lib/campaignExperiment.ts src/components/briefflow/LibraryModal.tsx src/components/briefflow/ExperimentComparison.tsx tests/campaign-history.test.mjs tests/experiment-comparison.test.mjs supabase/migrations/20261023121753_add_asset_versions_and_ab_variants.sql supabase/migrations/20261023122529_lock_down_asset_version_snapshot_rpc.sql supabase/migrations/20261023132243_add_ab_experiment_metrics_and_decisions.sql
+          npx prettier --write src/lib/supabase.ts src/lib/campaignExperiment.ts src/components/briefflow/LibraryModal.tsx src/components/briefflow/ExperimentComparison.tsx tests/campaign-history.test.mjs tests/experiment-comparison.test.mjs
           npm run format:check
           npm run lint
           npm run typecheck
@@ -51,4 +51,4 @@ jobs:
           git commit -m "feat: add AB comparison metrics and winner workflow"
           git push origin HEAD:production/creative-studio
 
-# retry after structural section fix
+# retry without SQL prettier parsing
