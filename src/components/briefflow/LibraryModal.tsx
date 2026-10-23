@@ -20,10 +20,14 @@ import {
 import { Button } from "@/components/ui/button";
 import { useBriefflowStore } from "@/store/briefflow";
 import {
+  createSavedAssetVariant,
   deleteSavedAsset,
+  getAssetVersions,
   getSavedAssetsPage,
   renameSavedAsset,
+  restoreAssetVersion,
   updateSavedAssetStatus,
+  type AssetVersion,
   type LibraryAssetStatus,
   type SavedAssetsCursor,
   type SavedLibraryAsset,
@@ -41,6 +45,9 @@ import {
   CopyPlus,
   PencilLine,
   Check,
+  GitCompareArrows,
+  History,
+  RotateCcw,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -99,6 +106,13 @@ export function LibraryModal() {
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
   const [renaming, setRenaming] = useState(false);
+  const [versions, setVersions] = useState<AssetVersion[]>([]);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [loadingVersions, setLoadingVersions] = useState(false);
+  const [restoringVersionId, setRestoringVersionId] = useState<string | null>(
+    null,
+  );
+  const [creatingVariant, setCreatingVariant] = useState(false);
   const loadRequestRef = useRef(0);
 
   const loadLibrary = useCallback(async () => {
@@ -252,6 +266,20 @@ export function LibraryModal() {
     selectedState?.type === "campaign"
       ? selectedState.campaignAssets
       : undefined;
+  const selectedGroupId =
+    selectedItem?.experiment_group_id ?? selectedItem?.id ?? null;
+  const hasVariantB = selectedGroupId
+    ? items.some(
+        (item) =>
+          item.experiment_group_id === selectedGroupId &&
+          item.variant_label === "B",
+      )
+    : false;
+
+  useEffect(() => {
+    setHistoryOpen(false);
+    setVersions([]);
+  }, [selectedItem?.id]);
 
   const beginRename = () => {
     if (!selectedItem) return;
@@ -306,6 +334,76 @@ export function LibraryModal() {
       });
     } finally {
       setUpdatingStatus(false);
+    }
+  };
+
+  const handleCreateVariant = async () => {
+    if (!selectedItem || creatingVariant) return;
+    setCreatingVariant(true);
+    try {
+      const result = await createSavedAssetVariant(selectedItem.id);
+      setItems((current) => {
+        const updated = current
+          .filter((item) => item.id !== result.variant.id)
+          .map((item) => (item.id === result.source.id ? result.source : item));
+        return [result.variant, ...updated];
+      });
+      setSelectedIndex(0);
+      setHistoryOpen(false);
+      setVersions([]);
+      toast.success("Variação B criada", {
+        description:
+          "Ela começa como rascunho e pode seguir uma direção diferente sem alterar a variação A.",
+      });
+    } catch (error) {
+      toast.error("Não foi possível criar a variação B", {
+        description: error instanceof Error ? error.message : undefined,
+      });
+    } finally {
+      setCreatingVariant(false);
+    }
+  };
+
+  const handleToggleHistory = async () => {
+    if (!selectedItem) return;
+    if (historyOpen) {
+      setHistoryOpen(false);
+      return;
+    }
+
+    setHistoryOpen(true);
+    setLoadingVersions(true);
+    try {
+      setVersions(await getAssetVersions(selectedItem.id));
+    } catch (error) {
+      setHistoryOpen(false);
+      toast.error("Não foi possível carregar o histórico", {
+        description: error instanceof Error ? error.message : undefined,
+      });
+    } finally {
+      setLoadingVersions(false);
+    }
+  };
+
+  const handleRestoreVersion = async (version: AssetVersion) => {
+    if (!selectedItem || restoringVersionId) return;
+    setRestoringVersionId(version.id);
+    try {
+      const restored = await restoreAssetVersion(selectedItem.id, version.id);
+      setItems((current) =>
+        current.map((item) => (item.id === restored.id ? restored : item)),
+      );
+      setVersions(await getAssetVersions(selectedItem.id));
+      toast.success(`Versão ${version.version_number} restaurada`, {
+        description:
+          "A restauração foi salva como uma nova versão para manter o histórico completo.",
+      });
+    } catch (error) {
+      toast.error("Não foi possível restaurar esta versão", {
+        description: error instanceof Error ? error.message : undefined,
+      });
+    } finally {
+      setRestoringVersionId(null);
     }
   };
 
@@ -466,8 +564,15 @@ export function LibraryModal() {
                           <span className="block truncate text-xs font-semibold text-fg-primary">
                             {label}
                           </span>
-                          <span className="mt-1.5 inline-flex rounded-full border border-border-subtle bg-surface-1 px-2 py-0.5 text-[10px] font-semibold text-fg-secondary">
-                            {libraryStatusLabel(item.status)}
+                          <span className="mt-1.5 flex flex-wrap gap-1.5">
+                            <span className="inline-flex rounded-full border border-border-subtle bg-surface-1 px-2 py-0.5 text-[10px] font-semibold text-fg-secondary">
+                              {libraryStatusLabel(item.status)}
+                            </span>
+                            {item.variant_label ? (
+                              <span className="inline-flex rounded-full border border-brand/20 bg-brand-muted px-2 py-0.5 text-[10px] font-semibold text-brand">
+                                Variação {item.variant_label}
+                              </span>
+                            ) : null}
                           </span>
                           <span
                             className="mt-1.5 flex items-center gap-1.5 text-xs text-fg-tertiary"
@@ -573,6 +678,11 @@ export function LibraryModal() {
                                 getBuilderCampaignBrandName(selectedState) ||
                                 "Campanha Salva"}
                             </h4>
+                            {selectedItem.variant_label ? (
+                              <span className="shrink-0 rounded-full border border-brand/20 bg-brand-muted px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-brand">
+                                Variação {selectedItem.variant_label}
+                              </span>
+                            ) : null}
                             <button
                               type="button"
                               onClick={beginRename}
@@ -615,7 +725,43 @@ export function LibraryModal() {
                           ))}
                         </div>
                       </div>
-                      <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+                      <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:justify-end">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={
+                            creatingVariant ||
+                            selectedItem.variant_label === "B" ||
+                            hasVariantB
+                          }
+                          onClick={() => void handleCreateVariant()}
+                          className="w-full rounded-xl border-border-strong bg-surface-2 text-xs font-semibold text-fg-secondary hover:bg-surface-3 hover:text-fg-primary sm:w-auto"
+                        >
+                          {creatingVariant ? (
+                            <Loader2 className="mr-1.5 size-4 animate-spin" />
+                          ) : (
+                            <GitCompareArrows className="mr-1.5 size-4" />
+                          )}
+                          {selectedItem.variant_label === "B" || hasVariantB
+                            ? "Variação B criada"
+                            : "Criar variação B"}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={loadingVersions}
+                          onClick={() => void handleToggleHistory()}
+                          className="w-full rounded-xl border-border-strong bg-surface-2 text-xs font-semibold text-fg-secondary hover:bg-surface-3 hover:text-fg-primary sm:w-auto"
+                        >
+                          {loadingVersions ? (
+                            <Loader2 className="mr-1.5 size-4 animate-spin" />
+                          ) : (
+                            <History className="mr-1.5 size-4" />
+                          )}
+                          {historyOpen ? "Ocultar histórico" : "Histórico"}
+                        </Button>
                         <Button
                           type="button"
                           variant="outline"
@@ -636,6 +782,96 @@ export function LibraryModal() {
                         </Button>
                       </div>
                     </div>
+
+                    {historyOpen ? (
+                      <section
+                        aria-label="Histórico da campanha"
+                        className="rounded-2xl border border-border-strong bg-surface-1/80 p-4 shadow-[var(--shadow-soft)]"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div>
+                            <h5 className="text-sm font-semibold text-fg-primary">
+                              Histórico de versões
+                            </h5>
+                            <p className="mt-1 text-xs leading-5 text-fg-tertiary">
+                              Cada salvamento de conteúdo cria um snapshot.
+                              Restaurar também gera uma nova versão, sem apagar
+                              as anteriores.
+                            </p>
+                          </div>
+                          <span className="rounded-full bg-surface-3 px-2.5 py-1 text-xs font-semibold text-fg-secondary">
+                            {versions.length} versões
+                          </span>
+                        </div>
+
+                        {loadingVersions ? (
+                          <div
+                            className="mt-4 flex min-h-24 items-center justify-center text-fg-muted"
+                            role="status"
+                          >
+                            <Loader2 className="mr-2 size-4 animate-spin" />
+                            Carregando histórico...
+                          </div>
+                        ) : versions.length ? (
+                          <div className="mt-4 space-y-2">
+                            {versions.map((version, index) => (
+                              <div
+                                key={version.id}
+                                className="flex flex-col gap-3 rounded-xl border border-border-subtle bg-surface-2 p-3 sm:flex-row sm:items-center sm:justify-between"
+                              >
+                                <div className="min-w-0">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className="text-xs font-semibold text-fg-primary">
+                                      Versão {version.version_number}
+                                    </span>
+                                    {index === 0 ? (
+                                      <span className="rounded-full bg-emerald-400/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-300">
+                                        Atual
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                  <p className="mt-1 text-xs text-fg-muted">
+                                    {new Date(
+                                      version.created_at,
+                                    ).toLocaleString("pt-BR", {
+                                      day: "2-digit",
+                                      month: "2-digit",
+                                      year: "numeric",
+                                      hour: "2-digit",
+                                      minute: "2-digit",
+                                    })}
+                                  </p>
+                                </div>
+                                {index === 0 ? null : (
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    disabled={Boolean(restoringVersionId)}
+                                    onClick={() =>
+                                      void handleRestoreVersion(version)
+                                    }
+                                    className="rounded-xl border-border-strong bg-surface-1 text-xs font-semibold text-fg-secondary hover:bg-surface-3 hover:text-fg-primary"
+                                  >
+                                    {restoringVersionId === version.id ? (
+                                      <Loader2 className="mr-1.5 size-4 animate-spin" />
+                                    ) : (
+                                      <RotateCcw className="mr-1.5 size-4" />
+                                    )}
+                                    Restaurar
+                                  </Button>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="mt-4 rounded-xl border border-dashed border-border-strong p-4 text-xs leading-5 text-fg-tertiary">
+                            O histórico começará no próximo salvamento desta
+                            campanha.
+                          </p>
+                        )}
+                      </section>
+                    ) : null}
 
                     <CampaignTabs
                       assets={campaignAssets}

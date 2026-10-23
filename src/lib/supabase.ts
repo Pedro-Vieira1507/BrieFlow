@@ -32,6 +32,8 @@ export interface SavedLibraryAsset {
   type: string;
   content: BuilderState;
   status: LibraryAssetStatus;
+  experiment_group_id?: string | null;
+  variant_label?: "A" | "B" | null;
   created_at: string;
   updated_at?: string;
 }
@@ -44,6 +46,24 @@ export interface SavedAssetsCursor {
 export interface SavedAssetsPage {
   items: SavedLibraryAsset[];
   nextCursor: SavedAssetsCursor | null;
+}
+
+export interface AssetVersion {
+  id: string;
+  asset_id: string;
+  user_id: string;
+  version_number: number;
+  name: string;
+  type: string;
+  content: BuilderState;
+  status: LibraryAssetStatus | null;
+  variant_label: "A" | "B" | null;
+  created_at: string;
+}
+
+export interface SavedAssetVariantResult {
+  source: SavedLibraryAsset;
+  variant: SavedLibraryAsset;
 }
 
 export interface BrandKit {
@@ -320,7 +340,7 @@ async function refreshPrivateUrls(
 }
 
 const SAVED_ASSET_COLUMNS =
-  "id,user_id,organization_id,name,type,content,status,created_at,updated_at";
+  "id,user_id,organization_id,name,type,content,status,experiment_group_id,variant_label,created_at,updated_at";
 const DEFAULT_LIBRARY_PAGE_SIZE = 12;
 const MAX_LIBRARY_PAGE_SIZE = 100;
 
@@ -441,6 +461,161 @@ export async function updateSavedAssetStatus(
 
   if (error) throw error;
   return data as SavedLibraryAsset;
+}
+
+const ASSET_VERSION_COLUMNS =
+  "id,asset_id,user_id,version_number,name,type,content,status,variant_label,created_at";
+
+export async function getAssetVersions(
+  assetId: string,
+): Promise<AssetVersion[]> {
+  if (!supabase) throw new Error("Supabase não configurado.");
+  const user = await requireUser();
+  const { data, error } = await supabase
+    .from("asset_versions")
+    .select(ASSET_VERSION_COLUMNS)
+    .eq("asset_id", assetId)
+    .eq("user_id", user.id)
+    .order("version_number", { ascending: false })
+    .limit(30);
+
+  if (error) throw error;
+  const versions = (data ?? []) as AssetVersion[];
+  if (!versions.length) return versions;
+
+  const refreshed = await refreshPrivateUrls(
+    versions.map(
+      (version) =>
+        ({
+          id: version.id,
+          user_id: version.user_id,
+          name: version.name,
+          type: version.type,
+          content: version.content,
+          status: version.status ?? "draft",
+          created_at: version.created_at,
+        }) satisfies SavedLibraryAsset,
+    ),
+  );
+
+  return versions.map((version, index) => ({
+    ...version,
+    content: refreshed[index]?.content ?? version.content,
+  }));
+}
+
+export async function restoreAssetVersion(
+  assetId: string,
+  versionId: string,
+): Promise<SavedLibraryAsset> {
+  if (!supabase) throw new Error("Supabase não configurado.");
+  const user = await requireUser();
+  const { data: version, error: versionError } = await supabase
+    .from("asset_versions")
+    .select(ASSET_VERSION_COLUMNS)
+    .eq("id", versionId)
+    .eq("asset_id", assetId)
+    .eq("user_id", user.id)
+    .single();
+
+  if (versionError) throw versionError;
+  const snapshot = version as AssetVersion;
+
+  const { data, error } = await supabase
+    .from("assets")
+    .update({ content: snapshot.content })
+    .eq("id", assetId)
+    .eq("user_id", user.id)
+    .select(SAVED_ASSET_COLUMNS)
+    .single();
+
+  if (error) throw error;
+  const [restored] = await refreshPrivateUrls([data as SavedLibraryAsset]);
+  return restored ?? (data as SavedLibraryAsset);
+}
+
+export async function createSavedAssetVariant(
+  assetId: string,
+): Promise<SavedAssetVariantResult> {
+  if (!supabase) throw new Error("Supabase não configurado.");
+  const user = await requireUser();
+
+  const { data: sourceData, error: sourceError } = await supabase
+    .from("assets")
+    .select(SAVED_ASSET_COLUMNS)
+    .eq("id", assetId)
+    .eq("user_id", user.id)
+    .single();
+  if (sourceError) throw sourceError;
+
+  let source = sourceData as SavedLibraryAsset;
+  if (source.variant_label === "B") {
+    throw new Error("Esta campanha já é a variação B.");
+  }
+
+  const experimentGroupId = source.experiment_group_id ?? source.id;
+  const { data: existingVariant, error: existingError } = await supabase
+    .from("assets")
+    .select("id")
+    .eq("user_id", user.id)
+    .eq("experiment_group_id", experimentGroupId)
+    .eq("variant_label", "B")
+    .maybeSingle();
+  if (existingError) throw existingError;
+  if (existingVariant) {
+    throw new Error("Já existe uma variação B para esta campanha.");
+  }
+
+  if (
+    source.experiment_group_id !== experimentGroupId ||
+    source.variant_label !== "A"
+  ) {
+    const { data: updatedSource, error: updateError } = await supabase
+      .from("assets")
+      .update({
+        experiment_group_id: experimentGroupId,
+        variant_label: "A",
+      })
+      .eq("id", source.id)
+      .eq("user_id", user.id)
+      .select(SAVED_ASSET_COLUMNS)
+      .single();
+    if (updateError) throw updateError;
+    source = updatedSource as SavedLibraryAsset;
+  }
+
+  const baseName = source.name.replace(/\s*[·-]\s*Variação\s+[AB]\s*$/i, "");
+  const { data: variantData, error: variantError } = await supabase
+    .from("assets")
+    .insert({
+      user_id: user.id,
+      name: normalizeLibraryLabel(`${baseName} · Variação B`),
+      type: source.type,
+      content: source.content,
+      status: "draft",
+      experiment_group_id: experimentGroupId,
+      variant_label: "B",
+    })
+    .select(SAVED_ASSET_COLUMNS)
+    .single();
+
+  if (variantError) {
+    if (variantError.message.includes("asset_limit_reached")) {
+      throw new Error(
+        "Você atingiu o limite de campanhas salvas do seu plano.",
+      );
+    }
+    throw variantError;
+  }
+
+  const refreshed = await refreshPrivateUrls([
+    source,
+    variantData as SavedLibraryAsset,
+  ]);
+  return {
+    source: refreshed[0] ?? source,
+    variant: refreshed[1] ?? (variantData as SavedLibraryAsset),
+  };
 }
 
 const BRAND_KIT_COLUMNS =

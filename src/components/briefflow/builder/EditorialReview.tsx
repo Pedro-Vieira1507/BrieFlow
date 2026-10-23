@@ -1,5 +1,6 @@
-import { ClipboardCheck, ArrowUpRight } from "lucide-react";
+import { ClipboardCheck, ArrowUpRight, Gauge } from "lucide-react";
 import { reviewEditorialContent } from "@/lib/editorialReview";
+import { calculateCreativeQuality } from "@/lib/creativeQuality";
 import { toMarketingBrief } from "@/types/brief";
 import { useBriefflowStore } from "@/store/briefflow";
 import type { CampaignAsset } from "@/types/builder";
@@ -19,12 +20,18 @@ export function EditorialReview({
     brief,
     builder.campaignAssets,
   );
+  const quality = calculateCreativeQuality(asset, issues);
+
   return (
     <details className="mb-5 rounded-2xl border border-border-strong bg-surface-1/85 px-4 py-3 text-sm">
       <summary className="flex min-h-11 cursor-pointer list-none flex-wrap items-center gap-2 font-semibold text-fg-primary focus-visible:outline-brand">
         <ClipboardCheck className="size-4 text-brand" aria-hidden />
         Revisão editorial
-        <span className="ml-auto rounded-full bg-surface-3 px-2.5 py-1 text-xs font-medium text-fg-secondary">
+        <span className="ml-auto inline-flex items-center gap-1.5 rounded-full bg-brand-muted px-2.5 py-1 text-xs font-semibold text-brand">
+          <Gauge className="size-3.5" aria-hidden />
+          Score {quality.score}/100 · {quality.label}
+        </span>
+        <span className="rounded-full bg-surface-3 px-2.5 py-1 text-xs font-medium text-fg-secondary">
           {issues.length
             ? `${issues.length} ${issues.length === 1 ? "ponto para revisar" : "pontos para revisar"}`
             : "Pronta para sua revisão"}
@@ -32,7 +39,8 @@ export function EditorialReview({
       </summary>
       <p className="mt-2 text-xs leading-5 text-fg-tertiary">
         Verificação de clareza e consistência com o briefing. Confira fatos,
-        direitos de imagem e condições comerciais antes de publicar.
+        direitos de imagem e condições comerciais antes de publicar. O score é
+        um indicador heurístico de completude e revisão; não prevê performance.
       </p>
       {issues.length > 0 && (
         <ul className="mt-3 space-y-2">
