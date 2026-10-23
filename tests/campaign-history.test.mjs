@@ -6,7 +6,7 @@ const read = (path) => readFileSync(path, "utf8");
 
 test("campaign history is private and snapshots only content changes", () => {
   const migration = read(
-    "supabase/migrations/20261023121500_add_asset_versions_and_ab_variants.sql",
+    "supabase/migrations/20261023121753_add_asset_versions_and_ab_variants.sql",
   );
   assert.match(
     migration,

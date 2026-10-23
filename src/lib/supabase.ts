@@ -66,6 +66,43 @@ export interface SavedAssetVariantResult {
   variant: SavedLibraryAsset;
 }
 
+export interface AssetExperimentMetrics {
+  asset_id: string;
+  user_id: string;
+  impressions: number;
+  clicks: number;
+  conversions: number;
+  revenue: number;
+  source: "manual" | "integration";
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AssetExperimentMetricsInput {
+  impressions: number;
+  clicks: number;
+  conversions: number;
+  revenue: number;
+  notes?: string;
+}
+
+export interface AssetExperimentDecision {
+  experiment_group_id: string;
+  user_id: string;
+  winner_asset_id: string;
+  decision_note: string | null;
+  decided_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AssetExperimentData {
+  variants: SavedLibraryAsset[];
+  metrics: AssetExperimentMetrics[];
+  decision: AssetExperimentDecision | null;
+}
+
 export interface BrandKit {
   id: string;
   user_id: string;
@@ -616,6 +653,194 @@ export async function createSavedAssetVariant(
     source: refreshed[0] ?? source,
     variant: refreshed[1] ?? (variantData as SavedLibraryAsset),
   };
+}
+
+const EXPERIMENT_METRIC_COLUMNS =
+  "asset_id,user_id,impressions,clicks,conversions,revenue,source,notes,created_at,updated_at";
+const EXPERIMENT_DECISION_COLUMNS =
+  "experiment_group_id,user_id,winner_asset_id,decision_note,decided_at,created_at,updated_at";
+const UUID_PATTERN = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
+
+function normalizeExperimentId(value: string, label: string): string {
+  const normalized = value.trim().toLowerCase();
+  if (!UUID_PATTERN.test(normalized)) {
+    throw new Error(`${label} inválido.`);
+  }
+  return normalized;
+}
+
+function normalizeMetricCount(value: number, label: string): number {
+  if (!Number.isFinite(value) || value < 0 || !Number.isInteger(value)) {
+    throw new Error(
+      `${label} deve ser um número inteiro maior ou igual a zero.`,
+    );
+  }
+  return value;
+}
+
+function normalizeMetricRevenue(value: number): number {
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error("Receita deve ser um número maior ou igual a zero.");
+  }
+  return Math.round(value * 100) / 100;
+}
+
+function normalizeExperimentNote(value?: string): string | null {
+  if (!value) return null;
+  const normalized = Array.from(value)
+    .map((character) => (character.charCodeAt(0) < 32 ? " " : character))
+    .join("")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 500);
+  return normalized || null;
+}
+
+function normalizeExperimentMetricRow(
+  row: Record<string, unknown>,
+): AssetExperimentMetrics {
+  return {
+    asset_id: String(row.asset_id),
+    user_id: String(row.user_id),
+    impressions: Number(row.impressions ?? 0),
+    clicks: Number(row.clicks ?? 0),
+    conversions: Number(row.conversions ?? 0),
+    revenue: Number(row.revenue ?? 0),
+    source: row.source === "integration" ? "integration" : "manual",
+    notes: typeof row.notes === "string" ? row.notes : null,
+    created_at: String(row.created_at),
+    updated_at: String(row.updated_at),
+  };
+}
+
+export async function getExperimentData(
+  experimentGroupId: string,
+): Promise<AssetExperimentData> {
+  if (!supabase) throw new Error("Supabase não configurado.");
+  const user = await requireUser();
+  const groupId = normalizeExperimentId(
+    experimentGroupId,
+    "Grupo de experimento",
+  );
+
+  const { data: variantRows, error: variantsError } = await supabase
+    .from("assets")
+    .select(SAVED_ASSET_COLUMNS)
+    .eq("user_id", user.id)
+    .eq("experiment_group_id", groupId)
+    .in("variant_label", ["A", "B"])
+    .order("variant_label", { ascending: true });
+  if (variantsError) throw variantsError;
+
+  const variants = await refreshPrivateUrls(
+    (variantRows ?? []) as SavedLibraryAsset[],
+  );
+  const assetIds = variants.map((variant) => variant.id);
+
+  let metrics: AssetExperimentMetrics[] = [];
+  if (assetIds.length) {
+    const { data: metricRows, error: metricsError } = await supabase
+      .from("asset_experiment_metrics")
+      .select(EXPERIMENT_METRIC_COLUMNS)
+      .eq("user_id", user.id)
+      .in("asset_id", assetIds);
+    if (metricsError) throw metricsError;
+    metrics = (metricRows ?? []).map((row) =>
+      normalizeExperimentMetricRow(row as Record<string, unknown>),
+    );
+  }
+
+  const { data: decisionRow, error: decisionError } = await supabase
+    .from("asset_experiment_decisions")
+    .select(EXPERIMENT_DECISION_COLUMNS)
+    .eq("experiment_group_id", groupId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (decisionError) throw decisionError;
+
+  return {
+    variants,
+    metrics,
+    decision: decisionRow ? (decisionRow as AssetExperimentDecision) : null,
+  };
+}
+
+export async function saveExperimentMetrics(
+  assetId: string,
+  input: AssetExperimentMetricsInput,
+): Promise<AssetExperimentMetrics> {
+  if (!supabase) throw new Error("Supabase não configurado.");
+  const user = await requireUser();
+  const normalizedAssetId = normalizeExperimentId(assetId, "Campanha");
+  const now = new Date().toISOString();
+  const payload = {
+    asset_id: normalizedAssetId,
+    user_id: user.id,
+    impressions: normalizeMetricCount(input.impressions, "Impressões"),
+    clicks: normalizeMetricCount(input.clicks, "Cliques"),
+    conversions: normalizeMetricCount(input.conversions, "Conversões"),
+    revenue: normalizeMetricRevenue(input.revenue),
+    source: "manual" as const,
+    notes: normalizeExperimentNote(input.notes),
+    updated_at: now,
+  };
+
+  const { data, error } = await supabase
+    .from("asset_experiment_metrics")
+    .upsert(payload, { onConflict: "asset_id" })
+    .select(EXPERIMENT_METRIC_COLUMNS)
+    .single();
+  if (error) throw error;
+  return normalizeExperimentMetricRow(data as Record<string, unknown>);
+}
+
+export async function setExperimentWinner(
+  experimentGroupId: string,
+  winnerAssetId: string,
+  note?: string,
+): Promise<AssetExperimentDecision> {
+  if (!supabase) throw new Error("Supabase não configurado.");
+  const user = await requireUser();
+  const groupId = normalizeExperimentId(
+    experimentGroupId,
+    "Grupo de experimento",
+  );
+  const winnerId = normalizeExperimentId(winnerAssetId, "Campanha vencedora");
+  const now = new Date().toISOString();
+  const { data, error } = await supabase
+    .from("asset_experiment_decisions")
+    .upsert(
+      {
+        experiment_group_id: groupId,
+        user_id: user.id,
+        winner_asset_id: winnerId,
+        decision_note: normalizeExperimentNote(note),
+        decided_at: now,
+        updated_at: now,
+      },
+      { onConflict: "experiment_group_id" },
+    )
+    .select(EXPERIMENT_DECISION_COLUMNS)
+    .single();
+  if (error) throw error;
+  return data as AssetExperimentDecision;
+}
+
+export async function clearExperimentWinner(
+  experimentGroupId: string,
+): Promise<void> {
+  if (!supabase) throw new Error("Supabase não configurado.");
+  const user = await requireUser();
+  const groupId = normalizeExperimentId(
+    experimentGroupId,
+    "Grupo de experimento",
+  );
+  const { error } = await supabase
+    .from("asset_experiment_decisions")
+    .delete()
+    .eq("experiment_group_id", groupId)
+    .eq("user_id", user.id);
+  if (error) throw error;
 }
 
 const BRAND_KIT_COLUMNS =

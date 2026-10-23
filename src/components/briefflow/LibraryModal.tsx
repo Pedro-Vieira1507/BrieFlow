@@ -33,6 +33,7 @@ import {
   type SavedLibraryAsset,
 } from "@/lib/supabase";
 import { CampaignTabs } from "@/components/briefflow/builder/CampaignTabs";
+import { ExperimentComparison } from "@/components/briefflow/ExperimentComparison";
 import {
   Loader2,
   Trash2,
@@ -113,6 +114,7 @@ export function LibraryModal() {
     null,
   );
   const [creatingVariant, setCreatingVariant] = useState(false);
+  const [comparisonOpen, setComparisonOpen] = useState(false);
   const loadRequestRef = useRef(0);
 
   const loadLibrary = useCallback(async () => {
@@ -279,6 +281,7 @@ export function LibraryModal() {
   useEffect(() => {
     setHistoryOpen(false);
     setVersions([]);
+    setComparisonOpen(false);
   }, [selectedItem?.id]);
 
   const beginRename = () => {
@@ -351,6 +354,7 @@ export function LibraryModal() {
       setSelectedIndex(0);
       setHistoryOpen(false);
       setVersions([]);
+      setComparisonOpen(true);
       toast.success("Variação B criada", {
         description:
           "Ela começa como rascunho e pode seguir uma direção diferente sem alterar a variação A.",
@@ -747,6 +751,20 @@ export function LibraryModal() {
                             ? "Variação B criada"
                             : "Criar variação B"}
                         </Button>
+                        {selectedItem.experiment_group_id &&
+                        selectedItem.variant_label ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            aria-pressed={comparisonOpen}
+                            onClick={() => setComparisonOpen((open) => !open)}
+                            className="w-full rounded-xl border-border-strong bg-surface-2 text-xs font-semibold text-fg-secondary hover:bg-surface-3 hover:text-fg-primary sm:w-auto"
+                          >
+                            <GitCompareArrows className="mr-1.5 size-4" />
+                            {comparisonOpen ? "Ocultar A/B" : "Comparar A/B"}
+                          </Button>
+                        ) : null}
                         <Button
                           type="button"
                           variant="outline"
@@ -871,6 +889,12 @@ export function LibraryModal() {
                           </p>
                         )}
                       </section>
+                    ) : null}
+
+                    {comparisonOpen && selectedItem.experiment_group_id ? (
+                      <ExperimentComparison
+                        experimentGroupId={selectedItem.experiment_group_id}
+                      />
                     ) : null}
 
                     <CampaignTabs
