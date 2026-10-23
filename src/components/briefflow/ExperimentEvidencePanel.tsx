@@ -11,6 +11,7 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { ExperimentHistoryPanel } from "./ExperimentHistoryPanel";
+import { ExperimentHistoricalImport } from "./ExperimentHistoricalImport";
 import {
   buildExperimentCsvTemplate,
   parseExperimentCsv,
@@ -244,6 +245,11 @@ export function ExperimentEvidencePanel({
 
   return (
     <div className="space-y-4">
+      <ExperimentHistoricalImport
+        variants={variants}
+        onMetricsImported={onMetricsImported}
+      />
+
       <section className="rounded-2xl border border-border-subtle bg-surface-2/60 p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
