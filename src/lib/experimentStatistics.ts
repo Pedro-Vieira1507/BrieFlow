@@ -8,10 +8,7 @@ export interface ExperimentMetricSnapshot {
 }
 
 export type EvidenceStatus =
-  | "invalid"
-  | "insufficient"
-  | "inconclusive"
-  | "significant";
+  "invalid" | "insufficient" | "inconclusive" | "significant";
 
 export type ExperimentDataQualitySeverity = "warning" | "blocking";
 
@@ -70,9 +67,7 @@ function clamp(value: number, min: number, max: number): number {
 
 function isValidCount(value: number | undefined): value is number {
   return (
-    Number.isFinite(value) &&
-    Number.isInteger(value) &&
-    Number(value) >= 0
+    Number.isFinite(value) && Number.isInteger(value) && Number(value) >= 0
   );
 }
 
