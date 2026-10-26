@@ -393,7 +393,9 @@ export function ExperimentEvidencePanel({
                   className="flex gap-2 text-[11px] leading-5 text-fg-tertiary"
                 >
                   <span className="shrink-0 font-semibold text-fg-primary">
-                    {issue.severity === "blocking" ? "Bloqueia teste" : "Revisar"}
+                    {issue.severity === "blocking"
+                      ? "Bloqueia teste"
+                      : "Revisar"}
                   </span>
                   <span>{issue.message}</span>
                 </div>

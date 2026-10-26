@@ -69,7 +69,11 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 function isValidCount(value: number | undefined): value is number {
-  return Number.isFinite(value) && Number.isInteger(value) && Number(value) >= 0;
+  return (
+    Number.isFinite(value) &&
+    Number.isInteger(value) &&
+    Number(value) >= 0
+  );
 }
 
 function normalizeCount(value: number | undefined): number {
