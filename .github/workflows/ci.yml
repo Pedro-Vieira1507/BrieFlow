@@ -7,7 +7,7 @@ on:
   pull_request:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -26,18 +26,6 @@ jobs:
       - name: Use npm 11
         run: npm install --global npm@11
       - run: npm ci --ignore-scripts
-      - name: Finalize patched dependency and formatting
-        if: github.event_name == 'push' && github.ref == 'refs/heads/production/creative-studio'
-        run: |
-          npm install zod@4.6.7 --package-lock-only --ignore-scripts --save-exact
-          npx prettier src/lib/experimentStatistics.ts --write
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add package.json package-lock.json src/lib/experimentStatistics.ts
-          if ! git diff --cached --quiet; then
-            git commit -m "security: upgrade zod and finalize experiment evidence"
-            git push origin HEAD:production/creative-studio
-          fi
       - run: npm run format:check
       - run: npm run lint
       - run: npm run typecheck
