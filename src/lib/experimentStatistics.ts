@@ -7,7 +7,23 @@ export interface ExperimentMetricSnapshot {
   revenue?: number;
 }
 
-export type EvidenceStatus = "insufficient" | "inconclusive" | "significant";
+export type EvidenceStatus =
+  | "invalid"
+  | "insufficient"
+  | "inconclusive"
+  | "significant";
+
+export type ExperimentDataQualitySeverity = "warning" | "blocking";
+
+export interface ExperimentDataQualityIssue {
+  code:
+    | "clicks_exceed_impressions"
+    | "conversions_exceed_impressions"
+    | "conversions_exceed_clicks";
+  variant: ExperimentVariantLabel;
+  severity: ExperimentDataQualitySeverity;
+  message: string;
+}
 
 export interface ProportionEvidence {
   label: string;
@@ -25,12 +41,17 @@ export interface ProportionEvidence {
   targetPerVariant: number | null;
   additionalA: number | null;
   additionalB: number | null;
+  valid: boolean;
+  invalidReason: string | null;
+  invalidVariants: ExperimentVariantLabel[];
 }
 
 export interface ExperimentEvidenceSummary {
   conversion: ProportionEvidence;
   ctr: ProportionEvidence;
+  dataQualityIssues: ExperimentDataQualityIssue[];
   recommendation:
+    | "invalid_data"
     | "collect_more_data"
     | "conversion_inconclusive"
     | "ctr_only_signal"
@@ -47,9 +68,12 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
+function isValidCount(value: number | undefined): value is number {
+  return Number.isFinite(value) && Number.isInteger(value) && Number(value) >= 0;
+}
+
 function normalizeCount(value: number | undefined): number {
-  if (!Number.isFinite(value) || !value || value < 0) return 0;
-  return Math.floor(value);
+  return isValidCount(value) ? Number(value) : 0;
 }
 
 function erf(value: number): number {
@@ -84,6 +108,33 @@ function estimateRequiredPerVariant(pA: number, pB: number): number | null {
   );
 }
 
+function invalidEvidence(input: {
+  label: string;
+  invalidVariants: ExperimentVariantLabel[];
+  invalidReason: string;
+}): ProportionEvidence {
+  return {
+    label: input.label,
+    aRate: 0,
+    bRate: 0,
+    deltaPercentagePoints: 0,
+    relativeLiftPercent: null,
+    pValue: null,
+    ciLowPercentagePoints: null,
+    ciHighPercentagePoints: null,
+    status: "invalid",
+    leader: null,
+    significantWinner: null,
+    sampleReady: false,
+    targetPerVariant: null,
+    additionalA: null,
+    additionalB: null,
+    valid: false,
+    invalidReason: input.invalidReason,
+    invalidVariants: input.invalidVariants,
+  };
+}
+
 export function compareExperimentProportions(input: {
   label: string;
   aSuccesses: number;
@@ -91,10 +142,38 @@ export function compareExperimentProportions(input: {
   bSuccesses: number;
   bTotal: number;
 }): ProportionEvidence {
+  const invalidCountVariants: ExperimentVariantLabel[] = [];
+  if (!isValidCount(input.aSuccesses) || !isValidCount(input.aTotal)) {
+    invalidCountVariants.push("A");
+  }
+  if (!isValidCount(input.bSuccesses) || !isValidCount(input.bTotal)) {
+    invalidCountVariants.push("B");
+  }
+  if (invalidCountVariants.length > 0) {
+    return invalidEvidence({
+      label: input.label,
+      invalidVariants: invalidCountVariants,
+      invalidReason:
+        "Há contagens inválidas. Use apenas números inteiros e não negativos para eventos e totais.",
+    });
+  }
+
   const aTotal = normalizeCount(input.aTotal);
   const bTotal = normalizeCount(input.bTotal);
-  const aSuccesses = Math.min(aTotal, normalizeCount(input.aSuccesses));
-  const bSuccesses = Math.min(bTotal, normalizeCount(input.bSuccesses));
+  const aSuccesses = normalizeCount(input.aSuccesses);
+  const bSuccesses = normalizeCount(input.bSuccesses);
+  const overTotalVariants: ExperimentVariantLabel[] = [];
+  if (aSuccesses > aTotal) overTotalVariants.push("A");
+  if (bSuccesses > bTotal) overTotalVariants.push("B");
+  if (overTotalVariants.length > 0) {
+    return invalidEvidence({
+      label: input.label,
+      invalidVariants: overTotalVariants,
+      invalidReason:
+        "Eventos excedem o total usado como denominador. O BrieFlow não trunca esses valores; revise atribuição e granularidade antes de calcular significância.",
+    });
+  }
+
   const pA = aTotal > 0 ? aSuccesses / aTotal : 0;
   const pB = bTotal > 0 ? bSuccesses / bTotal : 0;
   const delta = pB - pA;
@@ -162,7 +241,49 @@ export function compareExperimentProportions(input: {
       targetPerVariant === null ? null : Math.max(0, targetPerVariant - aTotal),
     additionalB:
       targetPerVariant === null ? null : Math.max(0, targetPerVariant - bTotal),
+    valid: true,
+    invalidReason: null,
+    invalidVariants: [],
   };
+}
+
+function collectDataQualityIssues(
+  a: ExperimentMetricSnapshot,
+  b: ExperimentMetricSnapshot,
+): ExperimentDataQualityIssue[] {
+  const issues: ExperimentDataQualityIssue[] = [];
+  const rows: Array<[ExperimentVariantLabel, ExperimentMetricSnapshot]> = [
+    ["A", a],
+    ["B", b],
+  ];
+
+  for (const [variant, metrics] of rows) {
+    if (metrics.clicks > metrics.impressions) {
+      issues.push({
+        code: "clicks_exceed_impressions",
+        variant,
+        severity: "blocking",
+        message: `Variação ${variant}: cliques excedem impressões. O CTR não pode ser testado como proporção até revisar a origem dos dados.`,
+      });
+    }
+    if (metrics.conversions > metrics.impressions) {
+      issues.push({
+        code: "conversions_exceed_impressions",
+        variant,
+        severity: "blocking",
+        message: `Variação ${variant}: conversões excedem impressões. A significância de conversão por impressão foi desativada para evitar um resultado artificial.`,
+      });
+    } else if (metrics.conversions > metrics.clicks) {
+      issues.push({
+        code: "conversions_exceed_clicks",
+        variant,
+        severity: "warning",
+        message: `Variação ${variant}: conversões excedem cliques. Isso pode ocorrer com atribuição pós-visualização ou múltiplos eventos; confirme se as conversões são eventos únicos antes de interpretar o teste.`,
+      });
+    }
+  }
+
+  return issues;
 }
 
 export function analyzeExperimentEvidence(
@@ -171,6 +292,7 @@ export function analyzeExperimentEvidence(
 ): ExperimentEvidenceSummary {
   const a = aMetrics ?? { impressions: 0, clicks: 0, conversions: 0 };
   const b = bMetrics ?? { impressions: 0, clicks: 0, conversions: 0 };
+  const dataQualityIssues = collectDataQualityIssues(a, b);
 
   const conversion = compareExperimentProportions({
     label: "Conversão por impressão",
@@ -187,10 +309,20 @@ export function analyzeExperimentEvidence(
     bTotal: b.impressions,
   });
 
+  if (!conversion.valid) {
+    return {
+      conversion,
+      ctr,
+      dataQualityIssues,
+      recommendation: "invalid_data",
+      suggestedWinner: null,
+    };
+  }
   if (conversion.status === "significant") {
     return {
       conversion,
       ctr,
+      dataQualityIssues,
       recommendation: "significant_conversion",
       suggestedWinner: conversion.significantWinner,
     };
@@ -199,6 +331,7 @@ export function analyzeExperimentEvidence(
     return {
       conversion,
       ctr,
+      dataQualityIssues,
       recommendation: "collect_more_data",
       suggestedWinner: null,
     };
@@ -207,6 +340,7 @@ export function analyzeExperimentEvidence(
     return {
       conversion,
       ctr,
+      dataQualityIssues,
       recommendation: "ctr_only_signal",
       suggestedWinner: null,
     };
@@ -214,6 +348,7 @@ export function analyzeExperimentEvidence(
   return {
     conversion,
     ctr,
+    dataQualityIssues,
     recommendation: "conversion_inconclusive",
     suggestedWinner: null,
   };

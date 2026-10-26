@@ -56,6 +56,7 @@ test("two-proportion evidence identifies a strong conversion lift", () => {
     bTotal: 2000,
   });
 
+  assert.equal(result.valid, true);
   assert.equal(result.sampleReady, true);
   assert.equal(result.status, "significant");
   assert.equal(result.significantWinner, "B");
@@ -77,6 +78,59 @@ test("small experiments stay explicitly insufficient", () => {
   assert.equal(result.significantWinner, null);
 });
 
+test("successes above the denominator are invalid instead of silently clamped", () => {
+  const result = compareExperimentProportions({
+    label: "Conversão",
+    aSuccesses: 120,
+    aTotal: 100,
+    bSuccesses: 10,
+    bTotal: 100,
+  });
+
+  assert.equal(result.valid, false);
+  assert.equal(result.status, "invalid");
+  assert.equal(result.pValue, null);
+  assert.equal(result.significantWinner, null);
+  assert.deepEqual(result.invalidVariants, ["A"]);
+  assert.match(result.invalidReason ?? "", /não trunca/i);
+});
+
+test("conversion counts above impressions block winner recommendations", () => {
+  const summary = analyzeExperimentEvidence(
+    { impressions: 100, clicks: 40, conversions: 120 },
+    { impressions: 100, clicks: 50, conversions: 20 },
+  );
+
+  assert.equal(summary.conversion.status, "invalid");
+  assert.equal(summary.recommendation, "invalid_data");
+  assert.equal(summary.suggestedWinner, null);
+  assert.ok(
+    summary.dataQualityIssues.some(
+      (issue) =>
+        issue.code === "conversions_exceed_impressions" &&
+        issue.variant === "A" &&
+        issue.severity === "blocking",
+    ),
+  );
+});
+
+test("attribution-shaped conversions above clicks warn without fabricating a funnel error", () => {
+  const summary = analyzeExperimentEvidence(
+    { impressions: 5000, clicks: 100, conversions: 130 },
+    { impressions: 5000, clicks: 120, conversions: 140 },
+  );
+
+  assert.equal(summary.conversion.valid, true);
+  assert.ok(
+    summary.dataQualityIssues.some(
+      (issue) =>
+        issue.code === "conversions_exceed_clicks" &&
+        issue.variant === "A" &&
+        issue.severity === "warning",
+    ),
+  );
+});
+
 test("CTR signal alone never becomes a suggested business winner", () => {
   const summary = analyzeExperimentEvidence(
     { impressions: 5000, clicks: 200, conversions: 100 },
@@ -87,6 +141,21 @@ test("CTR signal alone never becomes a suggested business winner", () => {
   assert.equal(summary.ctr.status, "significant");
   assert.equal(summary.recommendation, "ctr_only_signal");
   assert.equal(summary.suggestedWinner, null);
+});
+
+test("evidence UI surfaces data-quality blocking instead of hiding it", () => {
+  const source = readFileSync(
+    new URL(
+      "../src/components/briefflow/ExperimentEvidencePanel.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(source, /Dados incompatíveis com a análise estatística/);
+  assert.match(source, /Qualidade dos dados/);
+  assert.match(source, /evidence\.status === "invalid"/);
+  assert.match(source, /Bloqueia teste/);
 });
 
 test("A/B comparison wires the evidence panel to imported metrics", () => {

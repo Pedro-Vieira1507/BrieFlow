@@ -57,6 +57,7 @@ function formatDelta(value: number): string {
 }
 
 function EvidenceRow({ evidence }: { evidence: ProportionEvidence }) {
+  const invalid = evidence.status === "invalid";
   return (
     <div className="grid gap-2 rounded-xl border border-border-subtle bg-surface-1 p-3 sm:grid-cols-[1.1fr_repeat(4,minmax(0,1fr))] sm:items-center">
       <div>
@@ -66,27 +67,29 @@ function EvidenceRow({ evidence }: { evidence: ProportionEvidence }) {
         <div className="mt-1 text-[10px] text-fg-muted">
           {evidence.status === "significant"
             ? "Diferença significativa a 95%"
-            : evidence.status === "insufficient"
-              ? "Amostra ainda insuficiente"
-              : "Diferença ainda inconclusiva"}
+            : evidence.status === "invalid"
+              ? "Dados incompatíveis com teste de proporção"
+              : evidence.status === "insufficient"
+                ? "Amostra ainda insuficiente"
+                : "Diferença ainda inconclusiva"}
         </div>
       </div>
       <div>
         <div className="text-[10px] font-semibold text-fg-muted">A</div>
         <div className="mt-0.5 text-xs font-semibold tabular-nums text-fg-primary">
-          {percent.format(evidence.aRate)}%
+          {invalid ? "—" : `${percent.format(evidence.aRate)}%`}
         </div>
       </div>
       <div>
         <div className="text-[10px] font-semibold text-fg-muted">B</div>
         <div className="mt-0.5 text-xs font-semibold tabular-nums text-fg-primary">
-          {percent.format(evidence.bRate)}%
+          {invalid ? "—" : `${percent.format(evidence.bRate)}%`}
         </div>
       </div>
       <div>
         <div className="text-[10px] font-semibold text-fg-muted">Δ B − A</div>
         <div className="mt-0.5 text-xs font-semibold tabular-nums text-fg-primary">
-          {formatDelta(evidence.deltaPercentagePoints)}
+          {invalid ? "—" : formatDelta(evidence.deltaPercentagePoints)}
         </div>
       </div>
       <div>
@@ -215,6 +218,12 @@ export function ExperimentEvidencePanel({
 
   const recommendation = (() => {
     switch (evidence.recommendation) {
+      case "invalid_data":
+        return {
+          icon: AlertTriangle,
+          title: "Dados incompatíveis com a análise estatística",
+          body: "Há uma relação impossível para um teste de proporção, como eventos acima do denominador. O BrieFlow mantém os dados originais, mas bloqueia p-valor, intervalo de confiança e sugestão de vencedora até a atribuição ser revisada.",
+        };
       case "significant_conversion":
         return {
           icon: CheckCircle2,
@@ -370,6 +379,28 @@ export function ExperimentEvidencePanel({
             </p>
           </div>
         </div>
+
+        {evidence.dataQualityIssues.length > 0 ? (
+          <div className="mt-4 rounded-xl border border-border-strong bg-surface-1 p-3">
+            <div className="flex items-center gap-2 text-xs font-semibold text-fg-primary">
+              <AlertTriangle className="size-4 text-brand" />
+              Qualidade dos dados
+            </div>
+            <div className="mt-2 space-y-2">
+              {evidence.dataQualityIssues.map((issue) => (
+                <div
+                  key={`${issue.code}-${issue.variant}`}
+                  className="flex gap-2 text-[11px] leading-5 text-fg-tertiary"
+                >
+                  <span className="shrink-0 font-semibold text-fg-primary">
+                    {issue.severity === "blocking" ? "Bloqueia teste" : "Revisar"}
+                  </span>
+                  <span>{issue.message}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
 
         <div className="mt-4 space-y-2">
           <EvidenceRow evidence={evidence.conversion} />
