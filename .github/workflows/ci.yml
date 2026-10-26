@@ -26,6 +26,11 @@ jobs:
       - name: Use npm 11
         run: npm install --global npm@11
       - run: npm ci --ignore-scripts
+      - name: Show Prettier diff for experiment statistics
+        run: |
+          cp src/lib/experimentStatistics.ts /tmp/experimentStatistics.before.ts
+          npx prettier src/lib/experimentStatistics.ts --write
+          diff -u /tmp/experimentStatistics.before.ts src/lib/experimentStatistics.ts || true
       - run: npm run format:check
       - run: npm run lint
       - run: npm run typecheck
