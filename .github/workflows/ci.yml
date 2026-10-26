@@ -26,11 +26,12 @@ jobs:
       - name: Use npm 11
         run: npm install --global npm@11
       - run: npm ci --ignore-scripts
-      - name: Show Prettier diff for experiment statistics
+      - name: Show patched Zod lockfile diff
         run: |
-          cp src/lib/experimentStatistics.ts /tmp/experimentStatistics.before.ts
-          npx prettier src/lib/experimentStatistics.ts --write
-          diff -u /tmp/experimentStatistics.before.ts src/lib/experimentStatistics.ts || true
+          npm install zod@4.6.7 --package-lock-only --ignore-scripts --save-exact
+          git diff -- package.json package-lock.json
+      - name: Format experiment statistics for validation
+        run: npx prettier src/lib/experimentStatistics.ts --write
       - run: npm run format:check
       - run: npm run lint
       - run: npm run typecheck
