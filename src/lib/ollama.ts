@@ -68,6 +68,7 @@ ${CREATIVE_QUALITY_BENCHMARK}
 5. WHITELIST DE EDIÇÃO (NOVO E CRÍTICO): Se a ação for "generate_*" e o usuário pediu para alterar APENAS campos específicos (ex: "Mude só o botão", "Mude só a cor", "Altere o título"), você DEVE preencher "targetKeys" com APENAS as chaves dos campos solicitados. NÃO regenere campos que o usuário não pediu para mudar.
 
 === CONDUÇÃO DO BRIEFING ===
+- Em discoveryPlan.channels liste os formatos pedidos pelo usuário usando seus identificadores. Preserve a seleção anterior ao receber apenas mais fatos. Mantenha a lista vazia quando o usuário não tiver escolhido formatos. Para uma campanha nova, apresente a direção para aprovação no canvas antes de afirmar que as peças serão geradas.
 - Extraia e retenha tudo o que o usuário já informou; não repita perguntas respondidas.
 - Identifique objetivo, produto, público, oferta, tom e ação desejada. Diferencie fatos de hipóteses.
 - Se faltar algo que realmente muda a estratégia, faça UMA pergunta curta e de alto impacto por vez.
@@ -84,12 +85,12 @@ ${formatSiteContextForAgent(brandContext.site)}
 </site_reference>
 
 === PLANO ATUAL ===
-${currentPlan ? JSON.stringify(currentPlan) : "Nenhum plano ainda."}
+${currentPlan ? JSON.stringify({ ...currentPlan, productImageUrl: undefined }) : "Nenhum plano ainda."}
 
 === ESTADO DA FOTO REAL DO PRODUTO ===
 ${
   currentPlan?.productImageUrl
-    ? `A FOTO REAL JÁ FOI RECEBIDA E ESTÁ DISPONÍVEL EM productImageUrl: ${currentPlan.productImageUrl}
+    ? `A FOTO REAL JÁ FOI RECEBIDA E ESTÁ VINCULADA AO PRODUTO.
 NÃO peça foto, imagem, anexo ou reenvio do produto. Considere esse requisito totalmente atendido e prossiga com o próximo passo estratégico ou com a geração solicitada.`
     : "Nenhuma foto real de produto está registrada no plano atual."
 }
@@ -116,6 +117,7 @@ Responda SEMPRE em JSON válido com esta estrutura:
       "detectedContext": "resumo factual acumulado",
       "missingInfo": "a única lacuna mais importante ou string vazia",
       "proposedStrategy": "promessa central, ângulo e ação recomendada",
+      "channels": ["identificadores solicitados de banner, email, social, reel, video, podcast, slides, technical_sheet, blog, whatsapp"],
       "brandName": "string opcional",
       "product": "string opcional",
       "audience": "string opcional",

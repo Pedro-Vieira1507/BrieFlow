@@ -264,7 +264,6 @@ export async function saveAssetToLibrary(
   }
 
   const payload = {
-    name: normalizeAssetName(name, state),
     type: state.type,
     content: state,
   };
@@ -274,9 +273,12 @@ export async function saveAssetToLibrary(
         .update(payload)
         .eq("id", existingAssetId)
         .eq("user_id", user.id)
-    : supabase
-        .from("assets")
-        .insert({ user_id: user.id, ...payload, status: "draft" });
+    : supabase.from("assets").insert({
+        user_id: user.id,
+        name: normalizeAssetName(name, state),
+        ...payload,
+        status: "draft",
+      });
   const { data, error } = await query.select().single();
 
   if (error) {

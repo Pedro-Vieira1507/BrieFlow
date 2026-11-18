@@ -440,6 +440,7 @@ export function EmailPreview({
           {cta && (
             <div className="mt-8 flex justify-center">
               <button
+                data-email-cta
                 className="px-10 py-4 font-bold text-[15px] text-white shadow-xl hover:scale-105 active:scale-95 transition-transform"
                 style={{ backgroundColor: themeColor, borderRadius: "0" }}
               >
@@ -565,6 +566,7 @@ export function EmailPreview({
 
           {cta && (
             <button
+              data-email-cta
               className="mt-4 px-8 py-4 rounded-md font-bold text-sm text-white shadow-md hover:bg-opacity-90 transition-colors w-full active:scale-[0.98]"
               style={{ backgroundColor: themeColor }}
             >
@@ -669,6 +671,7 @@ export function EmailPreview({
 
           {cta && (
             <button
+              data-email-cta
               className="px-8 py-4 rounded-xl font-bold text-[14px] shadow-2xl hover:scale-105 active:scale-95 transition-transform w-full"
               style={{ color: boxColor, backgroundColor: themeColor }}
             >
@@ -780,6 +783,7 @@ export function EmailPreview({
             {cta && (
               <div className="mt-8 text-center">
                 <button
+                  data-email-cta
                   className="px-10 py-4 rounded-full font-bold text-[15px] text-white shadow-xl hover:scale-105 active:scale-95 transition-transform"
                   style={{
                     backgroundColor: themeColor,
@@ -903,6 +907,7 @@ export function EmailPreview({
 
           {cta && (
             <button
+              data-email-cta
               className="px-8 py-4 rounded-full font-bold text-sm text-white shadow-lg hover:scale-105 transition-transform w-auto active:scale-95"
               style={{
                 backgroundColor: themeColor,
@@ -1024,6 +1029,7 @@ export function EmailPreview({
 
           {cta && (
             <button
+              data-email-cta
               className="mt-8 px-12 py-4 rounded-xl font-bold text-sm text-white shadow-xl hover:scale-105 active:scale-95 transition-transform"
               style={{ backgroundColor: themeColor }}
             >
@@ -1129,6 +1135,7 @@ export function EmailPreview({
 
         {cta && (
           <button
+            data-email-cta
             className="mt-8 px-12 py-5 rounded-2xl font-bold text-sm text-white shadow-xl hover:scale-105 active:scale-95 transition-all w-full max-w-sm"
             style={{
               backgroundColor: themeColor,

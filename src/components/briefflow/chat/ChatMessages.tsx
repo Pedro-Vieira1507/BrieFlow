@@ -29,7 +29,8 @@ export function ChatMessages({
 }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const [textIdx, setTextIdx] = useState(0);
-  const { generatingLabel } = useBriefflowStore();
+  const { generatingLabel, activeLibraryAssetId, builder } =
+    useBriefflowStore();
 
   const busy = loading || scraping;
 
@@ -57,7 +58,15 @@ export function ChatMessages({
 
   return (
     <div className="chat-scroll flex-1 space-y-5 overflow-y-auto scroll-smooth px-4 py-5 sm:px-5 sm:py-6">
-      {messages.length === 0 && <ChatEmptyState onPick={onPickSuggestion} />}
+      {messages.length === 0 &&
+        (activeLibraryAssetId || builder.type === "campaign" ? (
+          <p className="rounded-xl bg-surface-2 p-4 text-sm text-fg-secondary">
+            Campanha aberta no canvas. Escolha uma peça para revisar ou descreva
+            o ajuste que deseja fazer.
+          </p>
+        ) : (
+          <ChatEmptyState onPick={onPickSuggestion} />
+        ))}
 
       {messages.map((m) => (
         <ChatMessage key={m.id} message={m} />

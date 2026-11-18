@@ -60,6 +60,7 @@ export function reviewEditorialContent(
   const title = document?.title || content.title || content.hook || "";
   const visibleText = [
     title,
+    content.brandName,
     content.subtitle,
     content.body,
     content.caption,
@@ -123,7 +124,7 @@ export function reviewEditorialContent(
   const quantities = (text: string) =>
     [
       ...text.matchAll(
-        /(?:R\$\s*\d[\d.,]*|\d[\d.,]*\s*(?:%|rpm|[kKmM]?[wW]|[mM]?[lL]|[kK]?[gG]|[mM]?[mM]|[vV]|°\s*[cC]))(?![\p{L}\d])/gu,
+        /(?:R\$\s*\d+(?:[.,]\d+)*|\d+(?:[.,]\d+)*\s*(?:%|rpm|[kKmM]?[wW]|[mM]?[lL]|[kK]?[gG]|[mM]?[mM]|[vV]|°\s*[cC]))(?![\p{L}\d])/gu,
       ),
     ].map((match) => normalize(match[0]).replace(/\s/g, ""));
   const evidence = [
@@ -133,6 +134,7 @@ export function reviewEditorialContent(
     brief.productDescription,
     brief.offer,
     brief.context,
+    brief.confirmedFacts,
     brief.site?.title,
     brief.site?.description,
     ...(brief.site?.headings || []),

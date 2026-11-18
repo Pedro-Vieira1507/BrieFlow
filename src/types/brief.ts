@@ -87,6 +87,7 @@ export interface MarketingBrief extends ProductReference {
   objective?: string | null;
   /** Contexto literal capturado do cliente (exigências palavra por palavra). */
   context?: string | null;
+  confirmedFacts?: string | null;
   /** Estratégia proposta na fase de discovery. */
   strategy?: string | null;
   /** O que ainda falta descobrir. */
@@ -202,6 +203,7 @@ export function toMarketingBrief(input: {
       "Sua Marca",
     objective: clean(plan?.objective),
     context: clean(plan?.detectedContext),
+    confirmedFacts: clean(plan?.confirmedFacts),
     strategy: clean(plan?.proposedStrategy),
     missingInfo: clean(plan?.missingInfo),
     audience: clean(plan?.audience) ?? clean(brandContext.persona),

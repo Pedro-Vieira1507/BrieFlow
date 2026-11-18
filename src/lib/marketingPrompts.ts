@@ -169,19 +169,19 @@ const ADVANCED_FORMAT_PLAYBOOKS: Record<
   string
 > = {
   reel: `FORMATO — REEL VERTICAL:
-- Construa um roteiro de 15–60 segundos em 4–8 cenas, com gancho nos primeiros 2 segundos.
+- Respeite a duração solicitada no briefing. Sem duração explícita, construa um roteiro de 15–60 segundos em 4–8 cenas, com gancho nos primeiros 2 segundos.
 - Cada seção representa uma cena. timing contém o intervalo; body contém a locução; items contém textos curtos em tela; visualDirection descreve enquadramento, ação e transição.
 - O roteiro deve ser filmável em 9:16 e manter uma única ideia. Não invente trends, depoimentos ou resultados.`,
   video: `FORMATO — VÍDEO:
-- Construa um roteiro de 45–180 segundos com abertura, desenvolvimento, demonstração/prova disponível e fechamento.
+- Use a duração solicitada no briefing. Na ausência dela, construa um roteiro de 45–180 segundos com abertura, desenvolvimento, demonstração/prova disponível e fechamento.
 - Cada seção representa uma cena ou sequência. Especifique timing, locução em body, elementos em tela em items e direção executável em visualDirection.
 - Inclua notas de produção somente quando forem úteis; não prometa imagens, falas ou dados que não estejam no briefing.`,
   podcast: `FORMATO — PODCAST:
-- Estruture pauta e roteiro para 8–25 minutos, com abertura, blocos temáticos e encerramento.
+- Siga a duração solicitada no briefing. Na ausência dela, planeje 8–25 minutos, com abertura, blocos temáticos e encerramento.
 - Cada seção representa um bloco. body contém o roteiro do host; items contém perguntas ou talking points; timing traz a duração; speakerNotes orienta ritmo e transições.
 - Preserve tom conversacional, evite monólogo publicitário e não invente convidados, citações ou pesquisas.`,
   slides: `FORMATO — APRESENTAÇÃO EM SLIDES:
-- Crie de 6 a 15 slides com arco narrativo: contexto, tensão, ideia, desenvolvimento, evidência disponível e próximo passo.
+- Siga a quantidade de slides pedida, incluindo capa e encerramento nesse total. Se a quantidade não foi indicada, crie de 6 a 15 slides com arco narrativo: contexto, tensão, ideia, desenvolvimento, evidência disponível e próximo passo.
 - Cada seção representa um slide. title é a mensagem do slide; body é o texto essencial; items são bullets; visualDirection orienta o layout; speakerNotes contém a fala do apresentador.
 - Um argumento por slide, pouca densidade e nenhuma estatística sem fonte no briefing.`,
   technical_sheet: `FORMATO — FICHA TÉCNICA:
@@ -194,7 +194,7 @@ const ADVANCED_FORMAT_PLAYBOOKS: Record<
 - keywords contém termos realmente ligados à intenção de busca. Não invente volume, posição, estudos ou citações.`,
   whatsapp: `FORMATO — WHATSAPP:
 - Gere uma mensagem curta, pessoal e contextual, com uma única ação e leitura confortável no celular.
-- Use de 1 a 3 seções no máximo. body contém o texto pronto; items somente quando uma lista de até 4 pontos for indispensável.
+- Use uma única seção. body contém a mensagem completa pronta para enviar, incluindo a chamada para ação; items somente quando uma lista de até 4 pontos for indispensável.
 - Não use hashtags, spam, falsa urgência nem linguagem de disparo em massa.`,
 };
 
@@ -275,6 +275,9 @@ function brandSection(brief: MarketingBrief): string {
     brief.strategy
       ? `Estratégia atual: ${clipPromptValue(brief.strategy, 1200)}`
       : null,
+    brief.confirmedFacts
+      ? `Fatos revisados pelo usuário: ${clipPromptValue(brief.confirmedFacts, 1800)}`
+      : "",
     brief.context
       ? `Contexto confirmado: ${clipPromptValue(brief.context, 1800)}`
       : null,

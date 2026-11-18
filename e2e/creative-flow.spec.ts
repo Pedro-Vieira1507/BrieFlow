@@ -73,6 +73,25 @@ test("briefing → direção → campanha → biblioteca → cópia", async ({
     page.getByText("Campanha Atlas", { exact: true }).first(),
   ).toBeVisible();
 
+  await page.getByRole("button", { name: "Renomear campanha" }).click();
+  await page
+    .getByLabel("Nome da campanha", { exact: true })
+    .fill("Atlas de novembro");
+  await page.getByRole("button", { name: "Salvar novo nome" }).click();
+  await expect.poll(() => backend.assets[0]?.name).toBe("Atlas de novembro");
+  await page.reload();
+  await page.getByRole("button", { name: "Abrir menu do perfil" }).click();
+  await page.getByRole("menuitem", { name: /Biblioteca/i }).click();
+  await page.getByRole("button", { name: "Continuar original" }).click();
+  await expect(page.getByText(/Campanha aberta no canvas/)).toBeVisible();
+  await page.getByRole("button", { name: "Salvar na biblioteca" }).click();
+  await expect(
+    page.getByText("Salvo na biblioteca com sucesso!", { exact: true }).last(),
+  ).toBeVisible();
+  expect(backend.assets[0]?.name).toBe("Atlas de novembro");
+  await page.getByRole("button", { name: "Abrir menu do perfil" }).click();
+  await page.getByRole("menuitem", { name: /Biblioteca/i }).click();
+  await expect(page.getByRole("heading", { name: "Biblioteca" })).toBeVisible();
   await page.getByRole("button", { name: "Criar cópia" }).click();
   await expect(
     page.getByText("Cópia carregada no Canvas", { exact: true }),

@@ -42,10 +42,10 @@ const session = {
 const tinyImage =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1200' height='675'%3E%3Crect width='1200' height='675' fill='%23111627'/%3E%3Ccircle cx='910' cy='340' r='180' fill='%236d5dfc' fill-opacity='.32'/%3E%3C/svg%3E";
 
-function discoveryResponse() {
+function discoveryResponse(action = "discovery_continue") {
   return {
     chat: "Briefing organizado. A campanha vai transformar perda de tempo procurando contexto em uma tensão concreta e convidar o público para uma demonstração.",
-    action: "discovery_continue",
+    action,
     targetKeys: ["all"],
     detectedContext: {
       brandName: "Atlas",
@@ -126,6 +126,21 @@ function materialResponse(action: string) {
     };
   }
 
+  if (action !== "social") {
+    return {
+      title: "Apresentação Atlas",
+      sections: [
+        {
+          title: "Apresentação do produto",
+          body: "Conheça o painel Atlas.",
+          visualDirection: "Plano aberto",
+          timing: "0–15 s",
+        },
+      ],
+      cta: "Ver demonstração",
+    };
+  }
+
   return {
     hook: "Sua equipe encontra o dado ou caça o dado?",
     body: "Quando cada decisão começa procurando contexto em lugares diferentes, o custo aparece antes mesmo da ação. O Painel Atlas organiza a leitura operacional para que gestores cheguem ao próximo passo com mais clareza. A ideia é simples: a informação precisa estar no fluxo da decisão, não espalhada ao redor dele.",
@@ -152,9 +167,14 @@ function json(route: Route, body: unknown, status = 200) {
 
 export async function installMockBackend(
   page: Page,
-  options: { dismissOnboarding?: boolean } = { dismissOnboarding: true },
+  options: {
+    dismissOnboarding?: boolean;
+    discoveryAction?: string;
+    imageUrl?: string;
+  } = {},
 ) {
   const assets: Array<Record<string, unknown>> = [];
+  const actions: string[] = [];
 
   await page.addInitScript(
     ({ authKey, authSession, dismissOnboarding, onboardingKey }) => {
@@ -206,8 +226,11 @@ export async function installMockBackend(
     if (url.pathname === "/functions/v1/ai-proxy") {
       const payload = (request.postDataJSON() ?? {}) as { action?: string };
       const action = payload.action ?? "discovery";
+      actions.push(action);
       const raw =
-        action === "discovery" ? discoveryResponse() : materialResponse(action);
+        action === "discovery"
+          ? discoveryResponse(options.discoveryAction)
+          : materialResponse(action);
       return json(route, {
         model: "brieflow-e2e",
         choices: [{ message: { content: JSON.stringify(raw) } }],
@@ -224,7 +247,7 @@ export async function installMockBackend(
 
     if (url.pathname === "/functions/v1/image-render") {
       return json(route, {
-        url: tinyImage,
+        url: options.imageUrl ?? tinyImage,
         path: "e2e/visual.svg",
         model: "mock-image",
         aspect_ratio: "16:9",
@@ -289,5 +312,5 @@ export async function installMockBackend(
     return json(route, {});
   });
 
-  return { assets };
+  return { assets, actions };
 }

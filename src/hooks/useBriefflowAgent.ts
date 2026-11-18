@@ -8,7 +8,6 @@ import {
   describeAiError,
 } from "@/hooks/useGenerateMaterials";
 import {
-  CORE_MATERIAL_TYPES,
   isMaterialType,
   toMarketingBrief,
   type MaterialType,
@@ -29,6 +28,10 @@ import type {
   BuilderState,
 } from "@/types/builder";
 import { analyzeImageWithVisionFn } from "@/lib/vision-api";
+import {
+  requestedMaterials,
+  selectedMaterials,
+} from "@/lib/campaignGeneration";
 import { mergeDetectedBriefContext } from "@/lib/discoveryContext";
 import { captureWorkspaceScope } from "@/lib/workspaceScope";
 import {
@@ -37,8 +40,6 @@ import {
 } from "@/lib/productImageContext";
 
 type CampaignChannel = MaterialType;
-
-const ALL_CHANNELS: CampaignChannel[] = [...CORE_MATERIAL_TYPES];
 
 const channelLabel = (channel: CampaignChannel) =>
   CONTENT_FORMATS[channel].shortLabel;
@@ -244,7 +245,11 @@ export function useBriefflowAgent() {
       if (!isCurrent()) return;
       const plan = discoveryPlanRef.current ?? builderRef.current.discoveryPlan;
 
-      const channels: CampaignChannel[] = only ? [only] : ALL_CHANNELS;
+      const channels = only ? [only] : selectedMaterials(plan?.channels);
+      if (!channels.length) {
+        toast.error("Selecione pelo menos um formato para gerar.");
+        return;
+      }
       const accountPlan = useCreditsStore.getState().plan;
       const blocked = channels.find(
         (channel) =>
@@ -300,7 +305,7 @@ export function useBriefflowAgent() {
         availableImageUrls: uniqueImages,
       });
 
-      if (!only) {
+      if (!only && builderRef.current.type !== "campaign") {
         patchCampaignAssets([]);
       }
 
@@ -958,46 +963,60 @@ Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo terri
           updateMessage(assistantId, { content: responseChat });
         }
 
-        const currentPhase = builderRef.current.type;
-        const inCampaignPhase = currentPhase === "campaign";
-
+        const inCampaignPhase = builderRef.current.type === "campaign";
+        const action = response.action || "discovery_continue";
+        const incoming =
+          response.builder.type === "discovery_plan"
+            ? response.builder.discoveryPlan
+            : undefined;
+        const single = action.startsWith("generate_")
+          ? action.slice("generate_".length)
+          : "";
+        const suggested = Array.isArray(incoming?.channels)
+          ? incoming.channels.filter(isMaterialType)
+          : [];
+        const mentioned = requestedMaterials(text);
+        const channels = suggested.length
+          ? [...new Set(suggested)]
+          : mentioned.length
+            ? mentioned
+            : (requestPlan?.channels ??
+              (isMaterialType(single) ? [single] : undefined));
+        const plan = withAttachedProductImage(
+          mergeDetectedBriefContext(
+            {
+              ...requestPlan,
+              ...incoming,
+              channels,
+              confirmedFacts: requestPlan?.confirmedFacts,
+              detectedContext:
+                incoming?.detectedContext ?? requestPlan?.detectedContext ?? "",
+              missingInfo:
+                incoming?.missingInfo ?? requestPlan?.missingInfo ?? "",
+              proposedStrategy:
+                incoming?.proposedStrategy ??
+                requestPlan?.proposedStrategy ??
+                "",
+            },
+            response.detectedContext,
+          ),
+          liveImageAfterResponse,
+        );
+        discoveryPlanRef.current = plan;
         if (
-          response.builder.type === "discovery_plan" &&
-          response.builder.discoveryPlan
+          !inCampaignPhase &&
+          plan &&
+          (incoming || action.startsWith("generate_"))
         ) {
-          const discoveryPlan = response.builder.discoveryPlan;
-          discoveryPlanRef.current = withAttachedProductImage(
-            mergeDetectedBriefContext(
-              {
-                ...discoveryPlanRef.current,
-                ...builderRef.current.discoveryPlan,
-                ...discoveryPlan,
-              },
-              response.detectedContext,
-            ),
-            liveImageAfterResponse,
-          );
-          if (!inCampaignPhase) {
-            setBuilder({
-              type: "discovery_plan",
-              discoveryPlan: discoveryPlanRef.current,
-              productImageUrl:
-                liveImageAfterResponse ??
-                builderRef.current.productImageUrl ??
-                null,
-              productImages: liveImageAfterResponse
-                ? [liveImageAfterResponse]
-                : builderRef.current.productImages,
-            });
-          }
-        } else {
-          discoveryPlanRef.current = withAttachedProductImage(
-            mergeDetectedBriefContext(
-              discoveryPlanRef.current ?? builderRef.current.discoveryPlan,
-              response.detectedContext,
-            ),
-            liveImageAfterResponse,
-          );
+          setBuilder((previous) => ({
+            ...previous,
+            type: "discovery_plan",
+            discoveryPlan: plan,
+            productImageUrl: liveImageAfterResponse ?? previous.productImageUrl,
+            productImages: liveImageAfterResponse
+              ? [liveImageAfterResponse]
+              : previous.productImages,
+          }));
         }
 
         const extractedSku = discoveryPlanRef.current?.productSku;
@@ -1006,8 +1025,16 @@ Para e-mail e social: preserve a mesma promessa, os mesmos fatos e o mesmo terri
           if (!isCurrent()) return;
         }
 
-        const action = response.action || "discovery_continue";
         const targetKeys = response.targetKeys || ["all"];
+        if (!inCampaignPhase) {
+          if (action.startsWith("generate_") && !isHiddenAction) {
+            updateMessage(assistantId, {
+              content:
+                "Revise os dados e os formatos no canvas. Use Aprovar e gerar campanha para iniciar a produção.",
+            });
+          }
+          return;
+        }
 
         if (action === "generate_all") {
           await generateCampaignSafely(

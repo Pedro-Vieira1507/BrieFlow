@@ -1,5 +1,5 @@
-import { downloadBlob, sanitizeFilenamePart } from "./export-utils";
-import { formatStructuredContentText } from "./structuredContent";
+import { downloadBlob, sanitizeFilenamePart } from "./export-utils.ts";
+import { formatStructuredContentText } from "./structuredContent.ts";
 
 import type { StructuredContentDocument } from "../types/builder";
 
@@ -21,10 +21,10 @@ function exportBaseName(
   );
 }
 
-async function exportSlides(
+export async function buildSlideDeck(
   document: StructuredContentDocument,
   brandName?: string,
-): Promise<void> {
+): Promise<ArrayBuffer> {
   const { default: PptxGenJS } = await import("pptxgenjs");
   const pptx = new PptxGenJS();
   pptx.layout = "LAYOUT_WIDE";
@@ -37,66 +37,8 @@ async function exportSlides(
     bodyFontFace: "Aptos",
   };
 
-  const cover = pptx.addSlide();
-  cover.background = { color: INK };
-  cover.addShape(pptx.ShapeType.rect, {
-    x: 0,
-    y: 0,
-    w: 0.18,
-    h: 7.5,
-    fill: { color: BRAND_PURPLE },
-    line: { color: BRAND_PURPLE },
-  });
-  cover.addText(clean(brandName, 120) || "Apresentação comercial", {
-    x: 0.72,
-    y: 0.7,
-    w: 11.8,
-    h: 0.35,
-    color: "B7AECF",
-    fontFace: "Aptos",
-    fontSize: 12,
-    bold: true,
-    charSpacing: 1.8,
-    margin: 0,
-    breakLine: false,
-  });
-  cover.addText(clean(document.title, 220), {
-    x: 0.72,
-    y: 1.65,
-    w: 11.4,
-    h: 1.55,
-    color: "FFFFFF",
-    fontFace: "Aptos Display",
-    fontSize: 34,
-    bold: true,
-    margin: 0,
-    valign: "middle",
-    breakLine: false,
-  });
-  const coverCopy = clean(document.subtitle) || clean(document.summary);
-  if (coverCopy) {
-    cover.addText(coverCopy, {
-      x: 0.75,
-      y: 3.45,
-      w: 10.5,
-      h: 1.2,
-      color: "D7D9E3",
-      fontFace: "Aptos",
-      fontSize: 18,
-      margin: 0,
-      breakLine: false,
-    });
-  }
-  cover.addText("Gerado e editável no BrieFlow", {
-    x: 0.75,
-    y: 6.75,
-    w: 4.8,
-    h: 0.25,
-    color: "8F95A7",
-    fontSize: 9,
-    margin: 0,
-    breakLine: false,
-  });
+  if (!document.sections.length)
+    throw new Error("Adicione um slide antes de exportar.");
 
   document.sections.forEach((section, index) => {
     const slide = pptx.addSlide();
@@ -183,59 +125,43 @@ async function exportSlides(
       );
     }
 
-    const footer = [
-      clean(section.timing, 80),
-      clean(section.visualDirection, 300),
-    ]
-      .filter(Boolean)
-      .join("  •  ");
-    if (footer) {
-      slide.addText(footer, {
-        x: 0.78,
-        y: 6.72,
-        w: 11.8,
-        h: 0.3,
-        color: MUTED,
-        fontSize: 9,
-        italic: true,
-        margin: 0,
-        breakLine: false,
-      });
-    }
-    if (clean(section.speakerNotes)) {
-      slide.addNotes(clean(section.speakerNotes));
+    const notes = [
+      index === 0
+        ? [document.title, document.subtitle, document.summary]
+            .map((value) => clean(value))
+            .filter(Boolean)
+            .join("\n")
+        : "",
+      clean(section.timing),
+      clean(section.visualDirection),
+      clean(section.speakerNotes),
+    ].filter(Boolean);
+    if (notes.length) slide.addNotes(notes.join("\n\n"));
+
+    if (index === document.sections.length - 1) {
+      const visible = [section.title, section.body, ...(section.items ?? [])]
+        .join(" ")
+        .toLocaleLowerCase("pt-BR");
+      const footer = [document.cta, document.disclaimer]
+        .map((value) => clean(value))
+        .filter(
+          (value) =>
+            value && !visible.includes(value.toLocaleLowerCase("pt-BR")),
+        )
+        .join("  •  ");
+      if (footer)
+        slide.addText(footer, {
+          x: 0.78,
+          y: 6.47,
+          w: 11.8,
+          h: 0.65,
+          color: MUTED,
+          fontSize: 13,
+          margin: 0,
+          fit: "shrink",
+        });
     }
   });
-
-  if (clean(document.cta) || clean(document.disclaimer)) {
-    const closing = pptx.addSlide();
-    closing.background = { color: INK };
-    closing.addText(clean(document.cta) || "Próximos passos", {
-      x: 0.85,
-      y: 2.1,
-      w: 11.6,
-      h: 1.1,
-      color: "FFFFFF",
-      fontSize: 32,
-      bold: true,
-      align: "center",
-      margin: 0,
-      breakLine: false,
-    });
-    if (clean(document.disclaimer)) {
-      closing.addText(clean(document.disclaimer), {
-        x: 1.25,
-        y: 4.8,
-        w: 10.8,
-        h: 0.8,
-        color: "A8ADBC",
-        fontSize: 10,
-        align: "center",
-        margin: 0,
-        breakLine: false,
-      });
-    }
-  }
 
   const raw = await pptx.write({
     outputType: "arraybuffer",
@@ -243,20 +169,14 @@ async function exportSlides(
   });
   if (!(raw instanceof ArrayBuffer))
     throw new Error("Não foi possível preparar a apresentação.");
-  const { normalizePptxPackage } = await import("./pptxPackage");
-  const file = await normalizePptxPackage(raw);
-  downloadBlob(
-    new Blob([file], {
-      type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-    }),
-    `${exportBaseName(document, brandName)}.pptx`,
-  );
+  const { normalizePptxPackage } = await import("./pptxPackage.ts");
+  return normalizePptxPackage(raw);
 }
 
-async function exportTechnicalSheetPdf(
+export async function buildTechnicalSheet(
   document: StructuredContentDocument,
   brandName?: string,
-): Promise<void> {
+): Promise<Blob> {
   const { jsPDF } = await import("jspdf");
   const pdf = new jsPDF({ unit: "mm", format: "a4", compress: true });
   const margin = 18;
@@ -290,9 +210,12 @@ async function exportTechnicalSheetPdf(
     pdf.setTextColor(...(options.color ?? [36, 39, 50]));
     const lines = pdf.splitTextToSize(text, contentWidth - indent);
     const lineHeight = size * 0.44;
-    ensureSpace(lines.length * lineHeight + (options.gap ?? 4));
-    pdf.text(lines, margin + indent, y);
-    y += lines.length * lineHeight + (options.gap ?? 4);
+    for (const line of lines) {
+      ensureSpace(lineHeight);
+      pdf.text(line, margin + indent, y);
+      y += lineHeight;
+    }
+    y += options.gap ?? 4;
   };
 
   pdf.setFillColor(23, 26, 36);
@@ -334,13 +257,6 @@ async function exportTechnicalSheetPdf(
     section.items?.forEach((item) =>
       write(`• ${clean(item, 800)}`, { indent: 3, gap: 2 }),
     );
-    if (clean(section.visualDirection)) {
-      write(`Aplicação/observação: ${clean(section.visualDirection)}`, {
-        size: 9,
-        color: [92, 98, 117],
-        gap: 3,
-      });
-    }
   });
 
   if (document.keywords?.length) {
@@ -374,7 +290,7 @@ async function exportTechnicalSheetPdf(
     });
   }
 
-  pdf.save(`${exportBaseName(document, brandName)}.pdf`);
+  return pdf.output("blob");
 }
 
 export function structuredExportLabel(
@@ -390,11 +306,20 @@ export async function exportStructuredDocument(
   brandName?: string,
 ): Promise<"PPTX" | "PDF" | "TXT"> {
   if (document.format === "slides") {
-    await exportSlides(document, brandName);
+    const file = await buildSlideDeck(document, brandName);
+    downloadBlob(
+      new Blob([file], {
+        type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      }),
+      `${exportBaseName(document, brandName)}.pptx`,
+    );
     return "PPTX";
   }
   if (document.format === "technical_sheet") {
-    await exportTechnicalSheetPdf(document, brandName);
+    downloadBlob(
+      await buildTechnicalSheet(document, brandName),
+      `${exportBaseName(document, brandName)}.pdf`,
+    );
     return "PDF";
   }
 

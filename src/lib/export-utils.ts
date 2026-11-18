@@ -90,20 +90,29 @@ function nextFrame(): Promise<void> {
   return new Promise((resolve) => requestAnimationFrame(() => resolve()));
 }
 
-async function waitForFonts(deadline: number): Promise<void> {
-  if (!("fonts" in document)) return;
-
-  const remaining = Math.max(0, deadline - Date.now());
-  await Promise.race([
-    document.fonts.ready.then(() => undefined),
-    new Promise<void>((_, reject) => {
-      window.setTimeout(
-        () =>
-          reject(new Error("Tempo esgotado ao carregar as fontes do design.")),
-        remaining,
-      );
-    }),
-  ]);
+export async function withExportDeadline<T>(
+  task: Promise<T>,
+  timeoutMs = 20_000,
+): Promise<T> {
+  let timeout: number | undefined;
+  try {
+    return await Promise.race([
+      task,
+      new Promise<never>((_, reject) => {
+        timeout = window.setTimeout(
+          () =>
+            reject(
+              new Error(
+                "A exportação demorou além do esperado. Tente novamente ou substitua a imagem.",
+              ),
+            ),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    window.clearTimeout(timeout);
+  }
 }
 
 async function waitForImages(
@@ -155,7 +164,7 @@ export async function waitForExportAssets(
   const deadline = Date.now() + timeoutMs;
 
   root.classList.add("export-rendering");
-  await Promise.all([waitForFonts(deadline), waitForImages(root, deadline)]);
+  await withExportDeadline(waitForImages(root, deadline), timeoutMs);
   await nextFrame();
   await nextFrame();
 
@@ -188,12 +197,88 @@ export function downloadBlob(blob: Blob, filename: string): void {
   );
 }
 
+/** Read the decoded pixels from the export preview before html-to-image clones it. */
+async function embeddedImage(img: HTMLImageElement): Promise<string> {
+  const source = img.currentSrc || img.src;
+  if (source.startsWith("data:")) return source;
+  const canvas = document.createElement("canvas");
+  canvas.width = img.naturalWidth;
+  canvas.height = img.naturalHeight;
+  const context = canvas.getContext("2d");
+  if (!context || !canvas.width || !canvas.height)
+    throw new Error("Imagem da prévia indisponível.");
+  try {
+    context.drawImage(img, 0, 0);
+    return canvas.toDataURL("image/png");
+  } catch {
+    // Some public images were displayed without the CORS attribute. Retry their exact URL.
+    const response = await fetch(source, {
+      signal: AbortSignal.timeout(10_000),
+      credentials: "omit",
+    });
+    if (!response.ok)
+      throw new Error(
+        "A imagem não está disponível para exportação. Anexe a foto ao briefing.",
+      );
+    const blob = await response.blob();
+    if (!blob.type.startsWith("image/"))
+      throw new Error("A referência não retornou uma imagem.");
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () =>
+        reject(new Error("Não foi possível ler a imagem para exportação."));
+      reader.readAsDataURL(blob);
+    });
+  }
+}
+
+export async function withEmbeddedExportImages<T>(
+  root: HTMLElement,
+  render: () => Promise<T>,
+): Promise<T> {
+  const images = await Promise.all(
+    Array.from(root.querySelectorAll("img"), async (img) => ({
+      img,
+      source: img.getAttribute("src"),
+      srcset: img.getAttribute("srcset"),
+      data: await embeddedImage(img),
+    })),
+  );
+  const changed = images.filter(
+    ({ img, data }) => img.currentSrc !== data || img.hasAttribute("srcset"),
+  );
+  try {
+    for (const { img, data } of changed) {
+      img.removeAttribute("srcset");
+      img.src = data;
+    }
+    await Promise.all(
+      changed.map(({ img }) => withExportDeadline(img.decode())),
+    );
+    return await withExportDeadline(render());
+  } finally {
+    for (const { img, source, srcset } of changed) {
+      if (source === null) img.removeAttribute("src");
+      else img.setAttribute("src", source);
+      if (srcset !== null) img.setAttribute("srcset", srcset);
+    }
+  }
+}
+
 function inlineComputedStyles(source: Element, clone: Element): void {
   const computed = window.getComputedStyle(source);
   const cloneWithStyle = clone as HTMLElement | SVGElement;
 
   for (let index = 0; index < computed.length; index += 1) {
     const property = computed.item(index);
+    if (
+      property.startsWith("--") ||
+      /^(?:animation|transition|scroll-|overscroll-|view-transition|cursor|caret-|pointer-events|touch-action)/.test(
+        property,
+      )
+    )
+      continue;
     cloneWithStyle.style.setProperty(
       property,
       computed.getPropertyValue(property),
@@ -222,10 +307,20 @@ function inlineComputedStyles(source: Element, clone: Element): void {
   });
 }
 
-export function serializeElementWithInlineStyles(element: HTMLElement): string {
+export function serializeElementWithInlineStyles(
+  element: HTMLElement,
+  ctaUrl = "",
+): string {
   const clone = element.cloneNode(true) as HTMLElement;
   inlineComputedStyles(element, clone);
   clone.classList.remove("export-rendering");
   clone.removeAttribute("contenteditable");
+  clone.querySelectorAll("button[data-email-cta]").forEach((button) => {
+    const replacement = document.createElement(ctaUrl ? "a" : "span");
+    replacement.setAttribute("style", button.getAttribute("style") ?? "");
+    if (ctaUrl) replacement.setAttribute("href", ctaUrl);
+    replacement.append(...button.childNodes);
+    button.replaceWith(replacement);
+  });
   return clone.outerHTML;
 }
