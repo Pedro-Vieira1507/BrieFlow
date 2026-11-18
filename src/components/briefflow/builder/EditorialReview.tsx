@@ -21,6 +21,9 @@ export function EditorialReview({
     builder.campaignAssets,
   );
   const quality = calculateCreativeQuality(asset, issues);
+  const factsPending = issues.some(({ code }) =>
+    ["unsupported_claim", "unverified_quantity"].includes(code),
+  );
 
   return (
     <details className="mb-5 rounded-2xl border border-border-strong bg-surface-1/85 px-4 py-3 text-sm">
@@ -29,7 +32,8 @@ export function EditorialReview({
         Revisão editorial
         <span className="ml-auto inline-flex items-center gap-1.5 rounded-full bg-brand-muted px-2.5 py-1 text-xs font-semibold text-brand">
           <Gauge className="size-3.5" aria-hidden />
-          Score {quality.score}/100 · {quality.label}
+          Score {quality.score}/100 ·{" "}
+          {factsPending ? "Conferir fatos" : quality.label}
         </span>
         <span className="rounded-full bg-surface-3 px-2.5 py-1 text-xs font-medium text-fg-secondary">
           {issues.length
@@ -42,6 +46,16 @@ export function EditorialReview({
         direitos de imagem e condições comerciais antes de publicar. O score é
         um indicador heurístico de completude e revisão; não prevê performance.
       </p>
+      {brief.confirmedFacts && (
+        <div className="mt-3 rounded-xl bg-surface-2 p-3 text-xs">
+          <p className="font-semibold text-fg-primary">
+            Fatos confirmados por você
+          </p>
+          <p className="mt-1 whitespace-pre-line text-fg-secondary">
+            {brief.confirmedFacts}
+          </p>
+        </div>
+      )}
       {issues.length > 0 && (
         <ul className="mt-3 space-y-2">
           {issues.map((issue) => (

@@ -10,6 +10,10 @@ import {
   Megaphone,
   Tag,
 } from "lucide-react";
+import { MATERIAL_TYPES } from "@/types/brief";
+import { selectedMaterials } from "@/lib/campaignGeneration";
+import { CONTENT_FORMATS, canUseMaterial } from "@/lib/plans";
+import { useCreditsStore } from "@/hooks/useCredits";
 import { cn } from "@/lib/utils";
 
 interface Props {
@@ -25,6 +29,14 @@ export function DiscoveryPlanView({
   onPatch,
   onApprove,
 }: Props) {
+  const account = useCreditsStore((state) => state.plan);
+  const selected = selectedMaterials(plan.channels);
+  const allowed = (type: (typeof MATERIAL_TYPES)[number]) =>
+    canUseMaterial(account?.plan, type, account?.allowedFormats);
+  const cost = selected.reduce(
+    (sum, type) => sum + CONTENT_FORMATS[type].creditCost,
+    0,
+  );
   const handleEdit = (key: keyof DiscoveryPlan, value: string) => {
     onPatch({ discoveryPlan: { ...plan, [key]: value } });
   };
@@ -154,11 +166,78 @@ export function DiscoveryPlanView({
         </div>
       </div>
 
+      <label className="block space-y-2 text-sm text-fg-secondary">
+        <span className="font-semibold text-fg-primary">
+          Fatos confirmados por você
+        </span>
+        <textarea
+          className="block w-full rounded-xl border border-border-subtle bg-surface-1 p-3"
+          rows={2}
+          maxLength={1800}
+          disabled={loading}
+          value={plan.confirmedFacts ?? ""}
+          placeholder="Ex.: Pacote de 250 g. Preço de R$ 39,90."
+          onChange={(event) => handleEdit("confirmedFacts", event.target.value)}
+        />
+        <span>
+          Esses dados acompanham as peças e ficam disponíveis na revisão
+          editorial.
+        </span>
+      </label>
+
+      <fieldset
+        disabled={loading}
+        className="rounded-2xl border border-border-subtle bg-surface-1 p-5"
+      >
+        <legend className="px-2 font-semibold text-fg-primary">
+          Formatos da campanha
+        </legend>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {MATERIAL_TYPES.map((type) => {
+            const checked = selected.includes(type);
+            const available = allowed(type);
+            return (
+              <label
+                key={type}
+                className="flex min-h-11 items-center gap-2 text-sm text-fg-secondary"
+              >
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  disabled={!available && !checked}
+                  onChange={() =>
+                    onPatch({
+                      discoveryPlan: {
+                        ...plan,
+                        channels: checked
+                          ? selected.filter((value) => value !== type)
+                          : [...selected, type],
+                      },
+                    })
+                  }
+                />
+                {CONTENT_FORMATS[type].label} ·{" "}
+                {available
+                  ? CONTENT_FORMATS[type].creditCost + " cr."
+                  : "fora do plano"}
+              </label>
+            );
+          })}
+        </div>
+        <p aria-live="polite" className="mt-3 text-sm text-fg-secondary">
+          Geração de {selected.length} peça(s) · {cost} créditos
+        </p>
+      </fieldset>
+
       <div className="flex justify-center pb-10 pt-3">
         <Button
           size="lg"
           onClick={onApprove}
-          disabled={loading}
+          disabled={
+            loading ||
+            !selected.length ||
+            selected.some((type) => !allowed(type))
+          }
           className="h-12 w-full rounded-xl border border-white/10 bg-brand px-7 text-sm font-semibold text-white shadow-[var(--shadow-brand)] transition-all duration-200 hover:-translate-y-px hover:brightness-110 active:translate-y-0 active:scale-[0.99] sm:w-auto"
         >
           <Sparkles className="mr-2 size-4" />

@@ -14,6 +14,7 @@ export interface DiscoveryPlan {
   objective?: string;
   tone?: string;
   channels?: string[];
+  confirmedFacts?: string;
   websiteUrl?: string;
   productSku?: string | null;
   productUrl?: string | null;

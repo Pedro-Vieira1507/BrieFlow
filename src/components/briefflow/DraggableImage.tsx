@@ -278,7 +278,7 @@ export function DraggableImage({
         <img
           src={imgSrc}
           alt="Produto"
-          loading="lazy"
+          loading={isExport ? "eager" : "lazy"}
           decoding="async"
           className="pointer-events-none w-full h-auto select-none bg-transparent object-contain"
           draggable={false}

@@ -35,7 +35,14 @@ import {
   serializeElementWithInlineStyles,
   triggerDownload,
   waitForExportAssets,
+  withEmbeddedExportImages,
 } from "@/lib/export-utils";
+import {
+  buildDeliveryEmail,
+  publicEmailImage,
+  webDestination,
+} from "@/lib/emailDelivery";
+import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
 import type { BuilderState } from "@/types/builder";
@@ -219,6 +226,16 @@ export function DesignExporter({
   const bannerState = getAssetState(state, "banner");
   const emailState = getAssetState(state, "email");
   const socialState = getAssetState(state, "social");
+  const [destination, setDestination] = useState(
+    () =>
+      webDestination(state?.discoveryPlan?.productUrl) ||
+      webDestination(state?.discoveryPlan?.websiteUrl),
+  );
+  const [deliveryImage, setDeliveryImage] = useState(
+    () =>
+      publicEmailImage(emailState?.productImageUrl) ||
+      publicEmailImage(emailState?.backgroundImageUrl),
+  );
 
   useEffect(() => {
     if (open) setActiveTab(getInitialTab(state, initialTab));
@@ -335,7 +352,9 @@ export function DesignExporter({
         height,
         pixelRatio,
         backgroundColor,
-        cacheBust: true,
+        cacheBust: false,
+        skipFonts: true,
+        fetchRequestInit: { signal: AbortSignal.timeout(10_000) },
         includeQueryParams: true,
         quality: format === "jpg" ? 0.88 : undefined,
         filter: (node) => node.dataset?.exportExclude !== "true",
@@ -350,10 +369,10 @@ export function DesignExporter({
         },
       };
 
-      const dataUrl =
-        format === "png"
-          ? await toPng(exportNode, options)
-          : await toJpeg(exportNode, options);
+      const node = exportNode;
+      const dataUrl = await withEmbeddedExportImages(node, () =>
+        format === "png" ? toPng(node, options) : toJpeg(node, options),
+      );
       const outputWidth = Math.round(width * pixelRatio);
       const outputHeight = Math.round(height * pixelRatio);
       const filename = `${activeTab}_${activeTab === "banner" ? device : "4x5"}_${brandSlug}_${outputWidth}x${outputHeight}.${format}`;
@@ -371,13 +390,27 @@ export function DesignExporter({
     }
   };
 
-  const handleExportHtml = async () => {
+  const handleExportHtml = async (delivery: boolean) => {
     if (!emailState || !beginExport()) return;
 
     const toastId = toast.loading("Preparando o HTML do e-mail...");
     let exportNode: HTMLElement | null = null;
 
     try {
+      if (delivery) {
+        const html = buildDeliveryEmail(
+          emailState,
+          destination,
+          deliveryImage,
+          state?.discoveryPlan?.offer,
+        );
+        downloadBlob(
+          new Blob([html], { type: "text/html;charset=utf-8" }),
+          `email_envio_${sanitizeFilenamePart(emailState.brandName)}.html`,
+        );
+        toast.success("HTML para envio exportado.", { id: toastId });
+        return;
+      }
       exportNode = getExportNode("email");
       if (!exportNode) throw new Error("E-mail não encontrado na prévia.");
 
@@ -385,7 +418,10 @@ export function DesignExporter({
 
       const brandName =
         String(emailState.brandName ?? "Marca").trim() || "Marca";
-      const renderedEmail = serializeElementWithInlineStyles(exportNode);
+      const node = exportNode;
+      const renderedEmail = await withEmbeddedExportImages(node, async () =>
+        serializeElementWithInlineStyles(node, webDestination(destination)),
+      );
       const htmlContent = `<!doctype html>
 <html lang="pt-BR">
 <head>
@@ -643,18 +679,41 @@ export function DesignExporter({
                     )}
                   </ExportPreviewFrame>
                 </div>
-                <div className="mt-auto flex w-full shrink-0 justify-center border-t border-border-subtle bg-surface-0/90 pt-3 backdrop-blur sm:pt-4">
+                <div className="mt-auto grid w-full shrink-0 gap-2 border-t border-border-subtle bg-surface-0 p-3 sm:grid-cols-2">
+                  <label className="text-xs text-fg-secondary">
+                    Link de destino do botão
+                    <Input
+                      type="url"
+                      value={destination}
+                      onChange={(event) => setDestination(event.target.value)}
+                      placeholder="https://..."
+                    />
+                  </label>
+                  <label className="text-xs text-fg-secondary">
+                    Imagem HTTPS permanente para envio (opcional)
+                    <Input
+                      type="url"
+                      value={deliveryImage}
+                      onChange={(event) => setDeliveryImage(event.target.value)}
+                      placeholder="https://..."
+                    />
+                  </label>
+                  <p className="text-xs text-fg-tertiary sm:col-span-2">
+                    A prévia inclui as imagens exibidas. Para enviar com imagem,
+                    informe o endereço onde ela ficará hospedada.
+                  </p>
                   <Button
-                    onClick={handleExportHtml}
+                    onClick={() => void handleExportHtml(true)}
                     disabled={!emailState || isExporting}
-                    className="w-full rounded-xl bg-brand text-white shadow-[var(--shadow-brand)] hover:brightness-110 sm:w-auto"
                   >
-                    {isExporting ? (
-                      <Loader2 className="size-4 mr-2 animate-spin" />
-                    ) : (
-                      <FileCode className="size-4 mr-2" />
-                    )}
-                    Baixar HTML autônomo
+                    <FileCode className="mr-2 size-4" /> Baixar HTML para envio
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => void handleExportHtml(false)}
+                    disabled={!emailState || isExporting}
+                  >
+                    <Download className="mr-2 size-4" /> Baixar prévia HTML
                   </Button>
                 </div>
               </TabsContent>

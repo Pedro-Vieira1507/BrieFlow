@@ -18,6 +18,7 @@ import { BrandPalette } from "./BrandPalette";
 import { ChatPanel } from "./ChatPanel";
 import { OnboardingCoach } from "./OnboardingCoach";
 import { PageBuilder } from "./PageBuilder";
+import { selectedMaterials } from "@/lib/campaignGeneration";
 import { CONTENT_FORMATS } from "@/lib/plans";
 import type { MaterialType } from "@/types/brief";
 import { AuthModal } from "./AuthModal";
@@ -44,7 +45,7 @@ export function WorkspaceShell() {
     generatingLabel,
     libraryOpen,
     loading,
-    messages,
+    patchBuilder,
     scraping,
     setAuthOpen,
     user,
@@ -97,10 +98,22 @@ export function WorkspaceShell() {
 
   const openFormat = useCallback(
     (material: MaterialType) => {
-      const hasBriefing =
-        messages.some((message) => message.role === "user") ||
-        Boolean(builder.discoveryPlan);
-      if (!hasBriefing) {
+      if (builder.type === "discovery_plan" && builder.discoveryPlan) {
+        patchBuilder({
+          discoveryPlan: {
+            ...builder.discoveryPlan,
+            channels: [
+              ...new Set([
+                ...selectedMaterials(builder.discoveryPlan.channels),
+                material,
+              ]),
+            ],
+          },
+        });
+        setMobileChatOpen(false);
+        return;
+      }
+      if (builder.type !== "campaign") {
         void handleSend(
           `Quero criar ${CONTENT_FORMATS[material].label}. Antes de gerar, conduza um briefing objetivo comigo.`,
           false,
@@ -110,7 +123,13 @@ export function WorkspaceShell() {
       }
       void regenerateChannel(material);
     },
-    [builder.discoveryPlan, handleSend, messages, regenerateChannel],
+    [
+      builder.discoveryPlan,
+      builder.type,
+      handleSend,
+      patchBuilder,
+      regenerateChannel,
+    ],
   );
 
   useEffect(() => {

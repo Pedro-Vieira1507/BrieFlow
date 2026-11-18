@@ -7,7 +7,10 @@ interface ClaimRule {
   evidence: RegExp;
 }
 
+const SELECTED_BEANS = /\bgr[ãa]os\s+selecionados\b/i;
+
 const CLAIM_RULES: ClaimRule[] = [
+  { id: "selected_beans", claim: SELECTED_BEANS, evidence: SELECTED_BEANS },
   {
     id: "no_equipment_needed",
     claim:
@@ -181,6 +184,7 @@ function collectConfirmedEvidence(brief: MarketingBrief): string {
     brief.product,
     brief.offer,
     brief.context,
+    brief.confirmedFacts,
     brief.productTitle,
     brief.productDescription,
     brief.site?.title,

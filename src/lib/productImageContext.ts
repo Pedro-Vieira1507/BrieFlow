@@ -14,20 +14,25 @@ export function withAttachedProductImage(
   plan: DiscoveryPlan | undefined,
   imageUrl: string | null | undefined,
 ): DiscoveryPlan | undefined {
-  if (!plan || !imageUrl) return plan;
+  if (!imageUrl) return plan;
+  const base = plan ?? {
+    detectedContext: "",
+    missingInfo: "",
+    proposedStrategy: "",
+  };
 
-  const detectedContext = plan.detectedContext?.includes(
+  const detectedContext = base.detectedContext?.includes(
     PRODUCT_IMAGE_CONTEXT_MARKER,
   )
-    ? plan.detectedContext
-    : [plan.detectedContext, PRODUCT_IMAGE_CONTEXT_MARKER]
+    ? base.detectedContext
+    : [base.detectedContext, PRODUCT_IMAGE_CONTEXT_MARKER]
         .filter(Boolean)
         .join("\n");
 
   return {
-    ...plan,
+    ...base,
     productImageUrl: imageUrl,
     detectedContext,
-    missingInfo: asksForProductImage(plan.missingInfo) ? "" : plan.missingInfo,
+    missingInfo: asksForProductImage(base.missingInfo) ? "" : base.missingInfo,
   };
 }
