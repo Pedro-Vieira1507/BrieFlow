@@ -41,6 +41,7 @@ interface Props {
   activeTab: CampaignAsset["type"];
   onTabChange: (tab: CampaignAsset["type"]) => void;
   loading?: boolean;
+  onlyAvailable?: boolean;
   onRetry?: (channel: CampaignAsset["type"]) => void | Promise<void>;
   onRefine?: (
     channel: CampaignAsset["type"],
@@ -165,6 +166,7 @@ export function CampaignTabs({
   activeTab,
   onTabChange,
   loading = false,
+  onlyAvailable = false,
   onRetry,
   onRefine,
 }: Props) {
@@ -174,7 +176,8 @@ export function CampaignTabs({
   const visibleChannels = CHANNELS.filter(
     ({ key }) =>
       assets.some((asset) => asset.type === key) ||
-      (CORE_MATERIAL_TYPES as readonly string[]).includes(key),
+      (!onlyAvailable &&
+        (CORE_MATERIAL_TYPES as readonly string[]).includes(key)),
   ).sort(
     (left, right) =>
       MATERIAL_TYPES.indexOf(left.key) - MATERIAL_TYPES.indexOf(right.key),

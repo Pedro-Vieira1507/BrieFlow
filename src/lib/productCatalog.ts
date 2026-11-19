@@ -204,6 +204,14 @@ function notifyChange(event: string, owner: string) {
   }
 }
 
+export function getPilotRun(
+  owner: string,
+  sku: string,
+  revision: string,
+): Promise<PilotRun | undefined> {
+  return read((store) => store.get([owner, sku, revision]), "pilotRuns");
+}
+
 export async function listPilotRuns(owner: string): Promise<PilotRun[]> {
   const rows: PilotRun[] = await read(
     (store) => store.index("owner").getAll(owner),

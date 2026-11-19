@@ -1,5 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import {
+  pilotFragment,
+  parsePilotFragment,
+  targetAsset,
+} from "../src/lib/pilotNavigation.ts";
 import { demoCampaign, demoProducts } from "../src/lib/skuDemo.ts";
 import { applySkuReview } from "../src/lib/skuReview.ts";
 import {
@@ -168,4 +173,78 @@ test("legacy and copied campaigns have stable independent identities and CSV tre
   const r = { ...run(), sku: '=SKU("1")' };
   assert.ok(pilotCsv([r]).startsWith("\uFEFF"));
   assert.ok(pilotCsv([r]).includes('"\u0027=SKU(""1"")"'));
+});
+test("a review link resolves the exact piece across saved copies, older entries and standalone materials", () => {
+  const addr = { revision: "demo-123", index: 7 };
+  assert.deepEqual(
+    parsePilotFragment(pilotFragment(addr.revision, addr.index)),
+    addr,
+  );
+  for (const hash of [
+    "#creative-canvas",
+    "#revisar-peca=demo-123.-1",
+    "#revisar-peca=demo-123.97+1",
+    "#revisar-peca=demo-123.3/x",
+    "",
+  ])
+    assert.equal(parsePilotFragment(hash), undefined);
+  const other = copySkuCampaign(draft);
+  const target = {
+    owner: "loja",
+    sku: coffee.sku,
+    revision: "2",
+    piece: {
+      campaignId: campaignKey(draft),
+      assetId: "demo-email",
+      channel: "email",
+    },
+  };
+  assert.equal(targetAsset(target, draft), draft.campaignAssets[1]);
+  assert.equal(targetAsset(target, other), undefined);
+  assert.equal(targetAsset({ ...target, sku: "OUTRO" }, draft), undefined);
+  assert.equal(
+    targetAsset(
+      { ...target, piece: { ...target.piece, channel: "banner" } },
+      draft,
+    ),
+    undefined,
+  );
+  assert.equal(
+    targetAsset(target, {
+      ...draft,
+      campaignAssets: [draft.campaignAssets[0]],
+    }),
+    undefined,
+  );
+  const older = {
+    type: "email",
+    skuLink: { approved: coffee },
+    body: "Oferta da semana",
+  };
+  const legacy = {
+    ...target,
+    piece: {
+      ...target.piece,
+      assetId: "standalone",
+      campaignId: "saved:row-1",
+    },
+  };
+  assert.equal(targetAsset(legacy, older, "row-1").content, older);
+  assert.equal(targetAsset(legacy, older, "row-2"), undefined);
+  assert.equal(
+    targetAsset(legacy, { ...older, generationError: "Falha" }, "row-1"),
+    undefined,
+  );
+  const r = startPilotRun("loja", coffee, next, {
+    scope: "library",
+    campaigns: [
+      {
+        id: campaignKey(draft),
+        libraryAssetId: "row-1",
+        name: "Loja",
+        state: draft,
+      },
+    ],
+  });
+  assert.ok(r.pieces.every((p) => p.libraryAssetId === "row-1"));
 });

@@ -1,13 +1,31 @@
 // src/components/briefflow/PageBuilder.tsx
-import { lazy, Suspense, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useBriefflowStore } from "@/store/briefflow";
-import { isSupabaseConfigured, saveAssetToLibrary } from "@/lib/supabase";
+import {
+  isSupabaseConfigured,
+  saveAssetToLibrary,
+  type SavedLibraryAsset,
+} from "@/lib/supabase";
 import { getBuilderCampaignBrandName } from "@/lib/campaignGeneration";
 import { CORE_MATERIAL_TYPES } from "@/types/brief";
 import { captureWorkspaceScope } from "@/lib/workspaceScope";
 
+import { Button } from "@/components/ui/button";
+import { CONTENT_FORMATS } from "@/lib/plans";
+import { catalogOwner } from "@/lib/productCatalog";
+import { deliverableAssets, withPilotIdentity } from "@/lib/skuPilot";
+import { targetAsset, type PilotTarget } from "@/lib/pilotNavigation";
+import { PilotPieceEntry } from "./PilotPieceEntry";
 import { CampaignProduct } from "./CampaignProduct";
 import { checkSku, exportSkuDocument } from "@/lib/skuDelivery";
 import { BuilderHeader } from "./builder/BuilderHeader";
@@ -54,6 +72,7 @@ export function PageBuilder({
     setAuthOpen,
     setBuilder,
     activeLibraryAssetId,
+    activeLibraryUpdatedAt,
     setActiveLibraryAssetId,
   } = useBriefflowStore();
 
@@ -64,6 +83,45 @@ export function PageBuilder({
   const [designExporterOpen, setDesignExporterOpen] = useState(false);
 
   const isSavingRef = useRef(false);
+  const [target, setTarget] = useState<PilotTarget>();
+  const heading = useRef<HTMLHeadingElement>(null);
+  const openPiece = useCallback(
+    (next: PilotTarget, saved?: SavedLibraryAsset) => {
+      if (saved) {
+        setBuilder(withPilotIdentity(saved.content, saved.id));
+        setActiveLibraryAssetId(saved.id, saved.updated_at);
+      }
+      setActiveTab(next.piece.channel);
+      setTarget(
+        saved
+          ? { ...next, piece: { ...next.piece, campaignName: saved.name } }
+          : next,
+      );
+    },
+    [setBuilder, setActiveLibraryAssetId],
+  );
+  const focusedAsset = useMemo(
+    () =>
+      target && target.owner === catalogOwner(user?.id)
+        ? targetAsset(target, builder, activeLibraryAssetId)
+        : undefined,
+    [target, user?.id, builder, activeLibraryAssetId],
+  );
+  const visibleAssets = useMemo(
+    () => (focusedAsset ? [focusedAsset] : deliverableAssets(builder)),
+    [focusedAsset, builder],
+  );
+  // Narrow the export to the piece shown. All edits and saves use the complete original.
+  const visibleCampaign = useMemo(
+    () =>
+      focusedAsset && builder.type === "campaign"
+        ? { ...builder, campaignAssets: visibleAssets }
+        : builder,
+    [builder, focusedAsset, visibleAssets],
+  );
+  useEffect(() => {
+    if (target) heading.current?.focus();
+  }, [target]);
 
   const hasContent = builder.type !== "none";
   const isSaveable =
@@ -95,12 +153,13 @@ export function PageBuilder({
         builder,
         activeLibraryAssetId,
         user.id,
+        activeLibraryUpdatedAt,
       );
       if (!isCurrent()) {
         toast.dismiss(toastId);
         return;
       }
-      setActiveLibraryAssetId(saved.id);
+      setActiveLibraryAssetId(saved.id, saved.updated_at, builder);
       toast.success("Salvo na biblioteca com sucesso!", { id: toastId });
     } catch (error) {
       if (!isCurrent()) {
@@ -119,7 +178,7 @@ export function PageBuilder({
 
   const handleExportClick = async () => {
     try {
-      await checkSku(builder, activeTab);
+      await checkSku(visibleCampaign, activeTab);
     } catch (error) {
       toast.error(
         error instanceof Error
@@ -129,10 +188,7 @@ export function PageBuilder({
       return;
     }
     if (!(CORE_MATERIAL_TYPES as readonly string[]).includes(activeTab)) {
-      const asset =
-        builder.type === "campaign"
-          ? builder.campaignAssets?.find((entry) => entry.type === activeTab)
-          : undefined;
+      const asset = visibleAssets.find((entry) => entry.type === activeTab);
       const document = asset?.content.structuredContent;
       if (!document) {
         toast.error("Conteúdo não encontrado para exportação.");
@@ -143,7 +199,7 @@ export function PageBuilder({
       const toastId = toast.loading("Preparando arquivo final...");
       try {
         const format = await exportSkuDocument(
-          builder,
+          visibleCampaign,
           document,
           brand,
           asset.id,
@@ -163,7 +219,11 @@ export function PageBuilder({
   };
 
   const handleAssetPatch = (assetId: string, patch: Partial<BuilderState>) => {
-    if (builder.type !== "campaign" || !builder.campaignAssets) return;
+    if (builder.type !== "campaign") {
+      if (assetId === "standalone") patchBuilder(patch);
+      return;
+    }
+    if (!builder.campaignAssets) return;
     const next = builder.campaignAssets.map((a) =>
       a.id === assetId ? { ...a, content: { ...a.content, ...patch } } : a,
     );
@@ -198,14 +258,39 @@ export function PageBuilder({
         />
 
         <div className="relative mx-auto max-w-6xl space-y-8 pb-32 lg:space-y-10 lg:pb-24">
-          <CampaignProduct key={user?.id ?? "visitante"} />
+          <PilotPieceEntry onOpen={openPiece} />
+          {focusedAsset && target && (
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3
+                id="pilot-piece-heading"
+                ref={heading}
+                tabIndex={-1}
+                className="break-words text-base font-semibold text-fg-primary outline-none"
+              >
+                {CONTENT_FORMATS[focusedAsset.type].shortLabel} ·{" "}
+                {target.piece.campaignName}
+              </h3>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setTarget(undefined)}
+              >
+                Ver campanha inteira
+              </Button>
+            </div>
+          )}
+          <CampaignProduct
+            key={user?.id ?? "visitante"}
+            focusRevision={focusedAsset ? target?.revision : undefined}
+            onOpenPiece={openPiece}
+          />
           {loading && generatingLabel && builder.type === "campaign" && (
             <GeneratingBanner label={generatingLabel} />
           )}
 
-          {builder.type === "campaign" && builder.campaignAssets && (
+          {visibleAssets.length > 0 && (
             <div className="fade-in-up">
-              {builder.campaignAssets
+              {visibleAssets
                 .filter((asset) => asset.type === activeTab)
                 .map((asset) => (
                   <EditorialReview
@@ -215,14 +300,15 @@ export function PageBuilder({
                   />
                 ))}
               <CampaignTabs
-                campaign={builder}
-                assets={builder.campaignAssets}
+                campaign={visibleCampaign}
+                assets={visibleAssets}
+                onlyAvailable={Boolean(focusedAsset)}
                 onAssetChange={handleAssetPatch}
                 activeTab={activeTab}
                 onTabChange={setActiveTab}
                 loading={loading}
-                onRetry={onRetry}
-                onRefine={onRefine}
+                onRetry={builder.type === "campaign" ? onRetry : undefined}
+                onRefine={builder.type === "campaign" ? onRefine : undefined}
               />
             </div>
           )}
@@ -247,7 +333,7 @@ export function PageBuilder({
           <DesignExporter
             open={designExporterOpen}
             onOpenChange={setDesignExporterOpen}
-            state={builder}
+            state={visibleCampaign}
             initialTab={
               (CORE_MATERIAL_TYPES as readonly string[]).includes(activeTab)
                 ? (activeTab as (typeof CORE_MATERIAL_TYPES)[number])

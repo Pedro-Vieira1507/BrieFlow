@@ -265,7 +265,7 @@ export function LibraryModal() {
 
   const handleApplyToCanvas = (item: SavedLibraryAsset) => {
     setBuilder(withPilotIdentity(item.content, item.id));
-    setActiveLibraryAssetId(item.id);
+    setActiveLibraryAssetId(item.id, item.updated_at);
     toast.success("Campanha carregada no Canvas com sucesso!");
     setLibraryOpen(false);
   };

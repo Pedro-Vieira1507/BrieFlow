@@ -29,9 +29,14 @@ interface BriefflowState {
   authOpen: boolean;
   libraryOpen: boolean;
   activeLibraryAssetId: string | null;
+  activeLibraryUpdatedAt?: string;
   workspaceVersion: number;
   workspaceDirty: boolean;
-  setActiveLibraryAssetId: (id: string | null) => void;
+  setActiveLibraryAssetId: (
+    id: string | null,
+    updatedAt?: string,
+    savedBuilder?: BuilderState,
+  ) => void;
   setWorkspaceDirty: (dirty: boolean) => void;
   // actions
   setMessages: (
@@ -84,13 +89,21 @@ export const useBriefflowStore = create<BriefflowState>((set) => ({
   authOpen: false,
   libraryOpen: false,
   activeLibraryAssetId: null,
+  activeLibraryUpdatedAt: undefined,
   workspaceVersion: 0,
   workspaceDirty: false,
-  setActiveLibraryAssetId: (activeLibraryAssetId) =>
+  setActiveLibraryAssetId: (
+    activeLibraryAssetId,
+    activeLibraryUpdatedAt,
+    savedBuilder,
+  ) =>
     set((state) => ({
       activeLibraryAssetId,
+      activeLibraryUpdatedAt,
       workspaceVersion: state.workspaceVersion + 1,
-      workspaceDirty: activeLibraryAssetId ? false : state.workspaceDirty,
+      workspaceDirty: activeLibraryAssetId
+        ? savedBuilder != null && state.builder !== savedBuilder
+        : state.workspaceDirty,
     })),
   setWorkspaceDirty: (workspaceDirty) => set({ workspaceDirty }),
   setMessages: (updater) =>
@@ -199,6 +212,7 @@ export const useBriefflowStore = create<BriefflowState>((set) => ({
         authOpen: false,
         libraryOpen: false,
         activeLibraryAssetId: null,
+        activeLibraryUpdatedAt: undefined,
       };
     }),
   setUploadedImage: (img) => set({ uploadedImage: img, workspaceDirty: true }),
@@ -219,5 +233,6 @@ export const useBriefflowStore = create<BriefflowState>((set) => ({
       authOpen: false,
       libraryOpen: false,
       activeLibraryAssetId: null,
+      activeLibraryUpdatedAt: undefined,
     })),
 }));

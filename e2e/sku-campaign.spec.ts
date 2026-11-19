@@ -330,3 +330,186 @@ test("the pilot includes other saved campaigns and identifies incomplete library
   await expect(results).toContainText("Uma nova mudança substituiu esta");
   await expect(results).not.toContainText("Até a última exportação");
 });
+test("a merchant opens the exact pending piece in the original campaign, preserves a draft and receives the download in the first tab", async ({
+  page,
+  context,
+  isMobile,
+}) => {
+  const backend = await installMockBackend(page, { includeNewTabs: true });
+  await openDemo(page);
+  await page.getByRole("button", { name: "Salvar na biblioteca" }).click();
+  await expect.poll(() => backend.assets.length).toBe(1);
+  const original = backend.assets[0];
+  const other = structuredClone(original);
+  other.id = "00000000-0000-4000-8000-000000000074";
+  other.name = "Campanha de inverno";
+  const otherState = other.content as {
+    skuLink: { campaignId?: string };
+    campaignAssets: { type: string; content: { body?: string } }[];
+  };
+  // This saved original predates campaign identities. Both campaigns use identical piece IDs.
+  delete otherState.skuLink.campaignId;
+  const email = otherState.campaignAssets.find(
+    (a) => a.type === "email",
+  )!.content;
+  email.body = "Lote de inverno por R$ 39,90. Reserve sua unidade.";
+  backend.assets.push(other);
+  const manualText = "Texto exclusivo do rascunho. Café por R$ 39,90.";
+  await page.getByRole("tab", { name: "WhatsApp", exact: true }).click();
+  await page
+    .getByLabel("Conteúdo da seção 1", { exact: true })
+    .fill(manualText);
+  await page.getByRole("button", { name: "Editar cadastro" }).click();
+  const catalog = page.getByRole("dialog", { name: "Catálogo de produtos" });
+  await catalog.getByLabel("Preço em reais").fill("48,90");
+  await catalog.getByRole("button", { name: "Salvar cadastro" }).click();
+  await page.getByRole("button", { name: "Resultados do piloto" }).click();
+  const panel = page.getByRole("dialog", { name: "Resultados do piloto" });
+  const winter = panel
+    .getByRole("listitem")
+    .filter({ hasText: "E-mail · Campanha de inverno" });
+  const link = winter.getByRole("link", { name: "Abrir E-mail em nova aba" });
+  const fragment = await link.getAttribute("href");
+  expect(fragment).toMatch(/^#revisar-peca=/);
+  expect(fragment).not.toContain("DEMO-CAFE");
+  const [detail] = await Promise.all([
+    context.waitForEvent("page"),
+    link.click(),
+  ]);
+  await expect(
+    detail.getByRole("heading", { name: "E-mail · Campanha de inverno" }),
+  ).toBeVisible();
+  await expect(
+    detail.getByRole("tab", { name: "E-mail", exact: true }),
+  ).toHaveAttribute("aria-selected", "true");
+  await expect(detail.getByRole("tab", { name: "WhatsApp" })).toHaveCount(0);
+  const competing = isMobile ? undefined : await context.newPage();
+  if (competing) {
+    await competing.goto("/" + fragment);
+    await expect(
+      competing.getByRole("heading", { name: "E-mail · Campanha de inverno" }),
+    ).toBeVisible();
+  }
+  await detail
+    .getByRole("button", { name: "Aprovar revisão da campanha" })
+    .click();
+  await detail.getByRole("button", { name: "Salvar na biblioteca" }).click();
+  await expect
+    .poll(() =>
+      JSON.stringify(backend.assets.find((a) => a.id === other.id)?.content),
+    )
+    .toContain("Lote de inverno por R$ 48,90");
+  expect(
+    JSON.stringify(backend.assets.find((a) => a.id === original.id)?.content),
+  ).toContain("39,90");
+  if (competing) {
+    await competing
+      .getByRole("button", { name: "Aprovar revisão da campanha" })
+      .click();
+    await competing
+      .getByRole("button", { name: "Salvar na biblioteca" })
+      .click();
+    await expect(
+      competing.getByText(/A versão salva mudou ou foi removida/),
+    ).toBeVisible();
+    await expect(
+      competing.getByText("Não salvo", { exact: true }),
+    ).toBeVisible();
+    await competing.close();
+  }
+  await detail.getByRole("button", { name: "Exportar campanha" }).click();
+  const exporter = detail.getByRole("dialog", {
+    name: "Central de exportação",
+  });
+  await exporter
+    .getByLabel("Link de destino do botão")
+    .fill("https://example.org/inverno");
+  const html = await downloadText(detail, () =>
+    exporter.getByRole("button", { name: "Baixar HTML para envio" }).click(),
+  );
+  expect(html).toContain("Lote de inverno por R$ 48,90");
+  await expect(panel).toContainText("1 de 4 peças exportadas");
+  await expect(winter).toContainText("Primeiro arquivo HTML");
+  await expect(winter.getByRole("link")).toHaveCount(0);
+  await panel
+    .getByRole("button", { name: "Abrir WhatsApp", exact: true })
+    .click();
+  await expect(
+    page.getByLabel("Conteúdo da seção 1", { exact: true }),
+  ).toHaveValue(manualText);
+  await expect(
+    page.getByRole("button", { name: "Ver campanha inteira" }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Aprovar revisão da campanha" })
+    .click();
+  const txt = await downloadText(page, () =>
+    page
+      .getByRole("tabpanel", { name: "WhatsApp" })
+      .getByRole("button", { name: "TXT", exact: true })
+      .click(),
+  );
+  expect(txt).toBe(manualText.replace("39,90", "48,90"));
+  await page.getByRole("button", { name: "Voltar às pendências" }).click();
+  await expect(panel).toContainText("2 de 4 peças exportadas");
+  await expect(
+    panel.getByRole("link", { name: "Abrir WhatsApp em nova aba" }),
+  ).toHaveCount(1);
+  const [winterWhatsApp] = await Promise.all([
+    context.waitForEvent("page"),
+    panel.getByRole("link", { name: "Abrir WhatsApp em nova aba" }).click(),
+  ]);
+  await expect(
+    winterWhatsApp.getByRole("heading", {
+      name: "WhatsApp · Campanha de inverno",
+    }),
+  ).toBeVisible();
+  const winterTxt = await downloadText(winterWhatsApp, () =>
+    winterWhatsApp
+      .getByRole("tabpanel", { name: "WhatsApp" })
+      .getByRole("button", { name: "TXT", exact: true })
+      .click(),
+  );
+  expect(winterTxt).toContain("R$ 48,90");
+  expect(winterTxt).not.toContain("Texto exclusivo do rascunho");
+  await expect(panel).toContainText("3 de 4 peças exportadas");
+  await panel
+    .getByRole("button", { name: "Abrir E-mail", exact: true })
+    .click();
+  await expect(
+    page.getByRole("tab", { name: "E-mail", exact: true }),
+  ).toHaveAttribute("aria-selected", "true");
+  await page.getByRole("button", { name: "Exportar campanha" }).click();
+  const originalExporter = page.getByRole("dialog", {
+    name: "Central de exportação",
+  });
+  await originalExporter
+    .getByLabel("Link de destino do botão")
+    .fill("https://example.org/cafe");
+  const originalHtml = await downloadText(page, () =>
+    originalExporter
+      .getByRole("button", { name: "Baixar HTML para envio" })
+      .click(),
+  );
+  expect(originalHtml).toContain("R$ 48,90");
+  expect(originalHtml).not.toContain("Lote de inverno");
+  await originalExporter
+    .getByRole("button", { name: "Fechar", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Voltar às pendências" }).click();
+  await expect(panel).toContainText("4 de 4 peças exportadas");
+  await expect(panel).toContainText("Concluída");
+  await expect(panel.getByRole("link")).toHaveCount(0);
+  await winterWhatsApp.close();
+  // An old link cannot re-open a completed task or advance its receipt again.
+  const stale = await context.newPage();
+  await stale.goto("/" + fragment);
+  await expect(stale.getByRole("alert")).toContainText(
+    "Esta peça já foi exportada",
+  );
+  await expect(
+    stale.getByRole("button", { name: "Ver campanha inteira" }),
+  ).toHaveCount(0);
+  await stale.close();
+  await detail.close();
+});

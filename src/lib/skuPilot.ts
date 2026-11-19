@@ -15,6 +15,7 @@ export type PilotScope = "library" | "canvas" | "partial";
 export type PilotFormat = "TXT" | "HTML" | "PNG" | "JPG" | "PDF" | "PPTX";
 export interface PilotCampaign {
   id: string;
+  libraryAssetId?: string;
   name: string;
   state: BuilderState;
 }
@@ -24,6 +25,7 @@ export interface PilotCohort {
 }
 export interface PilotPiece {
   campaignId: string;
+  libraryAssetId?: string;
   campaignName: string;
   assetId: string;
   channel: MaterialType;
@@ -138,12 +140,12 @@ function deliveryText(
     ]);
   return formatStructuredContentText(d);
 }
-function deliverableAssets(
-  state: BuilderState,
-): Pick<CampaignAsset, "id" | "type" | "content">[] {
+export function deliverableAssets(state: BuilderState): CampaignAsset[] {
   if (state.type === "campaign") return state.campaignAssets ?? [];
   if (state.type === "none" || state.type === "discovery_plan") return [];
-  return [{ id: "standalone", type: state.type, content: state }];
+  return [
+    { id: "standalone", type: state.type, content: state, status: "draft" },
+  ];
 }
 export function startPilotRun(
   owner: string,
@@ -180,6 +182,7 @@ export function startPilotRun(
       )
         pieces.push({
           campaignId: campaign.id,
+          libraryAssetId: campaign.libraryAssetId,
           campaignName: campaign.name,
           assetId: asset.id,
           channel: asset.type,

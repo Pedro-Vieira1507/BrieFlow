@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Clock3, Download } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { ArrowUpRight, Clock3, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -13,6 +13,7 @@ import {
 import { downloadBlob } from "@/lib/export-utils";
 import { CONTENT_FORMATS } from "@/lib/plans";
 import {
+  catalogOwner,
   listPilotRuns,
   pilotChangedEvent,
   recordPilot,
@@ -23,8 +24,17 @@ import {
   pilotFinishedAt,
   pilotScopeLabel,
   pilotStatus,
+  campaignKey,
+  type PilotPiece,
   type PilotRun,
 } from "@/lib/skuPilot";
+import {
+  getPendingTarget,
+  pilotFragment,
+  targetAsset,
+  type PilotTarget,
+} from "@/lib/pilotNavigation";
+import { useBriefflowStore } from "@/store/briefflow";
 import { formatPrice } from "@/lib/skuReview";
 
 const timestamp = (value: number) =>
@@ -132,7 +142,13 @@ function ManualComparison({ run }: { run: PilotRun }) {
     </div>
   );
 }
-function RunDetails({ run }: { run: PilotRun }) {
+function RunDetails({
+  run,
+  action,
+}: {
+  run: PilotRun;
+  action: (piece: PilotPiece, index: number) => ReactNode;
+}) {
   const end = pilotFinishedAt(run);
   const count = run.pieces.filter((p) => p.exportedAt != null).length;
   return (
@@ -185,29 +201,39 @@ function RunDetails({ run }: { run: PilotRun }) {
       </div>
       {run.pieces.length > 0 && (
         <ul className="divide-y divide-border-subtle rounded-xl border border-border-subtle px-3">
-          {run.pieces.map((p) => (
-            <li
-              key={JSON.stringify([p.campaignId, p.assetId])}
-              className="py-2.5"
-            >
-              <h5 className="break-words text-sm font-medium text-fg-primary">
-                {CONTENT_FORMATS[p.channel].shortLabel} · {p.campaignName}
-              </h5>
-              {p.reviewedAt != null && (
+          {run.pieces
+            .map((piece, index) => ({ piece, index }))
+            .sort(
+              (a, b) =>
+                Number(a.piece.exportedAt != null) -
+                Number(b.piece.exportedAt != null),
+            )
+            .map(({ piece: p, index }) => (
+              <li
+                key={JSON.stringify([p.campaignId, p.assetId])}
+                className="py-2.5"
+              >
+                <h5 className="break-words text-sm font-medium text-fg-primary">
+                  {CONTENT_FORMATS[p.channel].shortLabel} · {p.campaignName}
+                </h5>
+                {p.reviewedAt != null && (
+                  <p className={subtle}>
+                    Revisão aprovada · {timestamp(p.reviewedAt)}
+                  </p>
+                )}
                 <p className={subtle}>
-                  Revisão aprovada · {timestamp(p.reviewedAt)}
+                  {p.exportedAt == null
+                    ? "Exportação pendente"
+                    : "Primeiro arquivo " +
+                      p.format +
+                      " · " +
+                      timestamp(p.exportedAt)}
                 </p>
-              )}
-              <p className={subtle}>
-                {p.exportedAt == null
-                  ? "Exportação pendente"
-                  : "Primeiro arquivo " +
-                    p.format +
-                    " · " +
-                    timestamp(p.exportedAt)}
-              </p>
-            </li>
-          ))}
+                {p.exportedAt == null &&
+                  run.supersededAt == null &&
+                  action(p, index)}
+              </li>
+            ))}
         </ul>
       )}
       {run.pieces.length > 0 && (
@@ -220,7 +246,28 @@ function RunDetails({ run }: { run: PilotRun }) {
   );
 }
 
-export function PilotResults({ owner }: { owner: string }) {
+export function PilotResults({
+  owner,
+  focusRevision,
+  onOpenPiece,
+}: {
+  owner: string;
+  focusRevision?: string;
+  onOpenPiece: (target: PilotTarget) => void;
+}) {
+  const { builder, activeLibraryAssetId, user, loading, scraping } =
+    useBriefflowStore();
+  const currentCampaignId = campaignKey(builder, activeLibraryAssetId);
+  const [navigationError, setNavigationError] = useState("");
+  const [opening, setOpening] = useState(false);
+  const request = useRef(0);
+  const focusMoved = useRef(false);
+  useEffect(
+    () => () => {
+      request.current++;
+    },
+    [],
+  );
   const [open, setOpen] = useState(false);
   const [runs, setRuns] = useState<PilotRun[]>();
   const [selected, setSelected] = useState("");
@@ -260,11 +307,87 @@ export function PilotResults({ owner }: { owner: string }) {
       window.removeEventListener("focus", refresh);
     };
   }, [open, owner]);
-  const chosen = runs?.find((r) => r.revision === selected) ?? runs?.[0];
+  const focusedRun = runs?.find((r) => r.revision === focusRevision);
+  const contextualRun =
+    focusedRun?.supersededAt != null
+      ? runs?.find((r) => r.sku === focusedRun.sku && r.supersededAt == null)
+      : focusedRun;
+  const chosen =
+    runs?.find((r) => r.revision === selected) ?? contextualRun ?? runs?.[0];
+  async function openHere(run: PilotRun, index: number) {
+    const token = ++request.current;
+    setOpening(true);
+    setNavigationError("");
+    try {
+      const target = await getPendingTarget(
+        owner,
+        { revision: run.revision, index },
+        run.sku,
+      );
+      if (token !== request.current) return;
+      const current = useBriefflowStore.getState();
+      if (
+        owner !== catalogOwner(current.user?.id) ||
+        current.loading ||
+        current.scraping ||
+        !targetAsset(target, current.builder, current.activeLibraryAssetId)
+      )
+        throw new Error(
+          "A peça mudou ou foi removida. Confira a campanha atual.",
+        );
+      focusMoved.current = true;
+      onOpenPiece(target);
+      setSelected("");
+      setOpen(false);
+    } catch (e) {
+      if (token === request.current)
+        setNavigationError(
+          e instanceof Error ? e.message : "Não foi possível abrir a peça.",
+        );
+    } finally {
+      if (token === request.current) setOpening(false);
+    }
+  }
+  function action(piece: PilotPiece, index: number) {
+    if (!chosen) return null;
+    const label = "Abrir " + CONTENT_FORMATS[piece.channel].shortLabel;
+    if (
+      piece.campaignId === currentCampaignId &&
+      builder.skuLink?.approved.sku === chosen.sku
+    )
+      return (
+        <Button
+          className="mt-1.5"
+          size="sm"
+          variant="outline"
+          disabled={opening || loading || scraping}
+          onClick={() => void openHere(chosen, index)}
+        >
+          {label}
+        </Button>
+      );
+    if (!user)
+      return <p className={subtle}>Disponível na aba da campanha original.</p>;
+    return (
+      <Button className="mt-1.5" size="sm" variant="outline" asChild>
+        <a
+          href={pilotFragment(chosen.revision, index)}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          {label} em nova aba{" "}
+          <ArrowUpRight className="ml-1 size-3.5" aria-hidden="true" />
+        </a>
+      </Button>
+    );
+  }
   return (
     <Dialog
       open={open}
       onOpenChange={(v) => {
+        request.current++;
+        setOpening(false);
+        setNavigationError("");
         setOpen(v);
         if (!v) {
           setSelected("");
@@ -276,10 +399,19 @@ export function PilotResults({ owner }: { owner: string }) {
       <DialogTrigger asChild>
         <Button variant="outline" size="sm">
           <Clock3 aria-hidden="true" className="mr-1 size-4" />
-          Resultados do piloto
+          {focusRevision ? "Voltar às pendências" : "Resultados do piloto"}
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-h-[88dvh] overflow-y-auto sm:max-w-xl">
+      <DialogContent
+        className="max-h-[88dvh] overflow-y-auto sm:max-w-xl"
+        onCloseAutoFocus={(event) => {
+          if (focusMoved.current) {
+            event.preventDefault();
+            focusMoved.current = false;
+            document.getElementById("pilot-piece-heading")?.focus();
+          }
+        }}
+      >
         <DialogHeader>
           <DialogTitle>Resultados do piloto</DialogTitle>
           <DialogDescription>
@@ -304,7 +436,12 @@ export function PilotResults({ owner }: { owner: string }) {
               <select
                 className="w-full rounded-md border border-border-strong bg-surface-1 p-2"
                 value={chosen.revision}
-                onChange={(e) => setSelected(e.target.value)}
+                onChange={(e) => {
+                  request.current++;
+                  setOpening(false);
+                  setNavigationError("");
+                  setSelected(e.target.value);
+                }}
               >
                 {runs.map((r) => (
                   <option key={r.revision} value={r.revision}>
@@ -313,7 +450,12 @@ export function PilotResults({ owner }: { owner: string }) {
                 ))}
               </select>
             </label>
-            <RunDetails run={chosen} />
+            {navigationError && (
+              <p role="alert" className="text-sm text-fg-primary">
+                {navigationError}
+              </p>
+            )}
+            <RunDetails run={chosen} action={action} />
             <Button
               variant="outline"
               onClick={() =>

@@ -17,6 +17,7 @@ import {
 } from "@/lib/skuReview";
 import { demoCampaign, demoProducts } from "@/lib/skuDemo";
 import { campaignKey, factRevision } from "@/lib/skuPilot";
+import type { PilotTarget } from "@/lib/pilotNavigation";
 import { PilotResults } from "./PilotResults";
 import { ProductCatalogDialog } from "./ProductCatalogDialog";
 import { toast } from "sonner";
@@ -47,7 +48,13 @@ function FragmentPreview({
   );
 }
 
-export function CampaignProduct() {
+export function CampaignProduct({
+  focusRevision,
+  onOpenPiece,
+}: {
+  focusRevision?: string;
+  onOpenPiece: (target: PilotTarget) => void;
+}) {
   const { builder, user, workspaceVersion, loading, setBuilder } =
     useBriefflowStore();
   const { products, owner, ready, error } = useProductCatalog(user?.id);
@@ -193,7 +200,14 @@ export function CampaignProduct() {
           )}
         </div>
         <div className="flex flex-wrap gap-2">
-          {ready && <PilotResults key={owner} owner={owner} />}
+          {ready && (
+            <PilotResults
+              key={owner}
+              owner={owner}
+              focusRevision={focusRevision}
+              onOpenPiece={onOpenPiece}
+            />
+          )}
           {empty && (
             <Button
               variant="outline"
@@ -302,7 +316,9 @@ export function CampaignProduct() {
               disabled={missingChoices || busy || loading}
               onClick={() => void act(approve)}
             >
-              Aprovar revisão
+              {focusRevision
+                ? "Aprovar revisão da campanha"
+                : "Aprovar revisão"}
             </Button>
           </div>
         )}

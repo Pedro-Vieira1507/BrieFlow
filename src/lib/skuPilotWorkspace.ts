@@ -44,7 +44,12 @@ export async function updateCatalog(owner: string, updates: CatalogWrite[]) {
       const saved = await getSavedSkuCampaigns(initial.user.id, skus);
       for (const item of saved) {
         const id = campaignKey(item.content, item.id)!;
-        campaigns.set(id, { id, name: item.name, state: item.content });
+        campaigns.set(id, {
+          id,
+          libraryAssetId: item.id,
+          name: item.name,
+          state: item.content,
+        });
       }
       scope = "library";
     } catch {
@@ -62,6 +67,8 @@ export async function updateCatalog(owner: string, updates: CatalogWrite[]) {
     const id = state.skuLink!.campaignId!;
     campaigns.set(id, {
       id,
+      libraryAssetId:
+        current.activeLibraryAssetId ?? campaigns.get(id)?.libraryAssetId,
       name:
         campaigns.get(id)?.name ||
         state.brandName ||
