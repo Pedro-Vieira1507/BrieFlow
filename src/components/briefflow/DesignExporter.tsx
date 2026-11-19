@@ -47,6 +47,7 @@ import { cn } from "@/lib/utils";
 
 import type { BuilderState } from "@/types/builder";
 import type { CoreMaterialType } from "@/types/brief";
+import { checkSku } from "@/lib/skuDelivery";
 import { BannerPreview } from "./BannerPreview";
 import { EmailPreview } from "./EmailPreview";
 import { SocialPreview } from "./SocialPreview";
@@ -377,6 +378,7 @@ export function DesignExporter({
       const outputHeight = Math.round(height * pixelRatio);
       const filename = `${activeTab}_${activeTab === "banner" ? device : "4x5"}_${brandSlug}_${outputWidth}x${outputHeight}.${format}`;
 
+      await checkSku(state, activeTab);
       triggerDownload(dataUrl, filename);
       toast.success("Arte exportada com sucesso!", { id: toastId });
     } catch (error) {
@@ -404,6 +406,7 @@ export function DesignExporter({
           deliveryImage,
           state?.discoveryPlan?.offer,
         );
+        await checkSku(state, "email");
         downloadBlob(
           new Blob([html], { type: "text/html;charset=utf-8" }),
           `email_envio_${sanitizeFilenamePart(emailState.brandName)}.html`,
@@ -435,6 +438,7 @@ export function DesignExporter({
 </body>
 </html>`;
 
+      await checkSku(state, "email");
       downloadBlob(
         new Blob([htmlContent], { type: "text/html;charset=utf-8" }),
         `email_${device}_${sanitizeFilenamePart(brandName)}.html`,
@@ -451,12 +455,13 @@ export function DesignExporter({
     }
   };
 
-  const handleExportSocialText = () => {
+  const handleExportSocialText = async () => {
     if (!socialState || !beginExport()) return;
 
     try {
       const brandName =
         String(socialState.brandName ?? "Marca").trim() || "Marca";
+      await checkSku(state, "social");
       const textContent = buildSocialExportText(socialState);
       downloadBlob(
         new Blob([textContent], { type: "text/plain;charset=utf-8" }),
@@ -464,7 +469,11 @@ export function DesignExporter({
       );
       toast.success("Legenda exportada com sucesso!");
     } catch (error) {
-      toast.error("Erro ao gerar o arquivo de legenda.");
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Erro ao gerar o arquivo de legenda.",
+      );
       console.error("Falha na exportação de legenda:", error);
     } finally {
       setExporting(false);
@@ -662,6 +671,7 @@ export function DesignExporter({
                     {emailState ? (
                       <EmailPreview
                         state={emailState}
+                        offer={state?.discoveryPlan?.offer}
                         onChange={() => undefined}
                         exportWrapperClass={
                           device === "mobile"
@@ -734,6 +744,7 @@ export function DesignExporter({
                       {socialState ? (
                         <SocialPreview
                           state={socialState}
+                          offer={state?.discoveryPlan?.offer}
                           onChange={() => undefined}
                           exportWrapperClass="export-mode"
                           exportWrapperStyle={{

@@ -9,6 +9,8 @@ import { exportStructuredDocument } from "@/lib/structuredDocumentExport";
 import { CORE_MATERIAL_TYPES } from "@/types/brief";
 import { captureWorkspaceScope } from "@/lib/workspaceScope";
 
+import { CampaignProduct } from "./CampaignProduct";
+import { checkSku } from "@/lib/skuDelivery";
 import { BuilderHeader } from "./builder/BuilderHeader";
 import { GeneratingBanner } from "./builder/GeneratingBanner";
 import { DiscoveryPlanView } from "./builder/DiscoveryPlanView";
@@ -117,6 +119,16 @@ export function PageBuilder({
   };
 
   const handleExportClick = async () => {
+    try {
+      await checkSku(builder, activeTab);
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Confira o produto da campanha.",
+      );
+      return;
+    }
     if (!(CORE_MATERIAL_TYPES as readonly string[]).includes(activeTab)) {
       const asset =
         builder.type === "campaign"
@@ -131,7 +143,9 @@ export function PageBuilder({
       setIsExporting(true);
       const toastId = toast.loading("Preparando arquivo final...");
       try {
-        const format = await exportStructuredDocument(document, brand);
+        const format = await exportStructuredDocument(document, brand, () =>
+          checkSku(builder, activeTab),
+        );
         toast.success(`Conteúdo exportado em ${format}.`, { id: toastId });
       } catch (error) {
         console.error("Falha ao exportar conteúdo estruturado:", error);
@@ -182,6 +196,7 @@ export function PageBuilder({
         />
 
         <div className="relative mx-auto max-w-6xl space-y-8 pb-32 lg:space-y-10 lg:pb-24">
+          <CampaignProduct key={user?.id ?? "visitante"} />
           {loading && generatingLabel && builder.type === "campaign" && (
             <GeneratingBanner label={generatingLabel} />
           )}
@@ -198,6 +213,7 @@ export function PageBuilder({
                   />
                 ))}
               <CampaignTabs
+                campaign={builder}
                 assets={builder.campaignAssets}
                 onAssetChange={handleAssetPatch}
                 activeTab={activeTab}

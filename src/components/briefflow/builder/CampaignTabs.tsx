@@ -35,6 +35,7 @@ import {
 } from "@/lib/campaignGeneration";
 
 interface Props {
+  campaign: BuilderState;
   assets: CampaignAsset[];
   onAssetChange: (assetId: string, patch: Partial<BuilderState>) => void;
   activeTab: CampaignAsset["type"];
@@ -158,6 +159,7 @@ function BannerRecoveryProductUpload({
 }
 
 export function CampaignTabs({
+  campaign,
   assets,
   onAssetChange,
   activeTab,
@@ -335,16 +337,19 @@ export function CampaignTabs({
               />
             ) : asset.type === "email" ? (
               <EmailPreview
+                offer={campaign.discoveryPlan?.offer}
                 state={asset.content}
                 onChange={(patch) => onAssetChange(asset.id, patch)}
               />
             ) : asset.type === "social" ? (
               <SocialPreview
+                offer={campaign.discoveryPlan?.offer}
                 state={asset.content}
                 onChange={(patch) => onAssetChange(asset.id, patch)}
               />
             ) : (
               <StructuredContentPreview
+                campaign={campaign}
                 state={asset.content}
                 onChange={(patch) => onAssetChange(asset.id, patch)}
               />

@@ -22,13 +22,13 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
-import { useBriefflowStore } from "@/store/briefflow";
 import { cleanText, isEmptyLike } from "@/lib/sanitize";
 import { analyzeImageWithVisionFn } from "@/lib/vision-api";
 import { toast } from "sonner";
 import { uploadCampaignAsset } from "@/lib/supabase";
 
 interface Props {
+  offer?: string;
   state: BuilderState;
   onChange: (patch: Partial<BuilderState>) => void;
   exportWrapperClass?: string;
@@ -36,12 +36,12 @@ interface Props {
 }
 
 export function EmailPreview({
+  offer: offerRaw,
   state: propState,
   onChange,
   exportWrapperClass,
   exportWrapperStyle,
 }: Props) {
-  const { builder } = useBriefflowStore();
   const isExportClone = !!exportWrapperClass;
 
   // CORREÇÃO: A fonte da verdade agora é SEMPRE o propState atualizado enviado pelo pai (PageBuilder)
@@ -93,7 +93,6 @@ export function EmailPreview({
 
   const testimonials = state.testimonials || [];
   const prompt = cleanText(state.emailHeroImagePrompt);
-  const offerRaw = builder.discoveryPlan?.offer;
   const hasOffer = !isEmptyLike(offerRaw);
 
   const draggableImages = Array.from(new Set(state.productImages || [])).filter(

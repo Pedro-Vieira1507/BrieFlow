@@ -2,6 +2,8 @@
 import { useCallback, useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { useBriefflowStore, uid } from "@/store/briefflow";
+import { checkSku } from "@/lib/skuDelivery";
+import { formatPrice, type CatalogProduct } from "@/lib/skuReview";
 import { sendToOllama, type ChatTurn } from "@/lib/ollama";
 import {
   useGenerateMaterials,
@@ -243,6 +245,22 @@ export function useBriefflowAgent() {
     ) => {
       const isCurrent = captureWorkspaceScope(useBriefflowStore.getState);
       if (!isCurrent()) return;
+      const live = useBriefflowStore.getState().builder;
+      let catalog: CatalogProduct | undefined;
+      if (live.skuLink) {
+        try {
+          catalog = await checkSku(live);
+        } catch (error) {
+          toast.error(
+            error instanceof Error
+              ? error.message
+              : "Confira o produto da campanha.",
+          );
+          return;
+        }
+        if (!isCurrent() || useBriefflowStore.getState().builder !== live)
+          return;
+      }
       const plan = discoveryPlanRef.current ?? builderRef.current.discoveryPlan;
 
       const channels = only ? [only] : selectedMaterials(plan?.channels);
@@ -285,6 +303,7 @@ export function useBriefflowAgent() {
         ...(liveUploadedImageForGeneration
           ? [liveUploadedImageForGeneration]
           : []),
+        ...(catalog?.imageUrl ? [catalog.imageUrl] : []),
         ...scrapedProductsRef.current.map((p) => p.imageUrl).filter(Boolean),
         ...savedCampaignImages,
       ].filter(
@@ -300,10 +319,27 @@ export function useBriefflowAgent() {
         product: {
           productUrl: scrapedProductsRef.current[0]?.productUrl ?? null,
           productImageUrl: uniqueImages[0] ?? null,
-          productTitle: scrapedProductsRef.current[0]?.name ?? null,
+          productTitle:
+            catalog?.name ?? scrapedProductsRef.current[0]?.name ?? null,
         },
         availableImageUrls: uniqueImages,
       });
+
+      if (catalog) {
+        campaignBrief.product = catalog.name;
+        campaignBrief.confirmedFacts = [
+          campaignBrief.confirmedFacts,
+          "Cadastro vigente do SKU " +
+            catalog.sku +
+            ". Preço do produto " +
+            formatPrice(catalog.priceCents) +
+            ". Embalagem " +
+            catalog.unit +
+            ". Em caso de divergência no histórico, use estes dados.",
+        ]
+          .filter(Boolean)
+          .join("\n");
+      }
 
       if (!only && builderRef.current.type !== "campaign") {
         patchCampaignAssets([]);
