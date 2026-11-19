@@ -51,9 +51,11 @@ function FragmentPreview({
 export function CampaignProduct({
   focusRevision,
   onOpenPiece,
+  onReviewingChange,
 }: {
   focusRevision?: string;
   onOpenPiece: (target: PilotTarget) => void;
+  onReviewingChange: (reviewing: boolean) => void;
 }) {
   const { builder, user, workspaceVersion, loading, setBuilder } =
     useBriefflowStore();
@@ -314,11 +316,16 @@ export function CampaignProduct({
             <Button
               size="sm"
               disabled={missingChoices || busy || loading}
-              onClick={() => void act(approve)}
+              onClick={() => {
+                onReviewingChange(true);
+                void act(approve).finally(() => onReviewingChange(false));
+              }}
             >
-              {focusRevision
-                ? "Aprovar revisão da campanha"
-                : "Aprovar revisão"}
+              {busy
+                ? "Aplicando revisão…"
+                : focusRevision
+                  ? "Aprovar revisão da campanha"
+                  : "Aprovar revisão"}
             </Button>
           </div>
         )}

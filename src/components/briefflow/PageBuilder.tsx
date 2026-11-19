@@ -78,6 +78,7 @@ export function PageBuilder({
 
   const [activeTab, setActiveTab] = useState<CampaignAsset["type"]>("banner");
   const [isSaving, setIsSaving] = useState(false);
+  const [applyingReview, setApplyingReview] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
 
   const [designExporterOpen, setDesignExporterOpen] = useState(false);
@@ -236,7 +237,7 @@ export function PageBuilder({
         isSaveable={isSaveable}
         isSaving={isSaving}
         isExporting={isExporting}
-        loading={loading}
+        loading={loading || applyingReview}
         onExport={() => void handleExportClick()}
         onSave={handleSave}
         onOpenSettings={onOpenSettings}
@@ -283,13 +284,18 @@ export function PageBuilder({
             key={user?.id ?? "visitante"}
             focusRevision={focusedAsset ? target?.revision : undefined}
             onOpenPiece={openPiece}
+            onReviewingChange={setApplyingReview}
           />
           {loading && generatingLabel && builder.type === "campaign" && (
             <GeneratingBanner label={generatingLabel} />
           )}
 
           {visibleAssets.length > 0 && (
-            <div className="fade-in-up">
+            <div
+              className="fade-in-up"
+              inert={applyingReview}
+              aria-busy={applyingReview}
+            >
               {visibleAssets
                 .filter((asset) => asset.type === activeTab)
                 .map((asset) => (

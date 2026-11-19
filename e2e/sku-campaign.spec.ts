@@ -390,8 +390,55 @@ test("a merchant opens the exact pending piece in the original campaign, preserv
       competing.getByRole("heading", { name: "E-mail · Campanha de inverno" }),
     ).toBeVisible();
   }
+  // Keep the catalog busy so the immediate second click cannot race the approval.
+  await detail.evaluate(
+    () =>
+      new Promise<void>((ready, reject) => {
+        const opened = indexedDB.open("brieflow-product-catalog");
+        opened.onerror = () => reject(opened.error);
+        opened.onsuccess = () => {
+          const db = opened.result;
+          const tx = db.transaction("products", "readwrite");
+          const products = tx.objectStore("products");
+          let hold = true;
+          const expires = Date.now() + 10000;
+          window.addEventListener(
+            "test:release-catalog",
+            () => {
+              hold = false;
+            },
+            { once: true },
+          );
+          tx.oncomplete = () => db.close();
+          const next = () => {
+            products.get(["test", "pending"]).onsuccess = () => {
+              ready();
+              if (hold && Date.now() < expires) next();
+            };
+          };
+          next();
+        };
+      }),
+  );
   await detail
     .getByRole("button", { name: "Aprovar revisão da campanha" })
+    .click();
+  await expect(
+    detail.getByRole("button", { name: "Exportar campanha" }),
+  ).toBeDisabled();
+  await expect(
+    detail.getByRole("button", { name: "Salvar na biblioteca" }),
+  ).toBeDisabled();
+  await detail.evaluate(() =>
+    window.dispatchEvent(new Event("test:release-catalog")),
+  );
+  await detail.getByRole("button", { name: "Exportar campanha" }).click();
+  const readyExporter = detail.getByRole("dialog", {
+    name: "Central de exportação",
+  });
+  await expect(readyExporter).toBeVisible();
+  await readyExporter
+    .getByRole("button", { name: "Fechar", exact: true })
     .click();
   await detail.getByRole("button", { name: "Salvar na biblioteca" }).click();
   await expect
