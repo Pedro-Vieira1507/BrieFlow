@@ -16,19 +16,22 @@ import { Textarea } from "@/components/ui/textarea";
 import { CONTENT_FORMATS } from "@/lib/plans";
 import { formatStructuredContentText } from "@/lib/structuredContent";
 import { downloadBlob, sanitizeFilenamePart } from "@/lib/export-utils";
-import {
-  exportStructuredDocument,
-  structuredExportLabel,
-} from "@/lib/structuredDocumentExport";
+import { structuredExportLabel } from "@/lib/structuredDocumentExport";
 import type { BuilderState, StructuredContentDocument } from "@/types/builder";
 
+import { checkSku, exportSkuDocument } from "@/lib/skuDelivery";
+
 interface Props {
+  campaign: BuilderState;
+  assetId: string;
   state: BuilderState;
   onChange: (patch: Partial<BuilderState>) => void;
   compact?: boolean;
 }
 
 export function StructuredContentPreview({
+  campaign,
+  assetId,
   state,
   onChange,
   compact = false,
@@ -66,7 +69,17 @@ export function StructuredContentPreview({
   };
 
   const handleCopy = async () => {
-    await navigator.clipboard.writeText(text);
+    try {
+      await checkSku(campaign, document.format);
+      await navigator.clipboard.writeText(text);
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível copiar o texto.",
+      );
+      return;
+    }
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1_500);
     toast.success("Conteúdo copiado");
@@ -82,11 +95,21 @@ export function StructuredContentPreview({
     setExporting(true);
     const toastId = toast.loading("Preparando arquivo final...");
     try {
-      const format = await exportStructuredDocument(document, state.brandName);
+      const format = await exportSkuDocument(
+        campaign,
+        document,
+        state.brandName,
+        assetId,
+      );
       toast.success(`Conteúdo exportado em ${format}.`, { id: toastId });
     } catch (error) {
       console.error("Falha ao exportar conteúdo estruturado:", error);
-      toast.error("Não foi possível gerar o arquivo final.", { id: toastId });
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível gerar o arquivo final.",
+        { id: toastId },
+      );
     } finally {
       setExporting(false);
     }
@@ -151,14 +174,23 @@ export function StructuredContentPreview({
               type="button"
               size="sm"
               variant="outline"
-              onClick={() =>
-                downloadBlob(
-                  new Blob([JSON.stringify(document, null, 2)], {
-                    type: "application/json;charset=utf-8",
-                  }),
-                  `${filename}.json`,
-                )
-              }
+              onClick={async () => {
+                try {
+                  await checkSku(campaign, document.format);
+                  downloadBlob(
+                    new Blob([JSON.stringify(document, null, 2)], {
+                      type: "application/json;charset=utf-8",
+                    }),
+                    filename + ".json",
+                  );
+                } catch (error) {
+                  toast.error(
+                    error instanceof Error
+                      ? error.message
+                      : "Confira o produto da campanha.",
+                  );
+                }
+              }}
               className="hidden rounded-xl border-border-strong bg-surface-2 sm:inline-flex"
             >
               <FileJson className="mr-2 size-4" /> JSON

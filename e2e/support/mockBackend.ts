@@ -169,6 +169,7 @@ export async function installMockBackend(
   page: Page,
   options: {
     dismissOnboarding?: boolean;
+    includeNewTabs?: boolean;
     discoveryAction?: string;
     imageUrl?: string;
   } = {},
@@ -176,7 +177,8 @@ export async function installMockBackend(
   const assets: Array<Record<string, unknown>> = [];
   const actions: string[] = [];
 
-  await page.addInitScript(
+  const browserTarget = options.includeNewTabs ? page.context() : page;
+  await browserTarget.addInitScript(
     ({ authKey, authSession, dismissOnboarding, onboardingKey }) => {
       window.localStorage.setItem(authKey, JSON.stringify(authSession));
       if (dismissOnboarding) {
@@ -193,7 +195,7 @@ export async function installMockBackend(
     },
   );
 
-  await page.route("https://test.supabase.co/**", async (route) => {
+  await browserTarget.route("https://test.supabase.co/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
     const method = request.method();
@@ -255,12 +257,28 @@ export async function installMockBackend(
     }
 
     if (url.pathname === "/rest/v1/assets") {
-      if (method === "GET") return json(route, assets);
+      const rowId = url.searchParams.get("id")?.replace(/^eq\./, "");
+      const pilotId = url.searchParams
+        .get("content->skuLink->>campaignId")
+        ?.replace(/^eq\./, "");
+      if (method === "GET") {
+        let found = assets;
+        if (rowId) found = found.filter((a) => a.id === rowId);
+        if (pilotId)
+          found = found.filter(
+            (a) =>
+              (a.content as { skuLink?: { campaignId?: string } })?.skuLink
+                ?.campaignId === pilotId,
+          );
+        return json(route, found);
+      }
 
       if (method === "POST") {
         const payload = request.postDataJSON() as Record<string, unknown>;
         const created = {
-          id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          id: assets.length
+            ? crypto.randomUUID()
+            : "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
           user_id: TEST_USER_ID,
           organization_id: null,
           created_at: new Date().toISOString(),
@@ -273,18 +291,23 @@ export async function installMockBackend(
 
       if (method === "PATCH") {
         const payload = request.postDataJSON() as Record<string, unknown>;
-        const current = assets[0] ?? {
-          id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-          user_id: TEST_USER_ID,
-          organization_id: null,
-          created_at: new Date().toISOString(),
-        };
+        const index = assets.findIndex((a) => a.id === rowId);
+        const current = assets[index];
+        const version = url.searchParams
+          .get("updated_at")
+          ?.replace(/^eq\./, "");
+        if (!current || (version && current.updated_at !== version))
+          return json(
+            route,
+            { code: "PGRST116", message: "No matching row" },
+            406,
+          );
         const updated = {
           ...current,
           ...payload,
           updated_at: new Date().toISOString(),
         };
-        assets.splice(0, assets.length, updated);
+        assets[index] = updated;
         return json(route, updated);
       }
 

@@ -1,5 +1,5 @@
 // src/components/briefflow/LibraryModal.tsx
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -18,6 +18,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { copySkuCampaign, withPilotIdentity } from "@/lib/skuPilot";
 import { useBriefflowStore } from "@/store/briefflow";
 import {
   createSavedAssetVariant,
@@ -32,6 +33,8 @@ import {
   type SavedAssetsCursor,
   type SavedLibraryAsset,
 } from "@/lib/supabase";
+import { useProductCatalog } from "@/hooks/useProductCatalog";
+import { reviewSku, affectsOutput } from "@/lib/skuReview";
 import { CampaignTabs } from "@/components/briefflow/builder/CampaignTabs";
 import { ExperimentComparison } from "@/components/briefflow/ExperimentComparison";
 import {
@@ -93,6 +96,39 @@ export function LibraryModal() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [nextCursor, setNextCursor] = useState<SavedAssetsCursor | null>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const { products, ready: catalogReady } = useProductCatalog(user?.id);
+  const [skuOnly, setSkuOnly] = useState(false);
+  const skuStatuses = useMemo(() => {
+    const result = new Map<
+      string,
+      { sku: string; label: string; pending: boolean }
+    >();
+    const bySku = new Map(products.map((product) => [product.sku, product]));
+    for (const item of items) {
+      const sku = item.content?.skuLink?.approved?.sku;
+      if (!sku) continue;
+      const product = bySku.get(sku);
+      const mentions = product ? reviewSku(item.content, product) : [];
+      const pieces = (item.content.campaignAssets ?? []).filter((asset) =>
+        mentions.some((issue) => affectsOutput(issue, asset.type)),
+      ).length;
+      const label = pieces
+        ? pieces + (pieces === 1 ? " peça para revisar" : " peças para revisar")
+        : mentions.length
+          ? "Revisar o briefing"
+          : product
+            ? "Textos conferidos"
+            : catalogReady
+              ? "Conferir fonte"
+              : "Consultando fonte";
+      result.set(item.id, {
+        sku,
+        label,
+        pending: mentions.length > 0 || (!product && catalogReady),
+      });
+    }
+    return result;
+  }, [items, products, catalogReady]);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | LibraryAssetStatus>(
     "all",
@@ -228,14 +264,14 @@ export function LibraryModal() {
   };
 
   const handleApplyToCanvas = (item: SavedLibraryAsset) => {
-    setBuilder(item.content);
-    setActiveLibraryAssetId(item.id);
+    setBuilder(withPilotIdentity(item.content, item.id));
+    setActiveLibraryAssetId(item.id, item.updated_at);
     toast.success("Campanha carregada no Canvas com sucesso!");
     setLibraryOpen(false);
   };
 
   const handleDuplicateToCanvas = (item: SavedLibraryAsset) => {
-    setBuilder(item.content);
+    setBuilder(copySkuCampaign(item.content));
     setActiveLibraryAssetId(null);
     toast.success("Cópia carregada no Canvas", {
       description: "Ao salvar, ela será criada como uma nova campanha.",
@@ -247,11 +283,13 @@ export function LibraryModal() {
   const visibleEntries = items
     .map((item, index) => ({ item, index, label: getLibraryItemLabel(item) }))
     .filter(({ item, label }) => {
+      if (skuOnly && !skuStatuses.get(item.id)?.pending) return false;
       if (statusFilter !== "all" && item.status !== statusFilter) return false;
       if (!normalizedQuery) return true;
-      const haystack = `${label} ${item.name} ${item.type}`.toLocaleLowerCase(
-        "pt-BR",
-      );
+      const haystack =
+        `${label} ${item.name} ${item.type} ${item.content?.skuLink?.approved?.sku ?? ""}`.toLocaleLowerCase(
+          "pt-BR",
+        );
       return haystack.includes(normalizedQuery);
     });
 
@@ -262,8 +300,18 @@ export function LibraryModal() {
     }
   }, [normalizedQuery, selectedIndex, statusFilter, visibleEntries]);
 
-  const selectedItem = items[selectedIndex];
-  const selectedState: BuilderState | undefined = selectedItem?.content;
+  const selectedItem = visibleEntries.some(
+    (entry) => entry.index === selectedIndex,
+  )
+    ? items[selectedIndex]
+    : undefined;
+  const selectedState: BuilderState | undefined = useMemo(
+    () =>
+      selectedItem
+        ? withPilotIdentity(selectedItem.content, selectedItem.id)
+        : undefined,
+    [selectedItem],
+  );
   const campaignAssets =
     selectedState?.type === "campaign"
       ? selectedState.campaignAssets
@@ -412,7 +460,7 @@ export function LibraryModal() {
   };
 
   const handleAssetPatch = (assetId: string, patch: Partial<BuilderState>) => {
-    if (!selectedState || !campaignAssets) return;
+    if (!selectedItem || !selectedState || !campaignAssets) return;
     const nextAssets = campaignAssets.map((a) =>
       a.id === assetId ? { ...a, content: { ...a.content, ...patch } } : a,
     );
@@ -520,6 +568,16 @@ export function LibraryModal() {
                       ))}
                     </select>
                   </div>
+                  {skuStatuses.size > 0 && (
+                    <label className="mt-2 flex items-center gap-2 px-1 text-xs text-fg-secondary">
+                      <input
+                        type="checkbox"
+                        checked={skuOnly}
+                        onChange={(e) => setSkuOnly(e.target.checked)}
+                      />
+                      Só campanhas com revisão de SKU
+                    </label>
+                  )}
                   <p
                     className="mt-2 px-1 text-xs font-semibold uppercase tracking-[0.13em] text-fg-muted"
                     aria-live="polite"
@@ -537,6 +595,7 @@ export function LibraryModal() {
                   ) : null}
 
                   {visibleEntries.map(({ item, index, label }) => {
+                    const skuStatus = skuStatuses.get(item.id);
                     const isSelected = index === selectedIndex;
                     const dateValue = item.updated_at || item.created_at;
                     const dateStr = dateValue
@@ -568,6 +627,18 @@ export function LibraryModal() {
                           <span className="block truncate text-xs font-semibold text-fg-primary">
                             {label}
                           </span>
+                          {skuStatus && (
+                            <span
+                              className={cn(
+                                "mt-1 block text-xs",
+                                skuStatus.pending
+                                  ? "text-amber-300"
+                                  : "text-fg-secondary",
+                              )}
+                            >
+                              {skuStatus.sku} · {skuStatus.label}
+                            </span>
+                          )}
                           <span className="mt-1.5 flex flex-wrap gap-1.5">
                             <span className="inline-flex rounded-full border border-border-subtle bg-surface-1 px-2 py-0.5 text-[10px] font-semibold text-fg-secondary">
                               {libraryStatusLabel(item.status)}
@@ -620,7 +691,8 @@ export function LibraryModal() {
               </div>
 
               <div className="relative flex min-w-0 flex-1 flex-col overflow-y-auto bg-surface-0 p-4 sm:p-6">
-                {selectedState &&
+                {selectedItem &&
+                selectedState &&
                 campaignAssets &&
                 campaignAssets.length > 0 ? (
                   <div className="space-y-6 pb-20 animate-in fade-in slide-in-from-bottom-4 duration-300">
@@ -898,6 +970,7 @@ export function LibraryModal() {
                     ) : null}
 
                     <CampaignTabs
+                      campaign={selectedState}
                       assets={campaignAssets}
                       onAssetChange={handleAssetPatch}
                       activeTab={activeTab}

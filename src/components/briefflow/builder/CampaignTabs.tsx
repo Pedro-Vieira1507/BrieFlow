@@ -35,11 +35,13 @@ import {
 } from "@/lib/campaignGeneration";
 
 interface Props {
+  campaign: BuilderState;
   assets: CampaignAsset[];
   onAssetChange: (assetId: string, patch: Partial<BuilderState>) => void;
   activeTab: CampaignAsset["type"];
   onTabChange: (tab: CampaignAsset["type"]) => void;
   loading?: boolean;
+  onlyAvailable?: boolean;
   onRetry?: (channel: CampaignAsset["type"]) => void | Promise<void>;
   onRefine?: (
     channel: CampaignAsset["type"],
@@ -158,11 +160,13 @@ function BannerRecoveryProductUpload({
 }
 
 export function CampaignTabs({
+  campaign,
   assets,
   onAssetChange,
   activeTab,
   onTabChange,
   loading = false,
+  onlyAvailable = false,
   onRetry,
   onRefine,
 }: Props) {
@@ -172,7 +176,8 @@ export function CampaignTabs({
   const visibleChannels = CHANNELS.filter(
     ({ key }) =>
       assets.some((asset) => asset.type === key) ||
-      (CORE_MATERIAL_TYPES as readonly string[]).includes(key),
+      (!onlyAvailable &&
+        (CORE_MATERIAL_TYPES as readonly string[]).includes(key)),
   ).sort(
     (left, right) =>
       MATERIAL_TYPES.indexOf(left.key) - MATERIAL_TYPES.indexOf(right.key),
@@ -335,16 +340,20 @@ export function CampaignTabs({
               />
             ) : asset.type === "email" ? (
               <EmailPreview
+                offer={campaign.discoveryPlan?.offer}
                 state={asset.content}
                 onChange={(patch) => onAssetChange(asset.id, patch)}
               />
             ) : asset.type === "social" ? (
               <SocialPreview
+                offer={campaign.discoveryPlan?.offer}
                 state={asset.content}
                 onChange={(patch) => onAssetChange(asset.id, patch)}
               />
             ) : (
               <StructuredContentPreview
+                assetId={asset.id}
+                campaign={campaign}
                 state={asset.content}
                 onChange={(patch) => onAssetChange(asset.id, patch)}
               />

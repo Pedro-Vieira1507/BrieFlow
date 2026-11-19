@@ -1,5 +1,6 @@
 // src/types/builder.ts
 import type { MaterialType } from "./brief";
+import type { SkuLink } from "../lib/skuReview";
 
 export type BuilderType = MaterialType | "none" | "campaign" | "discovery_plan";
 
@@ -143,6 +144,7 @@ export interface BannerFontSizes {
 
 export interface BuilderState {
   type: BuilderType;
+  skuLink?: SkuLink;
   generationError?: string;
   title?: string;
   subtitle?: string;

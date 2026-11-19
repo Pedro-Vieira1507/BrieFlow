@@ -4,6 +4,7 @@ import {
   type User,
 } from "@supabase/supabase-js";
 
+import { campaignKey, copySkuCampaign } from "@/lib/skuPilot";
 import type { BuilderState } from "@/types/builder";
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
@@ -247,6 +248,7 @@ export async function saveAssetToLibrary(
   state: BuilderState,
   existingAssetId?: string | null,
   expectedUserId?: string,
+  expectedUpdatedAt?: string,
 ): Promise<SavedLibraryAsset> {
   if (!supabase) throw new Error("Supabase não configurado.");
   const user = await requireUser();
@@ -279,7 +281,15 @@ export async function saveAssetToLibrary(
         ...payload,
         status: "draft",
       });
-  const { data, error } = await query.select().single();
+  const guarded =
+    existingAssetId && expectedUpdatedAt
+      ? query.eq("updated_at", expectedUpdatedAt)
+      : query;
+  const { data, error } = await guarded.select().single();
+  if (existingAssetId && expectedUpdatedAt && error?.code === "PGRST116")
+    throw new Error(
+      "A versão salva mudou ou foi removida. Sua edição continua aberta. Confira a versão atual na biblioteca.",
+    );
 
   if (error) {
     if (error.message.includes("asset_limit_reached")) {
@@ -438,6 +448,76 @@ export async function getSavedAssetsPage(options?: {
     items: await refreshPrivateUrls(pageRows),
     nextCursor,
   };
+}
+
+export async function getSavedSkuCampaigns(
+  userId: string,
+  skus: ReadonlySet<string>,
+) {
+  if (!supabase || (await requireUser()).id !== userId)
+    throw new Error("Biblioteca indisponível nesta conta.");
+  const campaigns: Pick<SavedLibraryAsset, "id" | "name" | "content">[] = [];
+  let cursor = "";
+  for (;;) {
+    let query = supabase
+      .from("assets")
+      .select("id,name,content")
+      .eq("user_id", userId)
+      .not("content->skuLink", "is", null)
+      .order("id", { ascending: true })
+      .limit(75);
+    if (cursor) query = query.gt("id", cursor);
+    const { data, error } = await query;
+    if (error) throw error;
+    const page = (data ?? []) as typeof campaigns;
+    campaigns.push(
+      ...page.filter(
+        (row) =>
+          row.content?.skuLink && skus.has(row.content.skuLink.approved.sku),
+      ),
+    );
+    if (page.length < 75) return campaigns;
+    const next = page[page.length - 1].id;
+    if (next <= cursor) throw new Error("Leitura incompleta da biblioteca.");
+    cursor = next;
+  }
+}
+
+export async function getSavedPilotCampaign(
+  userId: string,
+  campaignId: string,
+  libraryAssetId?: string,
+): Promise<SavedLibraryAsset> {
+  if (!supabase || (await requireUser()).id !== userId)
+    throw new Error("Entre na conta que iniciou a revisão.");
+  const rowId =
+    libraryAssetId ||
+    (campaignId.startsWith("saved:") ? campaignId.slice(6) : undefined);
+  const query = supabase
+    .from("assets")
+    .select(SAVED_ASSET_COLUMNS)
+    .eq("user_id", userId);
+  const { data, error } = await (
+    rowId
+      ? query.eq("id", rowId)
+      : query.eq("content->skuLink->>campaignId", campaignId)
+  ).limit(2);
+  if (error)
+    throw new Error(
+      "Não foi possível consultar a biblioteca. Tente novamente.",
+    );
+  const rows = (data ?? []) as SavedLibraryAsset[];
+  const item = rows[0];
+  if (
+    rows.length !== 1 ||
+    item.user_id !== userId ||
+    campaignKey(item.content, item.id) !== campaignId
+  )
+    throw new Error(
+      "A campanha original não está disponível nesta biblioteca. Confira se ela foi salva e continua vinculada ao produto.",
+    );
+  const [refreshed] = await refreshPrivateUrls([item]);
+  return refreshed;
 }
 
 export async function getSavedAssets(): Promise<SavedLibraryAsset[]> {
@@ -630,7 +710,7 @@ export async function createSavedAssetVariant(
       user_id: user.id,
       name: normalizeLibraryLabel(`${baseName} · Variação B`),
       type: source.type,
-      content: source.content,
+      content: copySkuCampaign(source.content),
       status: "draft",
       experiment_group_id: experimentGroupId,
       variant_label: "B",

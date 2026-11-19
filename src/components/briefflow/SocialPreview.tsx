@@ -28,13 +28,13 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
-import { useBriefflowStore } from "@/store/briefflow";
 import { cleanText, isEmptyLike } from "@/lib/sanitize";
 import { analyzeImageWithVisionFn } from "@/lib/vision-api";
 import { toast } from "sonner";
 import { uploadCampaignAsset } from "@/lib/supabase";
 
 interface Props {
+  offer?: string;
   state: BuilderState;
   onChange: (patch: Partial<BuilderState>) => void;
   exportWrapperClass?: string;
@@ -42,6 +42,7 @@ interface Props {
 }
 
 export function SocialPreview({
+  offer: offerStr,
   state,
   onChange,
   exportWrapperClass,
@@ -56,8 +57,6 @@ export function SocialPreview({
   const [liked, setLiked] = useState(false);
   const [saved, setSaved] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
-
-  const { builder } = useBriefflowStore();
 
   const prompt = state.imagePrompt || "";
 
@@ -83,7 +82,6 @@ export function SocialPreview({
   const isProductImage = hasImportedImage;
   const brandName = cleanText(state.brandName, "Sua Marca");
 
-  const offerStr = builder.discoveryPlan?.offer;
   const hasOffer = !isEmptyLike(offerStr);
 
   const draggableImages = Array.from(new Set(state.productImages || [])).filter(

@@ -304,9 +304,11 @@ export function structuredExportLabel(
 export async function exportStructuredDocument(
   document: StructuredContentDocument,
   brandName?: string,
+  beforeDownload?: () => Promise<unknown>,
 ): Promise<"PPTX" | "PDF" | "TXT"> {
   if (document.format === "slides") {
     const file = await buildSlideDeck(document, brandName);
+    await beforeDownload?.();
     downloadBlob(
       new Blob([file], {
         type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
@@ -316,13 +318,13 @@ export async function exportStructuredDocument(
     return "PPTX";
   }
   if (document.format === "technical_sheet") {
-    downloadBlob(
-      await buildTechnicalSheet(document, brandName),
-      `${exportBaseName(document, brandName)}.pdf`,
-    );
+    const file = await buildTechnicalSheet(document, brandName);
+    await beforeDownload?.();
+    downloadBlob(file, `${exportBaseName(document, brandName)}.pdf`);
     return "PDF";
   }
 
+  await beforeDownload?.();
   downloadBlob(
     new Blob([formatStructuredContentText(document)], {
       type: "text/plain;charset=utf-8",
