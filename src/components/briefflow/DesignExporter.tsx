@@ -47,7 +47,7 @@ import { cn } from "@/lib/utils";
 
 import type { BuilderState } from "@/types/builder";
 import type { CoreMaterialType } from "@/types/brief";
-import { checkSku } from "@/lib/skuDelivery";
+import { checkSku, prepareSkuDelivery } from "@/lib/skuDelivery";
 import { BannerPreview } from "./BannerPreview";
 import { EmailPreview } from "./EmailPreview";
 import { SocialPreview } from "./SocialPreview";
@@ -378,8 +378,9 @@ export function DesignExporter({
       const outputHeight = Math.round(height * pixelRatio);
       const filename = `${activeTab}_${activeTab === "banner" ? device : "4x5"}_${brandSlug}_${outputWidth}x${outputHeight}.${format}`;
 
-      await checkSku(state, activeTab);
+      const receipt = await prepareSkuDelivery(state, activeTab);
       triggerDownload(dataUrl, filename);
+      await receipt?.(format === "png" ? "PNG" : "JPG");
       toast.success("Arte exportada com sucesso!", { id: toastId });
     } catch (error) {
       const message =
@@ -406,11 +407,12 @@ export function DesignExporter({
           deliveryImage,
           state?.discoveryPlan?.offer,
         );
-        await checkSku(state, "email");
+        const receipt = await prepareSkuDelivery(state, "email");
         downloadBlob(
           new Blob([html], { type: "text/html;charset=utf-8" }),
           `email_envio_${sanitizeFilenamePart(emailState.brandName)}.html`,
         );
+        await receipt?.("HTML");
         toast.success("HTML para envio exportado.", { id: toastId });
         return;
       }
@@ -461,12 +463,13 @@ export function DesignExporter({
     try {
       const brandName =
         String(socialState.brandName ?? "Marca").trim() || "Marca";
-      await checkSku(state, "social");
+      const receipt = await prepareSkuDelivery(state, "social");
       const textContent = buildSocialExportText(socialState);
       downloadBlob(
         new Blob([textContent], { type: "text/plain;charset=utf-8" }),
         `social_${sanitizeFilenamePart(brandName)}_legenda.txt`,
       );
+      await receipt?.("TXT");
       toast.success("Legenda exportada com sucesso!");
     } catch (error) {
       toast.error(

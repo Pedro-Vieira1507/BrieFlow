@@ -349,6 +349,7 @@ export function CampaignTabs({
               />
             ) : (
               <StructuredContentPreview
+                assetId={asset.id}
                 campaign={campaign}
                 state={asset.content}
                 onChange={(patch) => onAssetChange(asset.id, patch)}

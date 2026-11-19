@@ -4,6 +4,7 @@ import {
   type User,
 } from "@supabase/supabase-js";
 
+import { copySkuCampaign } from "@/lib/skuPilot";
 import type { BuilderState } from "@/types/builder";
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
@@ -440,6 +441,39 @@ export async function getSavedAssetsPage(options?: {
   };
 }
 
+export async function getSavedSkuCampaigns(
+  userId: string,
+  skus: ReadonlySet<string>,
+) {
+  if (!supabase || (await requireUser()).id !== userId)
+    throw new Error("Biblioteca indisponível nesta conta.");
+  const campaigns: Pick<SavedLibraryAsset, "id" | "name" | "content">[] = [];
+  let cursor = "";
+  for (;;) {
+    let query = supabase
+      .from("assets")
+      .select("id,name,content")
+      .eq("user_id", userId)
+      .not("content->skuLink", "is", null)
+      .order("id", { ascending: true })
+      .limit(75);
+    if (cursor) query = query.gt("id", cursor);
+    const { data, error } = await query;
+    if (error) throw error;
+    const page = (data ?? []) as typeof campaigns;
+    campaigns.push(
+      ...page.filter(
+        (row) =>
+          row.content?.skuLink && skus.has(row.content.skuLink.approved.sku),
+      ),
+    );
+    if (page.length < 75) return campaigns;
+    const next = page[page.length - 1].id;
+    if (next <= cursor) throw new Error("Leitura incompleta da biblioteca.");
+    cursor = next;
+  }
+}
+
 export async function getSavedAssets(): Promise<SavedLibraryAsset[]> {
   const page = await getSavedAssetsPage();
   return page.items;
@@ -630,7 +664,7 @@ export async function createSavedAssetVariant(
       user_id: user.id,
       name: normalizeLibraryLabel(`${baseName} · Variação B`),
       type: source.type,
-      content: source.content,
+      content: copySkuCampaign(source.content),
       status: "draft",
       experiment_group_id: experimentGroupId,
       variant_label: "B",

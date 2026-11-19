@@ -23,7 +23,7 @@ export function demoCampaign(product: CatalogProduct): BuilderState {
   return {
     type: "campaign",
     brandName,
-    skuLink: { approved: product },
+    skuLink: { approved: product, campaignId: crypto.randomUUID(), demo: true },
     discoveryPlan: {
       brandName,
       detectedContext: "Campanha de exemplo para e-commerce.",

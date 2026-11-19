@@ -9,13 +9,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { downloadBlob } from "@/lib/export-utils";
+import { updateCatalog } from "@/lib/skuPilotWorkspace";
 import { exampleCsv } from "@/lib/skuDemo";
 import {
   getProduct,
   parseCatalogCsv,
   productInput,
   sameProduct,
-  writeProducts,
   type CatalogWrite,
   type ProductForm,
   type ProductInput,
@@ -93,7 +93,7 @@ export function ProductCatalogDialog({
   async function save() {
     const input = productInput(form);
     if (!selected || !sameProduct(selected, input))
-      await writeProducts(owner, [
+      await updateCatalog(owner, [
         { input, expected: selected?.revision ?? null },
       ]);
     const current = await getProduct(owner, input.sku);
@@ -286,7 +286,7 @@ export function ProductCatalogDialog({
                 size="sm"
                 onClick={() =>
                   void act(async () => {
-                    await writeProducts(owner, pending);
+                    await updateCatalog(owner, pending);
                     setPending([]);
                     const refreshed =
                       selected && (await getProduct(owner, selected.sku));

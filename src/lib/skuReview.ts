@@ -10,6 +10,7 @@ export interface CatalogProduct {
   priorUnits?: string[];
   priorPrices?: number[];
   revision: string;
+  factRevision?: string;
   updatedAt: string;
 }
 
@@ -20,6 +21,8 @@ interface FieldException {
 
 export interface SkuLink {
   approved: CatalogProduct;
+  campaignId?: string;
+  demo?: boolean;
   previousPrices?: number[];
   previousUnits?: string[];
   exceptions?: Record<string, FieldException>;
@@ -412,6 +415,7 @@ export function applySkuReview(
   return {
     ...next,
     skuLink: {
+      ...link,
       approved: product,
       previousPrices: [
         ...new Set([...(link.previousPrices ?? []), link.approved.priceCents]),

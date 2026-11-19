@@ -18,6 +18,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { copySkuCampaign, withPilotIdentity } from "@/lib/skuPilot";
 import { useBriefflowStore } from "@/store/briefflow";
 import {
   createSavedAssetVariant,
@@ -263,14 +264,14 @@ export function LibraryModal() {
   };
 
   const handleApplyToCanvas = (item: SavedLibraryAsset) => {
-    setBuilder(item.content);
+    setBuilder(withPilotIdentity(item.content, item.id));
     setActiveLibraryAssetId(item.id);
     toast.success("Campanha carregada no Canvas com sucesso!");
     setLibraryOpen(false);
   };
 
   const handleDuplicateToCanvas = (item: SavedLibraryAsset) => {
-    setBuilder(item.content);
+    setBuilder(copySkuCampaign(item.content));
     setActiveLibraryAssetId(null);
     toast.success("Cópia carregada no Canvas", {
       description: "Ao salvar, ela será criada como uma nova campanha.",
@@ -304,7 +305,13 @@ export function LibraryModal() {
   )
     ? items[selectedIndex]
     : undefined;
-  const selectedState: BuilderState | undefined = selectedItem?.content;
+  const selectedState: BuilderState | undefined = useMemo(
+    () =>
+      selectedItem
+        ? withPilotIdentity(selectedItem.content, selectedItem.id)
+        : undefined,
+    [selectedItem],
+  );
   const campaignAssets =
     selectedState?.type === "campaign"
       ? selectedState.campaignAssets

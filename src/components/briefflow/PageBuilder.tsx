@@ -5,12 +5,11 @@ import { cn } from "@/lib/utils";
 import { useBriefflowStore } from "@/store/briefflow";
 import { isSupabaseConfigured, saveAssetToLibrary } from "@/lib/supabase";
 import { getBuilderCampaignBrandName } from "@/lib/campaignGeneration";
-import { exportStructuredDocument } from "@/lib/structuredDocumentExport";
 import { CORE_MATERIAL_TYPES } from "@/types/brief";
 import { captureWorkspaceScope } from "@/lib/workspaceScope";
 
 import { CampaignProduct } from "./CampaignProduct";
-import { checkSku } from "@/lib/skuDelivery";
+import { checkSku, exportSkuDocument } from "@/lib/skuDelivery";
 import { BuilderHeader } from "./builder/BuilderHeader";
 import { GeneratingBanner } from "./builder/GeneratingBanner";
 import { DiscoveryPlanView } from "./builder/DiscoveryPlanView";
@@ -143,8 +142,11 @@ export function PageBuilder({
       setIsExporting(true);
       const toastId = toast.loading("Preparando arquivo final...");
       try {
-        const format = await exportStructuredDocument(document, brand, () =>
-          checkSku(builder, activeTab),
+        const format = await exportSkuDocument(
+          builder,
+          document,
+          brand,
+          asset.id,
         );
         toast.success(`Conteúdo exportado em ${format}.`, { id: toastId });
       } catch (error) {

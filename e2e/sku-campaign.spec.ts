@@ -30,6 +30,14 @@ test("catalog price review blocks obsolete files, preserves manual copy and surv
   const backend = await installMockBackend(page);
   await openDemo(page);
   const panel = page.getByRole("region", { name: "Produto da campanha" });
+  const results = page.getByRole("dialog", { name: "Resultados do piloto" });
+  const openResults = () =>
+    panel.getByRole("button", { name: "Resultados do piloto" }).click();
+  const closeResults = () =>
+    results.getByRole("button", { name: "Fechar", exact: true }).click();
+  await openResults();
+  await expect(results).toContainText("As medições começam");
+  await closeResults();
   await page.getByRole("tab", { name: "WhatsApp", exact: true }).click();
   const manual =
     "Reserve pelo WhatsApp. Café da Serra por R$ 39,90. Eu separei o seu!";
@@ -48,6 +56,11 @@ test("catalog price review blocks obsolete files, preserves manual copy and surv
   ).toBeVisible();
   await expect(panel).toContainText("Peças afetadas");
   await expect(panel.locator("li")).toHaveCount(2);
+  await openResults();
+  await expect(results).toContainText("0 de 2 peças exportadas");
+  await expect(results).toContainText("Biblioteca e campanha aberta");
+  await expect(results).toContainText("3 peças conferidas");
+  await closeResults();
   const files: string[] = [];
   page.on("download", (file) => files.push(file.suggestedFilename()));
   await page.getByRole("button", { name: "Exportar campanha" }).click();
@@ -94,6 +107,9 @@ test("catalog price review blocks obsolete files, preserves manual copy and surv
   ).toBeVisible();
   await exporter.getByRole("button", { name: "Fechar", exact: true }).click();
   expect(files).toEqual([]);
+  await openResults();
+  await expect(results).toContainText("0 de 2 peças exportadas");
+  await closeResults();
   await panel.getByRole("button", { name: "Aprovar revisão" }).click();
   await expect(panel).toContainText("Textos conferidos com a fonte.");
   await page.getByRole("tab", { name: "WhatsApp", exact: true }).click();
@@ -102,6 +118,14 @@ test("catalog price review blocks obsolete files, preserves manual copy and surv
       wa.getByRole("button", { name: "TXT", exact: true }).click(),
     ),
   ).toBe(manual.replace("39,90", "44,90"));
+  await downloadText(page, () =>
+    wa.getByRole("button", { name: "TXT", exact: true }).click(),
+  );
+  await openResults();
+  await expect(results).toContainText("1 de 2 peças exportadas");
+  await expect(results.getByText(/Revisão aprovada ·/)).toHaveCount(2);
+  await expect(results).not.toContainText("Até a última exportação");
+  await closeResults();
   await page.getByRole("tab", { name: "E-mail", exact: true }).click();
   await page.getByRole("button", { name: "Exportar campanha" }).click();
   await exporter
@@ -121,6 +145,36 @@ test("catalog price review blocks obsolete files, preserves manual copy and surv
   const library = await openLibrary(page);
   await library.getByRole("button", { name: "Continuar original" }).click();
   await expect(panel).toContainText("Textos conferidos com a fonte.");
+  await openResults();
+  await expect(results).toContainText("Concluída");
+  await expect(results).toContainText("2 de 2 peças exportadas");
+  await expect(results).toContainText("Até a última exportação");
+  await expect(results).toContainText("Primeiro arquivo HTML");
+  await expect(results).toContainText("Primeiro arquivo TXT");
+  const baseline = results.getByLabel("Tempo manual das mesmas peças (min)");
+  await expect(baseline).toHaveValue("");
+  await baseline.fill("12,5");
+  await results.getByRole("button", { name: "Salvar tempo manual" }).click();
+  await expect(results).toContainText("a menos com o BrieFlow");
+  const csv = await downloadText(page, () =>
+    results.getByRole("button", { name: "Baixar medições (CSV)" }).click(),
+  );
+  expect(csv.split("\r\n")).toHaveLength(3);
+  expect(csv).toContain('"Demonstração"');
+  expect(csv).toContain('"750"');
+  const rows = csv
+    .trim()
+    .split("\r\n")
+    .slice(1)
+    .map((row) => row.slice(1, -1).split('";"'));
+  expect(rows.map((r) => r[20]).sort()).toEqual(["HTML", "TXT"]);
+  expect(
+    rows.every(
+      (r) =>
+        Number(r[22]) ===
+        Math.round((Date.parse(r[21]) - Date.parse(r[10])) / 1000),
+    ),
+  ).toBe(true);
   expect(backend.actions).toEqual([]);
 });
 
@@ -216,4 +270,63 @@ test("a shop product can be created from its briefing and its current catalog fa
     page.getByRole("region", { name: "Produto da campanha" }),
   ).toContainText("Moedor manual");
   expect(backend.actions).toContain("email");
+});
+test("the pilot includes other saved campaigns and identifies incomplete library reads", async ({
+  page,
+  isMobile,
+}) => {
+  test.skip(
+    isMobile,
+    "As duas campanhas e a leitura parcial são verificadas no desktop.",
+  );
+  const backend = await installMockBackend(page);
+  await openDemo(page);
+  await page.getByRole("button", { name: "Salvar na biblioteca" }).click();
+  await expect.poll(() => backend.assets.length).toBe(1);
+  const original = backend.assets[0];
+  const copy = structuredClone(original);
+  copy.id = "00000000-0000-4000-8000-000000000002";
+  copy.name = "Campanha de inverno";
+  const copyState = copy.content as { skuLink: { campaignId: string } };
+  copyState.skuLink.campaignId = "campanha-de-inverno";
+  backend.assets.push(copy);
+  const edit = async (field: string, value: string) => {
+    await page.getByRole("button", { name: "Editar cadastro" }).click();
+    const catalog = page.getByRole("dialog", { name: "Catálogo de produtos" });
+    await catalog.getByLabel(field).fill(value);
+    await catalog.getByRole("button", { name: "Salvar cadastro" }).click();
+    await expect(catalog).toBeHidden();
+  };
+  const open = () =>
+    page.getByRole("button", { name: "Resultados do piloto" }).click();
+  const results = page.getByRole("dialog", { name: "Resultados do piloto" });
+  const close = () =>
+    results.getByRole("button", { name: "Fechar", exact: true }).click();
+  await edit("Preço em reais", "44,90");
+  await edit("Fonte do cadastro", "Revisão da fonte do empório");
+  await open();
+  await expect(results.getByRole("option")).toHaveCount(1);
+  await expect(results).toContainText("6 peças conferidas");
+  await expect(results).toContainText("0 de 4 peças exportadas");
+  await expect(
+    results.getByRole("listitem").filter({ hasText: "Campanha de inverno" }),
+  ).toHaveCount(2);
+  await close();
+  await page.route("**/rest/v1/assets?**", (route) =>
+    new URL(route.request().url()).searchParams.has("content->skuLink")
+      ? route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: '{"message":"unavailable"}',
+        })
+      : route.fallback(),
+  );
+  await edit("Preço em reais", "47,90");
+  await open();
+  await expect(results).toContainText("Amostra parcial");
+  await expect(results).toContainText("0 de 2 peças exportadas");
+  await expect(results.getByRole("option")).toHaveCount(2);
+  await results.getByRole("combobox").selectOption({ index: 1 });
+  await expect(results).toContainText("Uma nova mudança substituiu esta");
+  await expect(results).not.toContainText("Até a última exportação");
 });

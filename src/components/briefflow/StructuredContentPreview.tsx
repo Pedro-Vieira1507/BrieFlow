@@ -16,16 +16,14 @@ import { Textarea } from "@/components/ui/textarea";
 import { CONTENT_FORMATS } from "@/lib/plans";
 import { formatStructuredContentText } from "@/lib/structuredContent";
 import { downloadBlob, sanitizeFilenamePart } from "@/lib/export-utils";
-import {
-  exportStructuredDocument,
-  structuredExportLabel,
-} from "@/lib/structuredDocumentExport";
+import { structuredExportLabel } from "@/lib/structuredDocumentExport";
 import type { BuilderState, StructuredContentDocument } from "@/types/builder";
 
-import { checkSku } from "@/lib/skuDelivery";
+import { checkSku, exportSkuDocument } from "@/lib/skuDelivery";
 
 interface Props {
   campaign: BuilderState;
+  assetId: string;
   state: BuilderState;
   onChange: (patch: Partial<BuilderState>) => void;
   compact?: boolean;
@@ -33,6 +31,7 @@ interface Props {
 
 export function StructuredContentPreview({
   campaign,
+  assetId,
   state,
   onChange,
   compact = false,
@@ -96,10 +95,11 @@ export function StructuredContentPreview({
     setExporting(true);
     const toastId = toast.loading("Preparando arquivo final...");
     try {
-      const format = await exportStructuredDocument(
+      const format = await exportSkuDocument(
+        campaign,
         document,
         state.brandName,
-        () => checkSku(campaign, document.format),
+        assetId,
       );
       toast.success(`Conteúdo exportado em ${format}.`, { id: toastId });
     } catch (error) {

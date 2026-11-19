@@ -5,7 +5,7 @@ import { Package, PencilLine } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CONTENT_FORMATS } from "@/lib/plans";
 import { useBriefflowStore } from "@/store/briefflow";
-import { getProduct, writeProducts } from "@/lib/productCatalog";
+import { getProduct, recordPilot, writeProducts } from "@/lib/productCatalog";
 import {
   affectsOutput,
   applySkuReview,
@@ -16,6 +16,8 @@ import {
   type SkuMention,
 } from "@/lib/skuReview";
 import { demoCampaign, demoProducts } from "@/lib/skuDemo";
+import { campaignKey, factRevision } from "@/lib/skuPilot";
+import { PilotResults } from "./PilotResults";
 import { ProductCatalogDialog } from "./ProductCatalogDialog";
 import { toast } from "sonner";
 
@@ -110,7 +112,22 @@ export function CampaignProduct() {
         "O texto ou o cadastro mudou. Confira os trechos atuais.",
       );
     if (!isCurrent()) return;
-    setBuilder(applySkuReview(builder, latest, decisions));
+    const next = applySkuReview(builder, latest, decisions);
+    setBuilder(next);
+    const id = campaignKey(
+      next,
+      useBriefflowStore.getState().activeLibraryAssetId,
+    );
+    if (id)
+      await recordPilot(owner, latest.sku, factRevision(latest), {
+        type: "review",
+        campaignId: id,
+        at: Date.now(),
+      }).catch(() =>
+        toast.warning(
+          "Os textos foram revisados. Não foi possível registrar o horário.",
+        ),
+      );
     setDecisions({});
     toast.success(
       "Revisão aprovada. Os textos já estão disponíveis para exportação.",
@@ -118,7 +135,17 @@ export function CampaignProduct() {
   }
   function link(next: CatalogProduct) {
     if (!isCurrent()) return;
-    setBuilder((current) => ({ ...current, skuLink: { approved: next } }));
+    setBuilder((current) => ({
+      ...current,
+      skuLink: {
+        approved: next,
+        campaignId:
+          campaignKey(
+            current,
+            useBriefflowStore.getState().activeLibraryAssetId,
+          ) || crypto.randomUUID(),
+      },
+    }));
     setEditing(false);
     toast.success("Produto vinculado à campanha.");
   }
@@ -166,6 +193,7 @@ export function CampaignProduct() {
           )}
         </div>
         <div className="flex flex-wrap gap-2">
+          {ready && <PilotResults key={owner} owner={owner} />}
           {empty && (
             <Button
               variant="outline"

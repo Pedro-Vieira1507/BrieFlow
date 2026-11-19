@@ -1,8 +1,16 @@
+import {
+  applyPilotEvent,
+  factRevision,
+  startPilotRun,
+  type PilotRun,
+  type PilotCohort,
+  type PilotEvent,
+} from "./skuPilot.ts";
 import { parsePrice, type CatalogProduct } from "./skuReview.ts";
 
 export type ProductInput = Omit<
   CatalogProduct,
-  "revision" | "updatedAt" | "priorUnits" | "priorPrices"
+  "revision" | "factRevision" | "updatedAt" | "priorUnits" | "priorPrices"
 >;
 export type ProductForm = {
   sku: string;
@@ -125,12 +133,20 @@ let connection: Promise<IDBDatabase> | undefined;
 function database() {
   if (!connection) {
     const opening = new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open("brieflow-product-catalog", 1);
+      const request = indexedDB.open("brieflow-product-catalog", 2);
       request.onupgradeneeded = () => {
-        const products = request.result.createObjectStore("products", {
-          keyPath: ["owner", "sku"],
-        });
-        products.createIndex("owner", "owner");
+        if (!request.result.objectStoreNames.contains("products")) {
+          const products = request.result.createObjectStore("products", {
+            keyPath: ["owner", "sku"],
+          });
+          products.createIndex("owner", "owner");
+        }
+        if (!request.result.objectStoreNames.contains("pilotRuns")) {
+          const runs = request.result.createObjectStore("pilotRuns", {
+            keyPath: ["owner", "sku", "revision"],
+          });
+          runs.createIndex("owner", "owner");
+        }
       };
       request.onsuccess = () => {
         const db = request.result;
@@ -153,10 +169,11 @@ function database() {
 
 async function read<T>(
   query: (store: IDBObjectStore) => IDBRequest<T>,
+  name = "products",
 ): Promise<T> {
   const db = await database();
   return new Promise((resolve, reject) => {
-    const request = query(db.transaction("products").objectStore("products"));
+    const request = query(db.transaction(name).objectStore(name));
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
@@ -177,6 +194,57 @@ export async function getProduct(
   return row?.value;
 }
 export const catalogChangedEvent = "brieflow:sku-catalog-changed";
+export const pilotChangedEvent = "brieflow:sku-pilot-changed";
+function notifyChange(event: string, owner: string) {
+  window.dispatchEvent(new Event(event));
+  if (typeof BroadcastChannel !== "undefined") {
+    const channel = new BroadcastChannel(event);
+    channel.postMessage(owner);
+    channel.close();
+  }
+}
+
+export async function listPilotRuns(owner: string): Promise<PilotRun[]> {
+  const rows: PilotRun[] = await read(
+    (store) => store.index("owner").getAll(owner),
+    "pilotRuns",
+  );
+  return rows.sort(
+    (a, b) => b.startedAt - a.startedAt || b.revision.localeCompare(a.revision),
+  );
+}
+
+function changeRun(
+  store: IDBObjectStore,
+  owner: string,
+  sku: string,
+  revision: string,
+  event: PilotEvent,
+) {
+  const request = store.get([owner, sku, revision]);
+  request.onsuccess = () => {
+    const run: PilotRun | undefined = request.result;
+    if (!run) return;
+    const next = applyPilotEvent(run, event);
+    if (next !== run) store.put(next);
+  };
+}
+export async function recordPilot(
+  owner: string,
+  sku: string,
+  revision: string,
+  event: PilotEvent,
+) {
+  const db = await database();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction("pilotRuns", "readwrite");
+    changeRun(tx.objectStore("pilotRuns"), owner, sku, revision, event);
+    tx.oncomplete = () => resolve();
+    tx.onabort = () =>
+      reject(tx.error ?? new Error("Não foi possível salvar a medição."));
+  });
+  notifyChange(pilotChangedEvent, owner);
+}
 export interface CatalogWrite {
   input: ProductInput;
   expected: string | null;
@@ -185,10 +253,11 @@ export async function writeProducts(
   owner: string,
   updates: CatalogWrite[],
   onlyMissing = false,
+  cohort?: PilotCohort,
 ) {
   const db = await database();
   await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction("products", "readwrite");
+    const tx = db.transaction(["products", "pilotRuns"], "readwrite");
     const store = tx.objectStore("products");
     let conflict: Error | undefined;
     for (const { input, expected } of updates) {
@@ -205,6 +274,12 @@ export async function writeProducts(
           tx.abort();
           return;
         }
+        const commercialChange = Boolean(
+          previous &&
+          (previous.value.priceCents !== input.priceCents ||
+            previous.value.unit !== input.unit),
+        );
+        const revision = crypto.randomUUID();
         const value: CatalogProduct = {
           ...input,
           priorUnits: previous
@@ -223,9 +298,27 @@ export async function writeProducts(
                 ]),
               ]
             : [],
-          revision: crypto.randomUUID(),
+          revision,
+          factRevision:
+            previous && !commercialChange
+              ? factRevision(previous.value)
+              : revision,
           updatedAt: new Date().toISOString(),
         };
+        if (previous && commercialChange) {
+          const runs = tx.objectStore("pilotRuns");
+          const run = startPilotRun(
+            owner,
+            previous.value,
+            value,
+            cohort ?? { scope: "partial", campaigns: [] },
+          );
+          changeRun(runs, owner, input.sku, factRevision(previous.value), {
+            type: "supersede",
+            at: run.startedAt,
+          });
+          runs.add(run);
+        }
         store.put({ owner, sku: input.sku, value } satisfies StoredProduct);
       };
     }
@@ -240,12 +333,8 @@ export async function writeProducts(
       /* onabort reports the final transaction outcome. */
     };
   });
-  window.dispatchEvent(new Event(catalogChangedEvent));
-  if (typeof BroadcastChannel !== "undefined") {
-    const channel = new BroadcastChannel(catalogChangedEvent);
-    channel.postMessage(owner);
-    channel.close();
-  }
+  notifyChange(catalogChangedEvent, owner);
+  notifyChange(pilotChangedEvent, owner);
 }
 
 export const sameProduct = (a: ProductInput, b: ProductInput) =>
